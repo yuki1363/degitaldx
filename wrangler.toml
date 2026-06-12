@@ -18,7 +18,7 @@ pages_build_output_dir = "."
 [[d1_databases]]
 binding = "DB"
 database_name = "mainte-db"
-database_id = "00000000-0000-0000-0000-000000000000" # TODO: wrangler d1 create の出力で置き換える
+database_id = "c09140a4-dfa1-4cf9-b656-477d38ffb1c7"
 
 # ---------------------------------------------------------------------
 # R2（写真・動画・PDF）
