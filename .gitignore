@@ -1,0 +1,12 @@
+# 依存パッケージ（ビルド工程なし運用のため通常は作られない）
+node_modules/
+
+# wrangler のローカル状態（ローカルD1データ等）
+.wrangler/
+
+# ローカル開発用の環境変数（DEV_USER_EMAIL 等）— コミット禁止
+.dev.vars
+
+# OS / エディタ
+.DS_Store
+*.log
