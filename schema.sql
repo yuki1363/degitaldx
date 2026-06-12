@@ -403,6 +403,62 @@ CREATE TABLE IF NOT EXISTS parts_transaction (
 CREATE INDEX IF NOT EXISTS idx_parts_transaction_part
   ON parts_transaction (part_id, created_at);
 
+-- ---------------------------------------------------------------------
+-- report_category — 日報カテゴリマスタ（07）
+--   変更時は master_history にスナップショットを保存する
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS report_category (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  -- 共通監査列
+  created_by  TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by  TEXT,
+  updated_at  TEXT,
+  deleted_by  TEXT,
+  deleted_at  TEXT
+);
+
+-- ---------------------------------------------------------------------
+-- daily_report — 日報（07）
+--   report_date: YYYY-MM-DD
+--   linked_records_json: [{ type: 'trouble'|'inspection'|'repair', id: N }]
+--   記録した時点で全員が閲覧可能（提出・承認の概念なし）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS daily_report (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_id         INTEGER NOT NULL REFERENCES users (id),
+  report_date         TEXT    NOT NULL,
+  category_id         INTEGER REFERENCES report_category (id),
+  body                TEXT    NOT NULL,
+  linked_records_json TEXT,
+  -- 共通監査列
+  created_by          TEXT    NOT NULL,
+  created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by          TEXT,
+  updated_at          TEXT,
+  deleted_by          TEXT,
+  deleted_at          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_report_date
+  ON daily_report (report_date, reporter_id);
+CREATE INDEX IF NOT EXISTS idx_daily_report_category
+  ON daily_report (category_id);
+
+-- 初期日報カテゴリ
+INSERT INTO report_category (name, sort_order, created_by)
+SELECT '日常点検', 1, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_category WHERE name = '日常点検');
+INSERT INTO report_category (name, sort_order, created_by)
+SELECT '工事', 2, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_category WHERE name = '工事');
+INSERT INTO report_category (name, sort_order, created_by)
+SELECT 'トラブル対応', 3, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_category WHERE name = 'トラブル対応');
+INSERT INTO report_category (name, sort_order, created_by)
+SELECT '引き継ぎ', 4, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_category WHERE name = '引き継ぎ');
+INSERT INTO report_category (name, sort_order, created_by)
+SELECT 'その他', 5, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_category WHERE name = 'その他');
+
 -- =====================================================================
 -- マイグレーション（既存環境向けの変更は以下に追記する）
 --   例: ALTER TABLE xxx ADD COLUMN yyy TEXT;
