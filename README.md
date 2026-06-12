@@ -214,4 +214,4 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 | Phase 3 | 業務依頼（03）+ 部品在庫・CSV移行（05） | ✅ 完了 |
 | Phase 4 | 日報（07）+ ダッシュボード/レポート出力（08） | ✅ 完了 |
 | Phase 5 | 管理機能（09）+ チャット/コメント（10） | ✅ 完了 |
-| Phase 6 | 横断検索（11） | 未着手 |
+| Phase 6 | 横断検索（11） | ✅ 完了 |
