@@ -10,7 +10,7 @@
  * 将来拡張（CLAUDE.md）: 入力中データの IndexedDB 一時保存とオンライン復帰時の
  * 自動同期は、入力フォームを実装するフェーズで追加する。
  */
-const CACHE_VERSION = 'v0.2.0';
+const CACHE_VERSION = 'v0.3.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -21,6 +21,12 @@ const PRECACHE_URLS = [
   '/js/api.js',
   '/js/auth.js',
   '/js/files.js',
+  '/js/util.js',
+  '/js/ledger.js',
+  '/js/inspection.js',
+  '/js/vendor/qrcode.mjs',
+  '/pages/ledger',
+  '/pages/inspection',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',

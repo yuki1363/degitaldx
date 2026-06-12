@@ -20,6 +20,38 @@ function formatGb(bytes) {
   return `${(bytes / GB).toFixed(2)} GB`;
 }
 
+/**
+ * 写真を Canvas でリサイズして JPEG にする（CLAUDE.md: 長辺1280px・品質0.7）。
+ * Canvas 経由の再エンコードにより EXIF（GPS位置情報等）も自動的に除去される。
+ * 画像以外・変換できない形式はそのまま返す（サーバー側検証に委ねる）。
+ */
+export async function resizeImageFile(file, maxEdge = 1280, quality = 0.7) {
+  if (!file.type || !file.type.startsWith('image/')) return file;
+  let bitmap;
+  try {
+    // EXIF の回転情報を反映してデコード（非対応ブラウザはオプションなしで再試行）
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch {
+      bitmap = await createImageBitmap(file);
+    }
+  } catch {
+    return file;
+  }
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+  if (!blob) return file;
+  const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
+  return new File([blob], `${base}.jpg`, { type: 'image/jpeg' });
+}
+
 /** 現在のストレージ使用量を取得する */
 export async function getStorageUsage() {
   const data = await api.get('/api/files/usage');
