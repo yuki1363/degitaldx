@@ -130,6 +130,87 @@ CREATE INDEX IF NOT EXISTS idx_storage_reports_created_at
   ON storage_reports (created_at);
 
 -- ---------------------------------------------------------------------
+-- equipment_ledger — 設備台帳（06）
+--   code はQRコード・ラベルに使う設備番号（一意）
+--   status: active = 稼働中 / stopped = 停止中 / retired = 廃棄
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS equipment_ledger (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  code         TEXT    NOT NULL UNIQUE,
+  name         TEXT    NOT NULL,
+  location     TEXT,
+  manufacturer TEXT,
+  model        TEXT,
+  installed_on TEXT,
+  status       TEXT    NOT NULL DEFAULT 'active'
+                       CHECK (status IN ('active', 'stopped', 'retired')),
+  note         TEXT,
+  -- 共通監査列
+  created_by   TEXT,
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+
+-- ---------------------------------------------------------------------
+-- inspection_master — 点検項目マスタ（02）
+--   input_type: ok_ng = OK/NG / number = 数値 / select = 選択式 / text = 自由記述
+--   number の min_value / max_value が異常値アラートの上下限
+--   変更時は master_history に変更前スナップショットを保存する
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS inspection_master (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_ledger (id),
+  name         TEXT    NOT NULL,
+  input_type   TEXT    NOT NULL DEFAULT 'ok_ng'
+                       CHECK (input_type IN ('ok_ng', 'number', 'select', 'text')),
+  unit         TEXT,
+  min_value    REAL,
+  max_value    REAL,
+  options_json TEXT,
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  -- 共通監査列
+  created_by   TEXT,
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_inspection_master_equipment
+  ON inspection_master (equipment_id, sort_order);
+
+-- ---------------------------------------------------------------------
+-- inspection_result — 点検実施記録（02）
+--   items_json: 実施時点の項目スナップショット
+--     [{ master_id, name, input_type, unit, min_value, max_value, value, abnormal }]
+--   （マスタを後から変更しても過去の記録は当時の内容で残る）
+--   has_abnormal: 異常値（基準範囲外 or NG）を含むか（一覧の色分け用）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS inspection_result (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_ledger (id),
+  assignee_id  INTEGER NOT NULL REFERENCES users (id),
+  inspected_at TEXT    NOT NULL,
+  items_json   TEXT    NOT NULL,
+  has_abnormal INTEGER NOT NULL DEFAULT 0,
+  note         TEXT,
+  -- 共通監査列
+  created_by   TEXT,
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_inspection_result_equipment
+  ON inspection_result (equipment_id, inspected_at);
+
+-- ---------------------------------------------------------------------
 -- 初期データ: 管理者ユーザー（プレースホルダー）
 --   ★ 本番へ適用する前に、'admin@example.com' を実際の管理者の
 --     メールアドレスへ必ず書き換えること（プレースホルダーのまま適用しない）。
