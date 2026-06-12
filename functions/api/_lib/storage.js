@@ -36,6 +36,43 @@ export const RELATED_TABLES = [
   'chat_messages',
 ];
 
+/**
+ * アップロード済みファイルをレコードに紐づける（点検記録・設備資料などの保存時に使う）。
+ * 未紐づけ（related_id IS NULL）か、同じレコードに紐づいているファイルのみ更新できる。
+ * @returns 紐づけた件数
+ */
+export async function attachFiles(env, { fileIds, relatedTable, relatedId, userEmail, now }) {
+  if (!Array.isArray(fileIds) || fileIds.length === 0) return 0;
+  const ids = fileIds.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) return 0;
+
+  // プリペアドステートメント（IN句はプレースホルダを件数分生成）
+  const placeholders = ids.map((_, i) => `?${i + 5}`).join(', ');
+  const result = await env.DB.prepare(
+    `UPDATE files
+        SET related_table = ?1, related_id = ?2, updated_by = ?3, updated_at = ?4
+      WHERE id IN (${placeholders})
+        AND deleted_at IS NULL
+        AND (related_id IS NULL OR (related_table = ?1 AND related_id = ?2))`
+  )
+    .bind(relatedTable, relatedId, userEmail, now, ...ids)
+    .run();
+  return result.meta.changes;
+}
+
+/** レコードに紐づくファイル一覧（添付表示用） */
+export async function listAttachedFiles(env, relatedTable, relatedId) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, file_name, content_type, size_bytes, created_by, created_at
+       FROM files
+      WHERE related_table = ?1 AND related_id = ?2 AND deleted_at IS NULL
+      ORDER BY id`
+  )
+    .bind(relatedTable, relatedId)
+    .all();
+  return results;
+}
+
 export function getLimits(env) {
   return {
     hardLimitBytes: Number(env.R2_HARD_LIMIT_BYTES) || DEFAULT_HARD_LIMIT_BYTES,

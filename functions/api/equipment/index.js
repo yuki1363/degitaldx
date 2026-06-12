@@ -1,0 +1,111 @@
+// /api/equipment — 設備台帳（06）一覧・登録
+//   GET  : 一覧（?q= で設備番号・名称・場所を部分一致検索）
+//   POST : 登録（editor 以上）
+
+import { json, jsonError, readJson } from '../_lib/http.js';
+import { requireRole } from '../_lib/auth.js';
+import { writeAuditLog } from '../_lib/audit.js';
+import { nowIso } from '../_lib/util.js';
+
+export const EQUIPMENT_STATUS = ['active', 'stopped', 'retired'];
+
+/** リクエストボディから設備の入力値を取り出して検証する */
+export function parseEquipmentInput(body) {
+  if (!body) return { error: 'リクエストボディが不正です。' };
+  const code = String(body.code || '').trim();
+  const name = String(body.name || '').trim();
+  if (!code) return { error: '設備番号（code）は必須です。' };
+  if (!name) return { error: '設備名（name）は必須です。' };
+  if (code.length > 50 || name.length > 100) {
+    return { error: '設備番号は50文字以内、設備名は100文字以内で入力してください。' };
+  }
+  const status = body.status === undefined || body.status === '' ? 'active' : String(body.status);
+  if (!EQUIPMENT_STATUS.includes(status)) {
+    return { error: `status が不正です: ${status}` };
+  }
+  const installedOn = body.installed_on ? String(body.installed_on).trim() : null;
+  if (installedOn && !/^\d{4}-\d{2}-\d{2}$/.test(installedOn)) {
+    return { error: '設置日（installed_on）は YYYY-MM-DD 形式で入力してください。' };
+  }
+  const optional = (v, max) => {
+    const s = v === undefined || v === null ? '' : String(v).trim();
+    return s ? s.slice(0, max) : null;
+  };
+  return {
+    value: {
+      code,
+      name,
+      location: optional(body.location, 100),
+      manufacturer: optional(body.manufacturer, 100),
+      model: optional(body.model, 100),
+      installed_on: installedOn,
+      status,
+      note: optional(body.note, 1000),
+    },
+  };
+}
+
+export async function onRequestGet({ request, env }) {
+  const url = new URL(request.url);
+  const q = (url.searchParams.get('q') || '').trim();
+
+  let stmt;
+  if (q) {
+    const like = `%${q}%`;
+    stmt = env.DB.prepare(
+      `SELECT id, code, name, location, manufacturer, model, installed_on, status
+         FROM equipment_ledger
+        WHERE deleted_at IS NULL
+          AND (code LIKE ?1 OR name LIKE ?1 OR location LIKE ?1)
+        ORDER BY code
+        LIMIT 300`
+    ).bind(like);
+  } else {
+    stmt = env.DB.prepare(
+      `SELECT id, code, name, location, manufacturer, model, installed_on, status
+         FROM equipment_ledger
+        WHERE deleted_at IS NULL
+        ORDER BY code
+        LIMIT 300`
+    );
+  }
+  const { results } = await stmt.all();
+  return json({ equipment: results });
+}
+
+export async function onRequestPost({ request, env, data }) {
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
+
+  const parsed = parseEquipmentInput(await readJson(request));
+  if (parsed.error) return jsonError(400, parsed.error);
+  const v = parsed.value;
+
+  // 設備番号の重複チェック（論理削除済みも含めて一意 = UNIQUE 制約と整合）
+  const dup = await env.DB.prepare('SELECT id FROM equipment_ledger WHERE code = ?1')
+    .bind(v.code)
+    .first();
+  if (dup) return jsonError(409, `設備番号「${v.code}」は既に使われています。`);
+
+  const result = await env.DB.prepare(
+    `INSERT INTO equipment_ledger
+       (code, name, location, manufacturer, model, installed_on, status, note, created_by, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+  )
+    .bind(
+      v.code, v.name, v.location, v.manufacturer, v.model,
+      v.installed_on, v.status, v.note, data.user.email, nowIso()
+    )
+    .run();
+
+  const id = result.meta.last_row_id;
+  await writeAuditLog(env.DB, {
+    tableName: 'equipment_ledger',
+    recordId: id,
+    action: 'create',
+    changedBy: data.user.email,
+    diff: v,
+  });
+
+  return json({ id }, 201);
+}
