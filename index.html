@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e40af">
+  <meta name="description" content="点検・修理・在庫・報告を現場で完結する設備保全オールインワンアプリ">
+  <title>設備保全アプリ</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="設備保全">
+
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title">設備保全アプリ</h1>
+    <div class="user-chip" id="user-chip" hidden>
+      <span class="user-name" id="user-name"></span>
+      <span class="role-badge" id="user-role"></span>
+    </div>
+  </header>
+
+  <div class="offline-banner" id="offline-banner" hidden>
+    オフラインです。通信が回復すると自動で再接続します。
+  </div>
+
+  <main class="container">
+    <p class="notice is-error" id="auth-notice" hidden></p>
+
+    <nav class="tile-grid" aria-label="機能メニュー">
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">📅</span>
+        <span class="tile-name">保全計画</span>
+        <span class="tile-no">01 カレンダー・工事予定</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">✅</span>
+        <span class="tile-name">点検実施</span>
+        <span class="tile-no">02 チェックリスト入力</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">🔧</span>
+        <span class="tile-name">修理依頼</span>
+        <span class="tile-no">03 進捗の見える化</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">⚠️</span>
+        <span class="tile-name">トラブル記録</span>
+        <span class="tile-no">04 ジャンル別記録</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">📦</span>
+        <span class="tile-name">部品在庫</span>
+        <span class="tile-no">05 入出庫・発注</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">🏭</span>
+        <span class="tile-name">設備台帳</span>
+        <span class="tile-no">06 QRコード対応</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">📝</span>
+        <span class="tile-name">日報</span>
+        <span class="tile-no">07 記録・閲覧</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">📊</span>
+        <span class="tile-name">ダッシュボード</span>
+        <span class="tile-no">08 グラフ・レポート</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">💬</span>
+        <span class="tile-name">チャット</span>
+        <span class="tile-no">10 コメント・引き継ぎ</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">🔍</span>
+        <span class="tile-name">横断検索</span>
+        <span class="tile-no">11 過去事例の検索</span>
+      </a>
+      <a class="tile is-disabled" aria-disabled="true" id="tile-admin">
+        <span class="badge-soon">準備中</span>
+        <span class="tile-icon">⚙️</span>
+        <span class="tile-name">管理</span>
+        <span class="tile-no">09 マスタ・監査ログ</span>
+      </a>
+    </nav>
+
+    <p class="phase-note">
+      Phase 0（基盤構築）— 各機能は今後のフェーズで順次有効になります。
+    </p>
+  </main>
+
+  <script type="module">
+    import { getCurrentUser, ROLE_LABELS } from '/js/auth.js';
+
+    // Service Worker 登録（PWA: オフラインでもアプリが起動する）
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch((err) => {
+        console.warn('Service Worker の登録に失敗:', err);
+      });
+    }
+
+    // オフライン表示
+    const offlineBanner = document.getElementById('offline-banner');
+    const updateOnlineStatus = () => {
+      offlineBanner.hidden = navigator.onLine;
+    };
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+
+    // ログインユーザー表示（Cloudflare Access のメールアドレスと users テーブルの突合結果）
+    const notice = document.getElementById('auth-notice');
+    try {
+      const user = await getCurrentUser();
+      document.getElementById('user-name').textContent = user.name;
+      document.getElementById('user-role').textContent = ROLE_LABELS[user.role] || user.role;
+      document.getElementById('user-chip').hidden = false;
+    } catch (err) {
+      if (err.offline) {
+        // オフライン起動時はユーザー表示なしで続行（オンライン復帰時に再取得される）
+        console.info('オフライン起動のためユーザー情報は未取得');
+      } else {
+        notice.textContent = err.message;
+        notice.hidden = false;
+      }
+    }
+  </script>
+</body>
+</html>
