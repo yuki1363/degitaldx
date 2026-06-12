@@ -1,0 +1,30 @@
+# =====================================================================
+# Cloudflare Pages プロジェクト設定
+#   - ビルドコマンドなし / 出力ディレクトリ "/"（フレームワークレス構成）
+#   - API は functions/ ディレクトリ（Pages Functions）
+#   - ローカル開発: npx wrangler pages dev .
+# =====================================================================
+name = "degitaldx"
+compatibility_date = "2026-06-01"
+pages_build_output_dir = "."
+
+# ---------------------------------------------------------------------
+# D1（全業務データ）
+#   作成: npx wrangler d1 create mainte-db
+#   ↑の出力に表示される database_id を下へ貼り付けること。
+#   （ローカル開発ではプレースホルダのままで動作する）
+#   スキーマ適用: npx wrangler d1 execute mainte-db --remote --file=schema.sql
+# ---------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "mainte-db"
+database_id = "00000000-0000-0000-0000-000000000000" # TODO: wrangler d1 create の出力で置き換える
+
+# ---------------------------------------------------------------------
+# R2（写真・動画・PDF）
+#   作成: npx wrangler r2 bucket create mainte-files --location apac
+#   ※ バケットは非公開で運用。r2.dev パブリックURLは絶対に有効化しない
+# ---------------------------------------------------------------------
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "mainte-files"

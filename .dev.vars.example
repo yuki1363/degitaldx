@@ -1,0 +1,12 @@
+# ローカル開発用の環境変数サンプル
+#   このファイルを .dev.vars にコピーして使う（.dev.vars は git 管理外）
+#     cp .dev.vars.example .dev.vars
+#
+# DEV_USER_EMAIL:
+#   wrangler pages dev では Cloudflare Access のヘッダー
+#   （Cf-Access-Authenticated-User-Email）が付与されないため、
+#   ここで指定したメールアドレスのユーザーとしてログインした扱いになる。
+#   users テーブルに登録済みのメールアドレスを指定すること
+#   （初期状態では schema.sql のプレースホルダー admin@example.com が登録されている）。
+#   ※ 本番（Cloudflare 上）ではこの変数を設定しないこと（Access のヘッダーのみを信頼する）
+DEV_USER_EMAIL=admin@example.com
