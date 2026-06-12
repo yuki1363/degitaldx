@@ -132,6 +132,12 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 - `DEV_USER_EMAIL` はローカル開発専用。**本番環境の環境変数には絶対に設定しない**
 - R2 バケットは非公開で運用し、`r2.dev` パブリックURLは有効化しない（ファイルは Functions 経由で配信）
 - Cloudflare アカウントの 2FA 必須
+- **ストレージ容量ガード**: R2 の無料枠（10GB）を超えて課金が発生しないよう、
+  アップロードAPIが使用量を集計し **8GB で警告 / 9GB で新規アップロードを拒否**する
+  （環境変数 `R2_WARN_BYTES` / `R2_HARD_LIMIT_BYTES` で変更可）。
+  拒否・警告時は利用者がその場の報告画面から**管理者へ報告**でき、
+  管理者はホーム画面で使用量警告と報告件数を確認できる。
+  なお論理削除したファイルは R2 に残るため使用量に含まれ続ける（容量を空ける物理削除は管理画面で実装予定）
 
 ## ディレクトリ構成（現状）
 
@@ -144,10 +150,12 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 ├── css/style.css           # 共通スタイル（スマホ375px基準）
 ├── js/
 │   ├── api.js              # fetchラッパー
-│   └── auth.js             # ログインユーザー情報・権限判定
+│   ├── auth.js             # ログインユーザー情報・権限判定
+│   └── files.js            # ファイルアップロード共通（容量ガード・管理者への報告画面）
 ├── functions/api/          # Pages Functions（REST API）
 │   ├── _middleware.js      # 共通: Access認証・エラーハンドリング
-│   ├── _lib/               # 共通モジュール（auth/audit/http/util）
+│   ├── _lib/               # 共通モジュール（auth/audit/http/storage/util）
+│   ├── files/              # ファイル保存API（R2アップロード/取得・容量上限ガード・容量報告）
 │   └── me.js               # GET /api/me — ログインユーザー情報
 ├── scripts/make-icons.mjs  # アイコン生成（依存なし）
 ├── schema.sql              # D1テーブル定義（冪等・マイグレーションは末尾に追記）
