@@ -319,6 +319,90 @@ SELECT '安全', 5, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WH
 INSERT INTO trouble_category (name, sort_order, created_by)
 SELECT 'その他', 6, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = 'その他');
 
+-- ---------------------------------------------------------------------
+-- repair_request — 修理依頼（03）
+--   status: open=受付 / in_progress=対応中 / waiting_parts=部品待ち / done=完了
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS repair_request (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER REFERENCES equipment_ledger (id),
+  title        TEXT    NOT NULL,
+  description  TEXT,
+  status       TEXT    NOT NULL DEFAULT 'open'
+                       CHECK (status IN ('open', 'in_progress', 'waiting_parts', 'done')),
+  assignee_id  INTEGER REFERENCES users (id),
+  -- 共通監査列
+  created_by   TEXT    NOT NULL,
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_repair_request_status
+  ON repair_request (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_repair_request_equipment
+  ON repair_request (equipment_id);
+
+-- ---------------------------------------------------------------------
+-- repair_history — 修理依頼ステータス変更履歴（03）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS repair_history (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id INTEGER NOT NULL REFERENCES repair_request (id),
+  old_status TEXT,
+  new_status TEXT    NOT NULL,
+  comment    TEXT,
+  changed_by TEXT    NOT NULL,
+  changed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_repair_history_request
+  ON repair_history (request_id, changed_at);
+
+-- ---------------------------------------------------------------------
+-- parts_inventory — 部品在庫（05）
+--   part_no は部品番号（一意）
+--   safety_stock: 安全在庫数（これを下回るとアラート）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS parts_inventory (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  part_no      TEXT    NOT NULL UNIQUE,
+  name         TEXT    NOT NULL,
+  spec         TEXT,
+  unit         TEXT    NOT NULL DEFAULT '個',
+  quantity     INTEGER NOT NULL DEFAULT 0,
+  safety_stock INTEGER NOT NULL DEFAULT 0,
+  location     TEXT,
+  supplier     TEXT,
+  note         TEXT,
+  -- 共通監査列
+  created_by   TEXT    NOT NULL,
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+
+-- ---------------------------------------------------------------------
+-- parts_transaction — 部品入出庫履歴（05）
+--   type: in=入庫 / out=出庫 / adjust=棚卸調整
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS parts_transaction (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  part_id    INTEGER NOT NULL REFERENCES parts_inventory (id),
+  type       TEXT    NOT NULL CHECK (type IN ('in', 'out', 'adjust')),
+  quantity   INTEGER NOT NULL,
+  note       TEXT,
+  created_by TEXT    NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_parts_transaction_part
+  ON parts_transaction (part_id, created_at);
+
 -- =====================================================================
 -- マイグレーション（既存環境向けの変更は以下に追記する）
 --   例: ALTER TABLE xxx ADD COLUMN yyy TEXT;

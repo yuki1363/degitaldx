@@ -721,6 +721,44 @@ input.is-abnormal {
   display: none;
 }
 
+/* ---- 部品在庫（05） ---- */
+.parts-qty {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.parts-qty-num {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.parts-qty-unit {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.import-table th,
+.import-table td {
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  text-align: left;
+  min-width: 60px;
+}
+
+.import-table th {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+
 /* ---- カレンダー（01 保全計画） ---- */
 .cal-nav {
   display: flex;
