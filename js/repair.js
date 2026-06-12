@@ -1,4 +1,5 @@
-// 03 修理依頼 — 一覧（ステータス別）・登録・編集・詳細・進捗変更
+// 03 業務依頼（修理・その他の依頼） — 一覧（ステータス別）・登録・編集・詳細・進捗変更
+//   ※ 内部名は repair（テーブル repair_request / URL /pages/repair）のまま
 //   URL: /pages/repair            … 一覧
 //        /pages/repair?new=1      … 新規登録
 //        /pages/repair?edit=N     … 編集
@@ -43,7 +44,7 @@ async function renderList() {
     const params = filterStatus ? `?status=${filterStatus}` : '';
     const { repairs } = await api.get(`/api/repairs${params}`);
     if (repairs.length === 0) {
-      render(listBox, el('p', { class: 'empty' }, '修理依頼はありません。'));
+      render(listBox, el('p', { class: 'empty' }, '業務依頼はありません。'));
       return;
     }
     render(
@@ -181,7 +182,7 @@ async function renderDetail(id) {
           el('button', {
             class: 'btn btn-danger',
             onclick: async () => {
-              if (!confirm('この修理依頼を削除しますか？')) return;
+              if (!confirm('この業務依頼を削除しますか？')) return;
               await api.del(`/api/repairs/${id}`);
               go('');
             },
@@ -266,7 +267,7 @@ async function renderForm(existing) {
 
   render(app, [
     el('div', { class: 'card' }, [
-      el('h2', { class: 'card-title' }, existing ? '修理依頼を編集' : '修理依頼を登録'),
+      el('h2', { class: 'card-title' }, existing ? '業務依頼を編集' : '業務依頼を登録'),
       field('タイトル（必須）', f.title),
       field('設備', f.equipment_id),
       field('担当者', f.assignee_id),

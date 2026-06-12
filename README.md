@@ -165,7 +165,11 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 ├── icons/                  # PWAアイコン（scripts/make-icons.mjs で生成）
 ├── pages/
 │   ├── ledger.html         # 06 設備台帳（一覧・詳細・QR・資料）
-│   └── inspection.html     # 02 点検実施（チェックリスト・履歴・項目マスタ管理）
+│   ├── inspection.html     # 02 点検実施（チェックリスト・履歴・項目マスタ管理）
+│   ├── plan.html           # 01 保全計画（カレンダー）
+│   ├── trouble.html        # 04 トラブル記録（ジャンル絞り込み）
+│   ├── repair.html         # 03 業務依頼（ステータス管理）
+│   └── parts.html          # 05 部品在庫（入出庫・CSVインポート）
 ├── css/style.css           # 共通スタイル（スマホ375px基準）
 ├── js/
 │   ├── api.js              # fetchラッパー
@@ -174,11 +178,19 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 │   ├── util.js             # JST日時表示・DOM生成ヘルパー
 │   ├── ledger.js           # 06 設備台帳（QR生成・ラベル印刷）
 │   ├── inspection.js       # 02 点検実施（異常値アラート・項目マスタ管理）
+│   ├── plan.js             # 01 保全計画（月カレンダー・種別色分け）
+│   ├── trouble.js          # 04 トラブル記録（ジャンル・期間・設備絞り込み）
+│   ├── repair.js           # 03 業務依頼（修理ほか依頼全般の進捗管理）
+│   ├── parts.js            # 05 部品在庫（+/−更新・発注アラート・CSVインポート）
 │   └── vendor/qrcode.mjs   # QRコード生成ライブラリ（qrcode-generator / MIT）
 ├── functions/api/          # Pages Functions（REST API）
 │   ├── _middleware.js      # 共通: Access認証・エラーハンドリング
-│   ├── _lib/               # 共通モジュール（auth/audit/http/storage/util）
+│   ├── _lib/               # 共通モジュール（auth/audit/history/http/storage/util）
 │   ├── files/              # ファイル保存API（R2アップロード/取得・容量上限ガード・容量報告）
+│   ├── plans/              # 01 保全計画API
+│   ├── troubles/           # 04 トラブル記録API（categories/ ジャンルマスタ）
+│   ├── repairs/            # 03 業務依頼API（ステータス履歴）
+│   ├── parts/              # 05 部品在庫API（transaction 入出庫 / import CSV取込）
 │   └── me.js               # GET /api/me — ログインユーザー情報
 ├── scripts/make-icons.mjs  # アイコン生成（依存なし）
 ├── schema.sql              # D1テーブル定義（冪等・マイグレーションは末尾に追記）
@@ -192,8 +204,8 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 |---|---|---|
 | Phase 0 | 基盤構築（D1スキーマ / Functions雛形 / PWA基盤 / Access設定手順） | ✅ 完了 |
 | Phase 1 | 設備台帳（06）+ 点検実施（02） | ✅ 完了 |
-| Phase 2 | 保全計画（01）+ トラブル記録（04） | 未着手 |
-| Phase 3 | 修理依頼（03）+ 部品在庫・CSV移行（05） | 未着手 |
+| Phase 2 | 保全計画（01）+ トラブル記録（04） | ✅ 完了 |
+| Phase 3 | 業務依頼（03）+ 部品在庫・CSV移行（05） | ✅ 完了 |
 | Phase 4 | 日報（07）+ ダッシュボード/レポート出力（08） | 未着手 |
 | Phase 5 | 管理機能（09）+ チャット/コメント（10） | 未着手 |
 | Phase 6 | 横断検索（11） | 未着手 |
