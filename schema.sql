@@ -225,6 +225,100 @@ WHERE NOT EXISTS (
   SELECT 1 FROM users
 );
 
+-- ---------------------------------------------------------------------
+-- maintenance_plan — 保全計画（01）
+--   plan_type: inspection=点検 / parts=部品交換 / construction=工事 / other=その他
+--   status: pending=未実施 / done=完了 / overdue=期限超過
+--   recurrence_rule: 繰り返しルール（例 'monthly', 'yearly', 'every:7'）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS maintenance_plan (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id     INTEGER REFERENCES equipment_ledger (id),
+  plan_type        TEXT    NOT NULL DEFAULT 'inspection'
+                           CHECK (plan_type IN ('inspection', 'parts', 'construction', 'other')),
+  title            TEXT    NOT NULL,
+  planned_date     TEXT    NOT NULL,
+  recurrence_rule  TEXT,
+  assignee_id      INTEGER REFERENCES users (id),
+  status           TEXT    NOT NULL DEFAULT 'pending'
+                           CHECK (status IN ('pending', 'done', 'overdue')),
+  note             TEXT,
+  -- 共通監査列
+  created_by       TEXT    NOT NULL,
+  created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by       TEXT,
+  updated_at       TEXT,
+  deleted_by       TEXT,
+  deleted_at       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_maintenance_plan_date
+  ON maintenance_plan (planned_date, status);
+CREATE INDEX IF NOT EXISTS idx_maintenance_plan_equipment
+  ON maintenance_plan (equipment_id);
+
+-- ---------------------------------------------------------------------
+-- trouble_category — トラブルジャンルマスタ（04）
+--   変更時は master_history にスナップショットを保存する
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trouble_category (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  -- 共通監査列
+  created_by  TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by  TEXT,
+  updated_at  TEXT,
+  deleted_by  TEXT,
+  deleted_at  TEXT
+);
+
+-- ---------------------------------------------------------------------
+-- trouble_record — トラブル記録（04）
+--   phenomenon: 現象（必須）
+--   cause / countermeasure: 原因・対策（任意）
+--   custom_fields_json: 管理者が追加したカスタム項目の値 JSON
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trouble_record (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id       INTEGER REFERENCES equipment_ledger (id),
+  category_id        INTEGER REFERENCES trouble_category (id),
+  occurred_at        TEXT    NOT NULL,
+  phenomenon         TEXT    NOT NULL,
+  cause              TEXT,
+  countermeasure     TEXT,
+  custom_fields_json TEXT,
+  -- 共通監査列
+  created_by         TEXT    NOT NULL,
+  created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by         TEXT,
+  updated_at         TEXT,
+  deleted_by         TEXT,
+  deleted_at         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_trouble_record_occurred
+  ON trouble_record (occurred_at);
+CREATE INDEX IF NOT EXISTS idx_trouble_record_equipment
+  ON trouble_record (equipment_id);
+CREATE INDEX IF NOT EXISTS idx_trouble_record_category
+  ON trouble_record (category_id);
+
+-- 初期トラブルジャンル
+INSERT INTO trouble_category (name, sort_order, created_by)
+SELECT '電気', 1, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = '電気');
+INSERT INTO trouble_category (name, sort_order, created_by)
+SELECT '機械', 2, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = '機械');
+INSERT INTO trouble_category (name, sort_order, created_by)
+SELECT '油空圧', 3, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = '油空圧');
+INSERT INTO trouble_category (name, sort_order, created_by)
+SELECT '制御・PLC', 4, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = '制御・PLC');
+INSERT INTO trouble_category (name, sort_order, created_by)
+SELECT '安全', 5, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = '安全');
+INSERT INTO trouble_category (name, sort_order, created_by)
+SELECT 'その他', 6, 'system' WHERE NOT EXISTS (SELECT 1 FROM trouble_category WHERE name = 'その他');
+
 -- =====================================================================
 -- マイグレーション（既存環境向けの変更は以下に追記する）
 --   例: ALTER TABLE xxx ADD COLUMN yyy TEXT;
