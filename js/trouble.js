@@ -8,6 +8,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
+import { buildCommentsCard } from '/js/comments.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -218,6 +219,7 @@ async function renderDetail(id) {
             )
           ),
     ]),
+    buildCommentsCard('trouble_record', id, currentUser),
   ]);
 }
 

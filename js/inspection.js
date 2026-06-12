@@ -13,6 +13,7 @@ import {
   el, render, formatDateTime, nowLocalInputValue, isoToLocalInputValue, localInputToIso,
   ACTION_LABELS,
 } from '/js/util.js';
+import { buildCommentsCard } from '/js/comments.js';
 
 const INPUT_TYPE_LABELS = { ok_ng: 'OK / NG', number: '数値', select: '選択式', text: '自由記述' };
 
@@ -434,6 +435,7 @@ async function renderDetail(id) {
         )
       ),
     ]),
+    buildCommentsCard('inspection_result', inspection.id, currentUser),
   ]);
 }
 

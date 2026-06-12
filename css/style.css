@@ -1043,6 +1043,131 @@ input.is-abnormal {
   text-decoration: underline;
 }
 
+/* ---- コメント（10） ---- */
+.comment-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.comment-row:last-child {
+  border-bottom: none;
+}
+
+.comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.comment-author {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.comment-time {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  flex: 1;
+}
+
+.comment-body {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.btn-icon:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+/* ---- チャット（10） ---- */
+.chat-msg {
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.chat-msg.is-mine {
+  text-align: right;
+}
+
+.chat-msg.is-mine .chat-meta {
+  flex-direction: row-reverse;
+}
+
+.chat-msg.is-mine .chat-body {
+  background: #dbeafe;
+  border-radius: 12px 2px 12px 12px;
+  display: inline-block;
+  text-align: left;
+}
+
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.chat-author {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.chat-time {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.chat-body {
+  display: inline-block;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 2px 12px 12px 12px;
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 85%;
+  word-break: break-word;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding: 8px;
+}
+
+/* ---- ヒントテキスト ---- */
+.hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 4px 0 8px;
+  line-height: 1.5;
+}
+
 /* 印刷用（抽出レポートのPDF出力） */
 @media print {
   body.printing-label > :not(.print-label) {

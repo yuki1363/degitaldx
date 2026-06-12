@@ -9,6 +9,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDateTime, formatBytes, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
+import { buildCommentsCard } from '/js/comments.js';
 
 const STATUS = {
   open:          { label: '受付',    color: '#1e40af', bg: '#dbeafe' },
@@ -214,6 +215,7 @@ async function renderDetail(id) {
             })
           ),
     ]),
+    buildCommentsCard('repair_request', id, currentUser),
   ]);
 }
 

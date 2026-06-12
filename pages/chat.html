@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e40af">
+  <title>チャット — 設備保全アプリ</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="back-link" href="/" aria-label="ホームへ戻る">‹</a>
+    <h1 class="app-title">チャット</h1>
+    <div class="header-spacer"></div>
+  </header>
+  <main class="container" style="display:flex;flex-direction:column;height:calc(100dvh - 52px);padding-bottom:0">
+    <div id="chat-list" style="flex:1;overflow-y:auto;padding:12px 0"></div>
+    <div id="chat-form" style="padding:8px 0 env(safe-area-inset-bottom)"></div>
+  </main>
+  <script type="module" src="/js/chat.js"></script>
+</body>
+</html>

@@ -76,8 +76,7 @@
         <span class="tile-name">ダッシュボード</span>
         <span class="tile-no">08 グラフ・レポート</span>
       </a>
-      <a class="tile is-disabled" aria-disabled="true">
-        <span class="badge-soon">準備中</span>
+      <a class="tile" href="/pages/chat">
         <span class="tile-icon">💬</span>
         <span class="tile-name">チャット</span>
         <span class="tile-no">10 コメント・引き継ぎ</span>
@@ -89,7 +88,7 @@
         <span class="tile-no">11 過去事例の検索</span>
       </a>
       <a class="tile is-disabled" aria-disabled="true" id="tile-admin">
-        <span class="badge-soon">準備中</span>
+        <span class="badge-soon">管理者のみ</span>
         <span class="tile-icon">⚙️</span>
         <span class="tile-name">管理</span>
         <span class="tile-no">09 マスタ・監査ログ</span>
@@ -97,7 +96,7 @@
     </nav>
 
     <p class="phase-note">
-      Phase 4（日報・ダッシュボード）まで利用できます。残りの機能は今後のフェーズで順次有効になります。
+      Phase 5（チャット・コメント・管理機能）まで利用できます。横断検索は今後のフェーズで有効になります。
     </p>
   </main>
 
@@ -129,6 +128,14 @@
       document.getElementById('user-role').textContent = ROLE_LABELS[user.role] || user.role;
       document.getElementById('user-chip').hidden = false;
       showStorageAlertForAdmin(user);
+      // 管理者のみ管理タイルを有効化
+      if (user.role === 'admin') {
+        const tile = document.getElementById('tile-admin');
+        tile.classList.remove('is-disabled');
+        tile.removeAttribute('aria-disabled');
+        tile.href = '/pages/admin';
+        tile.querySelector('.badge-soon')?.remove();
+      }
     } catch (err) {
       if (err.offline) {
         // オフライン起動時はユーザー表示なしで続行（オンライン復帰時に再取得される）

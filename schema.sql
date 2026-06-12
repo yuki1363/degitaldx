@@ -459,6 +459,47 @@ SELECT '引き継ぎ', 4, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_catego
 INSERT INTO report_category (name, sort_order, created_by)
 SELECT 'その他', 5, 'system' WHERE NOT EXISTS (SELECT 1 FROM report_category WHERE name = 'その他');
 
+-- ---------------------------------------------------------------------
+-- comments — 各レコードへのコメントスレッド（10）
+--   related_table: 'trouble_record' / 'inspection_result' / 'repair_request' / 'daily_report'
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS comments (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  related_table TEXT    NOT NULL,
+  related_id    INTEGER NOT NULL,
+  body          TEXT    NOT NULL,
+  -- 共通監査列
+  created_by    TEXT    NOT NULL,
+  created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by    TEXT,
+  updated_at    TEXT,
+  deleted_by    TEXT,
+  deleted_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_related
+  ON comments (related_table, related_id, created_at);
+
+-- ---------------------------------------------------------------------
+-- chat_messages — グループチャット（シフト引き継ぎ等）（10）
+--   channel: 将来の複数チャンネル拡張用。現状は 'general' 固定
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel     TEXT    NOT NULL DEFAULT 'general',
+  body        TEXT    NOT NULL,
+  -- 共通監査列
+  created_by  TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by  TEXT,
+  updated_at  TEXT,
+  deleted_by  TEXT,
+  deleted_at  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_channel
+  ON chat_messages (channel, created_at);
+
 -- =====================================================================
 -- マイグレーション（既存環境向けの変更は以下に追記する）
 --   例: ALTER TABLE xxx ADD COLUMN yyy TEXT;
