@@ -10,3 +10,8 @@
 #   （初期状態では schema.sql のプレースホルダー admin@example.com が登録されている）。
 #   ※ 本番（Cloudflare 上）ではこの変数を設定しないこと（Access のヘッダーのみを信頼する）
 DEV_USER_EMAIL=admin@example.com
+
+# R2 容量上限ガードの上限値（バイト）。未設定なら既定値（9GB / 8GB）。
+# ローカルで拒否・警告の動作確認をするときに小さい値にして使う。
+# R2_HARD_LIMIT_BYTES=9000000000
+# R2_WARN_BYTES=8000000000

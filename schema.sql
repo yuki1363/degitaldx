@@ -80,16 +80,68 @@ CREATE INDEX IF NOT EXISTS idx_master_history_master
   ON master_history (master_name, changed_at);
 
 -- ---------------------------------------------------------------------
+-- files — R2 保存ファイルのメタデータ（容量上限ガードの台帳を兼ねる）
+--   R2 オブジェクト1件につき1行。使用量 = SUM(size_bytes)
+--   論理削除してもオブジェクトは R2 に残るため、使用量には含まれ続ける
+--   （R2 オブジェクトごと消す物理削除は管理画面（Phase 5）で実装予定）
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS files (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  r2_key        TEXT    NOT NULL UNIQUE,
+  file_name     TEXT    NOT NULL,
+  content_type  TEXT    NOT NULL,
+  size_bytes    INTEGER NOT NULL,
+  related_table TEXT,
+  related_id    INTEGER,
+  -- 共通監査列
+  created_by    TEXT,
+  created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by    TEXT,
+  updated_at    TEXT,
+  deleted_by    TEXT,
+  deleted_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_related
+  ON files (related_table, related_id);
+
+-- ---------------------------------------------------------------------
+-- storage_reports — 保存容量に関する管理者への報告
+--   アップロード時に容量上限で拒否された／警告ラインを超えた場合に、
+--   利用者が報告画面から送信する。管理者はホーム画面で件数を確認できる。
+--   context: blocked = 上限で拒否された / warning = 警告ライン超え
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS storage_reports (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  context          TEXT    NOT NULL CHECK (context IN ('blocked', 'warning')),
+  used_bytes       INTEGER NOT NULL,
+  hard_limit_bytes INTEGER NOT NULL,
+  message          TEXT,
+  -- 共通監査列（created_by = 報告者）
+  created_by       TEXT,
+  created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by       TEXT,
+  updated_at       TEXT,
+  deleted_by       TEXT,
+  deleted_at       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_storage_reports_created_at
+  ON storage_reports (created_at);
+
+-- ---------------------------------------------------------------------
 -- 初期データ: 管理者ユーザー（プレースホルダー）
 --   ★ 本番へ適用する前に、'admin@example.com' を実際の管理者の
 --     メールアドレスへ必ず書き換えること（プレースホルダーのまま適用しない）。
 --     Cloudflare Access の許可リストにも同じメールアドレスを登録する。
 --     2人目以降の利用者は管理画面（Phase 5）から登録する。
+--   ※ users テーブルが空のときだけ投入される（運用中のDBに schema.sql を
+--     再実行しても余計なユーザーが追加されない）
 -- ---------------------------------------------------------------------
 INSERT INTO users (email, name, group_name, role, created_by)
 SELECT 'admin@example.com', '管理者', '保全G', 'admin', 'system'
 WHERE NOT EXISTS (
-  SELECT 1 FROM users WHERE email = 'admin@example.com'
+  SELECT 1 FROM users
 );
 
 -- =====================================================================

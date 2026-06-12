@@ -1,0 +1,116 @@
+// POST /api/files — ファイルアップロード（R2 へ保存・容量上限ガード付き）
+//
+//   呼び出し方（ボディはファイルのバイナリそのまま。multipart ではない）:
+//     fetch('/api/files?filename=photo.jpg&related_table=trouble_record&related_id=1', {
+//       method: 'POST',
+//       headers: { 'Content-Type': file.type },
+//       body: file,
+//     })
+//
+//   検証（すべてサーバー側）:
+//     - 権限: editor 以上
+//     - Content-Type / 拡張子 / 1ファイルサイズ上限（storage.js の FILE_RULES）
+//     - 容量上限ガード: 使用量 + 今回サイズ がハードリミットを超えるなら 507 で拒否
+//   ※ 同時アップロードでチェックがすれ違う理論上の余地はあるが、
+//     ハードリミット自体に 1GB のマージンがあるため実害はない（10名規模）
+
+import { json, jsonError } from '../_lib/http.js';
+import { requireRole } from '../_lib/auth.js';
+import { writeAuditLog } from '../_lib/audit.js';
+import { nowIso } from '../_lib/util.js';
+import {
+  getStorageUsage,
+  sanitizeFileName,
+  validateFileMeta,
+  RELATED_TABLES,
+} from '../_lib/storage.js';
+
+export async function onRequestPost({ request, env, data }) {
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
+
+  const url = new URL(request.url);
+  const fileName = sanitizeFileName(url.searchParams.get('filename') || '');
+  const contentType = (request.headers.get('Content-Type') || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  const contentLength = Number(request.headers.get('Content-Length'));
+
+  if (!url.searchParams.get('filename')) {
+    return jsonError(400, 'クエリパラメータ filename を指定してください。');
+  }
+  if (!Number.isFinite(contentLength)) {
+    return jsonError(400, 'Content-Length ヘッダーが必要です。');
+  }
+
+  // 添付先（任意）。指定する場合は許可テーブルのみ
+  const relatedTable = url.searchParams.get('related_table') || null;
+  const relatedIdRaw = url.searchParams.get('related_id');
+  const relatedId = relatedIdRaw === null || relatedIdRaw === '' ? null : Number(relatedIdRaw);
+  if (relatedTable !== null && !RELATED_TABLES.includes(relatedTable)) {
+    return jsonError(400, `related_table が不正です: ${relatedTable}`);
+  }
+  if (relatedId !== null && !Number.isInteger(relatedId)) {
+    return jsonError(400, 'related_id は整数で指定してください。');
+  }
+
+  // 種別・拡張子・1ファイルサイズ上限の検証
+  const meta = validateFileMeta({ fileName, contentType, sizeBytes: contentLength });
+  if (meta.error) return jsonError(meta.error.status, meta.error.message);
+
+  // 容量上限ガード（無料枠10GBを超えない）
+  const usage = await getStorageUsage(env);
+  if (usage.used_bytes + contentLength > usage.hard_limit_bytes) {
+    return jsonError(
+      507,
+      '保存容量の上限に達したためアップロードできません。不要な動画・ファイルの整理を管理者に依頼してください。',
+      { usage }
+    );
+  }
+
+  // R2 へ保存（リクエストボディをストリームのまま渡す。メモリに載せない）
+  const now = new Date();
+  const ym = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const r2Key = `uploads/${ym}/${crypto.randomUUID()}${meta.ext}`;
+  const object = await env.FILES.put(r2Key, request.body, {
+    httpMetadata: { contentType },
+  });
+
+  // メタデータを D1 に記録（実サイズは R2 が受け取った object.size を正とする）
+  const result = await env.DB.prepare(
+    `INSERT INTO files
+       (r2_key, file_name, content_type, size_bytes, related_table, related_id, created_by, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+  )
+    .bind(r2Key, fileName, contentType, object.size, relatedTable, relatedId, data.user.email, nowIso())
+    .run();
+
+  const fileId = result.meta.last_row_id;
+  await writeAuditLog(env.DB, {
+    tableName: 'files',
+    recordId: fileId,
+    action: 'create',
+    changedBy: data.user.email,
+    diff: { file_name: fileName, content_type: contentType, size_bytes: object.size, related_table: relatedTable, related_id: relatedId },
+  });
+
+  const usageAfter = await getStorageUsage(env);
+  return json(
+    {
+      file: {
+        id: fileId,
+        file_name: fileName,
+        content_type: contentType,
+        size_bytes: object.size,
+        url: `/api/files/${fileId}`,
+      },
+      usage: usageAfter,
+      // 警告ライン超え: フロントは「容量が残りわずか」の注意を表示する
+      warning: usageAfter.warning
+        ? `保存容量が警告ライン（${Math.round(usageAfter.warn_bytes / 1_000_000_000)}GB）を超えました。不要なファイルの整理を検討してください。`
+        : null,
+    },
+    201
+  );
+}
