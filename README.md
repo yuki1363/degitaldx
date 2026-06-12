@@ -147,11 +147,18 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 ├── manifest.json           # PWAマニフェスト
 ├── sw.js                   # Service Worker（静的キャッシュ・オフライン起動）
 ├── icons/                  # PWAアイコン（scripts/make-icons.mjs で生成）
+├── pages/
+│   ├── ledger.html         # 06 設備台帳（一覧・詳細・QR・資料）
+│   └── inspection.html     # 02 点検実施（チェックリスト・履歴・項目マスタ管理）
 ├── css/style.css           # 共通スタイル（スマホ375px基準）
 ├── js/
 │   ├── api.js              # fetchラッパー
 │   ├── auth.js             # ログインユーザー情報・権限判定
-│   └── files.js            # ファイルアップロード共通（容量ガード・管理者への報告画面）
+│   ├── files.js            # ファイルアップロード共通（容量ガード・報告画面・Canvasリサイズ）
+│   ├── util.js             # JST日時表示・DOM生成ヘルパー
+│   ├── ledger.js           # 06 設備台帳（QR生成・ラベル印刷）
+│   ├── inspection.js       # 02 点検実施（異常値アラート・項目マスタ管理）
+│   └── vendor/qrcode.mjs   # QRコード生成ライブラリ（qrcode-generator / MIT）
 ├── functions/api/          # Pages Functions（REST API）
 │   ├── _middleware.js      # 共通: Access認証・エラーハンドリング
 │   ├── _lib/               # 共通モジュール（auth/audit/http/storage/util）
@@ -168,7 +175,7 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 | フェーズ | 内容 | 状態 |
 |---|---|---|
 | Phase 0 | 基盤構築（D1スキーマ / Functions雛形 / PWA基盤 / Access設定手順） | ✅ 完了 |
-| Phase 1 | 設備台帳（06）+ 点検実施（02） | 未着手 |
+| Phase 1 | 設備台帳（06）+ 点検実施（02） | ✅ 完了 |
 | Phase 2 | 保全計画（01）+ トラブル記録（04） | 未着手 |
 | Phase 3 | 修理依頼（03）+ 部品在庫・CSV移行（05） | 未着手 |
 | Phase 4 | 日報（07）+ ダッシュボード/レポート出力（08） | 未着手 |
