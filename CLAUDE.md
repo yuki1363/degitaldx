@@ -33,9 +33,9 @@
 - 操作者は Cloudflare Access のメールアドレスから自動取得（手入力させない）
 ### 初回セットアップ手順
 1. Cloudflare アカウント（無料プラン）を作成し、**2FA を必ず設定**
-2. Workers & Pages → Pages → 「Gitに接続」→ 本リポジトリを選択。ビルドコマンドなし / 出力ディレクトリ `/` でデプロイ
-3. D1 データベース作成: `wrangler d1 create mainte-db` → `wrangler.toml` にバインディング `DB` を設定 → `schema.sql` を適用
-4. R2 バケット作成: `wrangler r2 bucket create mainte-files`（ロケーションヒント APAC）→ バインディング `FILES` を設定
+2. D1 データベース作成: `wrangler d1 create mainte-db` → `wrangler.toml` の `database_id` を実IDへ書き換え → `schema.sql` を適用（※ Pages 接続より先に行う）
+3. R2 バケット作成: `wrangler r2 bucket create mainte-files`（ロケーションヒント APAC）→ バインディング `FILES` を設定
+4. Workers & Pages → **「Pages」タブ** → 「Gitに接続」→ 本リポジトリを選択。ビルドコマンドなし / 出力ディレクトリ `/` でデプロイ（**Worker として接続しないこと**。「Deploy command: npx wrangler deploy」が出る画面は Worker 用で、Missing entry-point エラーになる。詳細は README）
 5. Zero Trust → Access → Applications → Self-hosted を追加し、対象に `アプリ名.pages.dev` を指定
 6. ポリシー: Allow / 会社ドメインのメール（または利用者10名を個別登録）。認証方式は One-time PIN。セッション期間は1ヶ月
 7. 部品在庫の初期データ移行（機能05参照）

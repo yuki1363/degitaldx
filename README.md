@@ -17,33 +17,67 @@ Cloudflare（Pages / Functions / D1 / R2 / Access）のみで完結し、外部�
 
 ## 初回セットアップ
 
-1. Cloudflare アカウント（無料プラン）を作成し、**2FA を必ず設定**する
-2. **Pages**: Workers & Pages → Pages → 「Gitに接続」→ 本リポジトリを選択
-   - ビルドコマンド: なし / ビルド出力ディレクトリ: `/`
-3. **D1**: データベースを作成し、`wrangler.toml` の `database_id` を書き換えてスキーマを適用する
+> ⚠️ **必ず「Pages」プロジェクトとして作成すること（Worker としてではなく）。**
+> リポジトリ接続時に「Deploy command: `npx wrangler deploy`」と表示される画面は **Worker 用**の接続フローであり、
+> そのままデプロイすると `Missing entry-point to Worker script or to assets directory` エラーで失敗する。
+> 間違えて Worker として作成した場合は、そのプロジェクトを削除（該当プロジェクト → Settings → Delete）し、
+> 下記の手順5で **「Pages」タブから**作り直す。
 
-   ```sh
-   npx wrangler d1 create mainte-db
-   # ↑出力された database_id を wrangler.toml に貼り付け
-   npx wrangler d1 execute mainte-db --remote --file=schema.sql
-   ```
+### 1. アカウント準備
 
-   ※ `schema.sql` 内の初期管理者はプレースホルダー（`admin@example.com`）のため、
-   **実際の管理者のメールアドレスに書き換えてから適用すること**
-4. **R2**: バケットを作成する（バインディングは `wrangler.toml` 設定済み）
+Cloudflare アカウント（無料プラン）を作成し、**2FA を必ず設定**する。
 
-   ```sh
-   npx wrangler r2 bucket create mainte-files --location apac
-   ```
+### 2. D1 データベース作成（※ Pages 接続より先に行う）
 
-5. **Pages へのバインディング反映**: Pages プロジェクトの Settings → Functions で
-   D1（変数名 `DB` → `mainte-db`）と R2（変数名 `FILES` → `mainte-files`）を紐づける
-   （`wrangler.toml` を Pages が読む構成の場合は自動で反映される）
-6. **Access**: Zero Trust → Access → Applications → 「Self-hosted」を追加
-   - 対象ドメイン: `<プロジェクト名>.pages.dev`（**プレビューURL `*.<プロジェクト名>.pages.dev` も保護対象に含めること**）
-   - ポリシー: Allow / 会社ドメインのメール（または利用者10名を個別登録）
-   - 認証方式: One-time PIN / セッション期間: 1ヶ月
-7. アプリにアクセスし、初期管理者でログイン → 管理画面（Phase 5 で実装）から利用者を登録する
+ダッシュボード: 「ストレージとデータベース」→ D1 →「データベースを作成」→ 名前 `mainte-db`
+（CLI の場合: `npx wrangler d1 create mainte-db`）
+
+作成後に表示される **Database ID（UUID）** を `wrangler.toml` の `database_id` に貼り付けて
+commit & push する。
+**ID が仮値（`00000000-...`）のままだと Pages のデプロイが失敗する**ため、必ず先に反映すること。
+
+### 3. R2 バケット作成
+
+ダッシュボード: R2 →「バケットを作成」→ 名前 `mainte-files` / ロケーション: アジア太平洋（APAC）
+（CLI の場合: `npx wrangler r2 bucket create mainte-files --location apac`）
+
+### 4. スキーマ適用
+
+`schema.sql` の初期管理者プレースホルダー（`admin@example.com`）を
+**実際の管理者のメールアドレスに書き換えてから**適用する。
+
+- CLI: `npx wrangler d1 execute mainte-db --remote --file=schema.sql`
+- ダッシュボード: D1 → `mainte-db` →「コンソール」に `schema.sql` の内容を貼り付けて実行
+
+### 5. Pages プロジェクト作成（Git 連携）
+
+1. Workers & Pages →「作成」→ **「Pages」タブ** →「Git に接続」
+2. 本リポジトリを選択
+3. ビルド設定: フレームワークプリセット「なし」/ ビルドコマンド: **空欄** / ビルド出力ディレクトリ: `/`
+   （Pages にデプロイコマンドの入力欄はない。`functions/` ディレクトリは自動で API として認識される）
+4. 「保存してデプロイ」
+
+デプロイ後、プロジェクトの Settings → Bindings（旧 Functions タブ）で
+D1（`DB` → `mainte-db`）と R2（`FILES` → `mainte-files`）が紐づいていることを確認する
+（`wrangler.toml` から自動反映される。されていない場合は手動で追加する）。
+
+※ 本番ブランチはリポジトリのデフォルトブランチが使われる（Settings → Builds で変更可能）。
+
+### 6. Access（社内限定公開）— 運用開始前に必須
+
+Zero Trust → Access → Applications →「Self-hosted」を追加する。
+
+- 対象ドメイン: `<プロジェクト名>.pages.dev`（**プレビューURL `*.<プロジェクト名>.pages.dev` も保護対象に含めること**）
+- ポリシー: Allow / 会社ドメインのメール（または利用者10名を個別登録）
+- 認証方式: One-time PIN / セッション期間: 1ヶ月
+
+**Access の設定が完了するまでアプリの URL を共有しないこと**（下記セキュリティ運用メモ参照）。
+
+### 7. 動作確認
+
+アプリの URL を開く → Access のワンタイムコード認証 → ホーム画面右上に
+管理者の名前と「管理者」バッジが表示されれば、D1・Access 連携まで正常。
+以降の利用者登録は管理画面（Phase 5 で実装）から行う。
 
 ## ローカル開発
 
