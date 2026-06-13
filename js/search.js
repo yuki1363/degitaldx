@@ -60,13 +60,19 @@ async function doSearch(params, resultsBox) {
       return;
     }
 
-    // キーワードをハイライトする（DOMテキストのみ）
+    // テキストをエスケープしてからキーワードをハイライトする
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    );
     const highlight = (text, kws) => {
-      if (!text || !kws.length) return text || '';
-      let result = text;
+      const escaped = escapeHtml(text);
+      if (!kws.length) return escaped;
+      let result = escaped;
       for (const kw of kws) {
-        result = result.replace(new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-          (m) => `<mark>${m}</mark>`);
+        result = result.replace(
+          new RegExp(escapeHtml(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+          (m) => `<mark>${m}</mark>`
+        );
       }
       return result;
     };

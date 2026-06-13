@@ -29,10 +29,14 @@ export async function onRequestGet({ request, env, data }) {
 
   const { results } = await db.prepare(sql).bind(...binds).all();
 
-  const countSql = `SELECT COUNT(*) AS n FROM audit_log WHERE 1=1`
-    + (table  ? ` AND table_name = '${table}'`   : '')
-    + (action ? ` AND action = '${action}'`       : '');
-  const total = await db.prepare(countSql).first();
+  let countSql = `SELECT COUNT(*) AS n FROM audit_log WHERE 1=1`;
+  const countBinds = [];
+  if (table)  { countSql += ` AND table_name = ?`; countBinds.push(table); }
+  if (action) { countSql += ` AND action = ?`;      countBinds.push(action); }
+  if (user)   { countSql += ` AND changed_by LIKE ?`; countBinds.push(`%${user}%`); }
+  if (from)   { countSql += ` AND changed_at >= ?`; countBinds.push(from); }
+  if (to)     { countSql += ` AND changed_at <= ?`; countBinds.push(to + 'T23:59:59Z'); }
+  const total = await db.prepare(countSql).bind(...countBinds).first();
 
   return json({ logs: results ?? [], total: total?.n ?? 0, limit, offset });
 }
