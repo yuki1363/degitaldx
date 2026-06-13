@@ -527,3 +527,48 @@ CREATE TABLE IF NOT EXISTS trouble_custom_field (
 -- マイグレーション（既存環境向けの変更は以下に追記する）
 --   例: ALTER TABLE xxx ADD COLUMN yyy TEXT;
 -- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- notifications — 通知センター（最近の動き・アラート）
+--   発生イベント: parts_zero=部品在庫0 / inspection_abnormal=点検の異常値・NG /
+--                 trouble=トラブル記録の新規登録
+--   level: info / warning / alert（表示の色分け）
+--   既読はチーム共有方式: 誰か1人が確認すると全員の未読数が減る。
+--     acknowledged_by / acknowledged_at に確認者・確認日時を記録する。
+--   link_url: クリック時に遷移する該当レコードの画面URL
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS notifications (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  type            TEXT    NOT NULL,
+  level           TEXT    NOT NULL DEFAULT 'info'
+                          CHECK (level IN ('info', 'warning', 'alert')),
+  title           TEXT    NOT NULL,
+  body            TEXT,
+  related_table   TEXT,
+  related_id      INTEGER,
+  link_url        TEXT,
+  acknowledged_by TEXT,
+  acknowledged_at TEXT,
+  -- 共通監査列
+  created_by      TEXT,
+  created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by      TEXT,
+  updated_at      TEXT,
+  deleted_by      TEXT,
+  deleted_at      TEXT
+);
+
+-- 未読（未確認）の集計と新着順表示に使うインデックス
+CREATE INDEX IF NOT EXISTS idx_notifications_unack
+  ON notifications (acknowledged_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_type
+  ON notifications (type, created_at);
+
+-- ---------------------------------------------------------------------
+-- parts_inventory に発注メールの宛先列を追加（在庫からのOutlook発注）
+--   ※ 既存DBへの一度きりのマイグレーション。
+--     再実行すると「duplicate column name: supplier_email」エラーになるが、
+--     既に適用済みであることを示すだけなので無視してよい
+--     （その場合はこの ALTER 行をコメントアウトして schema.sql を再実行する）。
+-- ---------------------------------------------------------------------
+ALTER TABLE parts_inventory ADD COLUMN supplier_email TEXT;

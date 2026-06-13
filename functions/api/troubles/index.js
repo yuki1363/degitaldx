@@ -1,5 +1,6 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
+import { createNotification } from '../_lib/notify.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
@@ -104,6 +105,27 @@ export async function onRequestPost({ request, env, data }) {
     action: 'create',
     changedBy: userEmail,
     diff: { occurred_at, phenomenon: phenomenon.trim(), equipment_id, category_id, cause, countermeasure },
+  });
+
+  // トラブル記録の新規登録を通知（設備名があれば見出しに付ける）
+  let eqLabel = '';
+  if (equipment_id) {
+    const eq = await db.prepare(`SELECT code, name FROM equipment_ledger WHERE id = ?1`)
+      .bind(equipment_id)
+      .first();
+    if (eq) eqLabel = `${eq.code} ${eq.name}: `;
+  }
+  const phenomenonText = phenomenon.trim();
+  const shortPhenomenon = phenomenonText.length > 40 ? phenomenonText.slice(0, 40) + '…' : phenomenonText;
+  await createNotification(db, {
+    type: 'trouble',
+    level: 'info',
+    title: `トラブル記録: ${eqLabel}${shortPhenomenon}`,
+    body: phenomenonText,
+    relatedTable: 'trouble_record',
+    relatedId: id,
+    linkUrl: `/pages/trouble?id=${id}`,
+    createdBy: userEmail,
   });
 
   return json({ id }, 201);

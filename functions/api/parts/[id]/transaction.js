@@ -3,6 +3,7 @@
 
 import { requireRole } from '../../_lib/auth.js';
 import { writeAuditLog } from '../../_lib/audit.js';
+import { createNotification } from '../../_lib/notify.js';
 import { json, jsonError, readJson } from '../../_lib/http.js';
 import { nowIso } from '../../_lib/util.js';
 
@@ -14,9 +15,9 @@ export async function onRequestPost({ env, data, params, request }) {
   const { DB } = env;
   const userEmail = data.user.email;
 
-  // 部品の存在確認
+  // 部品の存在確認（在庫0通知の見出しに使うため名称等も取得）
   const part = await DB.prepare(
-    `SELECT id, quantity FROM parts_inventory WHERE id = ?1 AND deleted_at IS NULL`
+    `SELECT id, name, part_no, unit, quantity FROM parts_inventory WHERE id = ?1 AND deleted_at IS NULL`
   )
     .bind(id)
     .first();
@@ -83,6 +84,20 @@ export async function onRequestPost({ env, data, params, request }) {
     changedBy: userEmail,
     diff: { old_qty: oldQty, new_qty: newQty, type, delta },
   });
+
+  // 在庫が0になったらアラート通知（0から0へは変化なしなので oldQty>0 のときのみ）
+  if (newQty === 0 && oldQty > 0) {
+    await createNotification(DB, {
+      type: 'parts_zero',
+      level: 'alert',
+      title: `在庫切れ: ${part.name}`,
+      body: `${part.part_no}（${part.name}）の在庫が0${part.unit}になりました。発注をご検討ください。`,
+      relatedTable: 'parts_inventory',
+      relatedId: id,
+      linkUrl: `/pages/parts?id=${id}`,
+      createdBy: userEmail,
+    });
+  }
 
   return json({ quantity: newQty });
 }

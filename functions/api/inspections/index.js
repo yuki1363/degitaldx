@@ -7,6 +7,7 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
+import { createNotification } from '../_lib/notify.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
@@ -228,6 +229,24 @@ export async function onRequestPost({ request, env, data }) {
       attached_files: attached,
     },
   });
+
+  // 異常値・NG を含む点検は通知（設備名を見出しに付ける）
+  if (v.has_abnormal === 1) {
+    const eq = await env.DB.prepare(`SELECT code, name FROM equipment_ledger WHERE id = ?1`)
+      .bind(v.equipment_id)
+      .first();
+    const eqName = eq ? `${eq.code} ${eq.name}` : `設備#${v.equipment_id}`;
+    await createNotification(env.DB, {
+      type: 'inspection_abnormal',
+      level: 'warning',
+      title: `点検で異常検知: ${eqName}`,
+      body: '点検記録に異常値（基準範囲外）または NG が含まれています。内容を確認してください。',
+      relatedTable: 'inspection_result',
+      relatedId: id,
+      linkUrl: `/pages/inspection?id=${id}`,
+      createdBy: data.user.email,
+    });
+  }
 
   return json({ id, has_abnormal: v.has_abnormal === 1 }, 201);
 }
