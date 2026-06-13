@@ -21,9 +21,14 @@
 <body>
   <header class="app-header">
     <h1 class="app-title">設備保全アプリ</h1>
-    <div class="user-chip" id="user-chip" hidden>
-      <span class="user-name" id="user-name"></span>
-      <span class="role-badge" id="user-role"></span>
+    <div class="header-right">
+      <a class="notif-bell" id="notif-bell" href="/pages/notifications" hidden aria-label="通知">
+        🔔<span class="notif-bell-badge" id="notif-bell-badge" hidden>0</span>
+      </a>
+      <div class="user-chip" id="user-chip" hidden>
+        <span class="user-name" id="user-name"></span>
+        <span class="role-badge" id="user-role"></span>
+      </div>
     </div>
   </header>
 
@@ -34,6 +39,14 @@
   <main class="container">
     <p class="notice is-error" id="auth-notice" hidden></p>
     <p class="notice is-warning" id="storage-alert" hidden></p>
+
+    <section class="home-activity" id="home-activity" hidden>
+      <div class="home-activity-head">
+        <h2 class="home-activity-title">最近の動き</h2>
+        <a class="home-activity-more" href="/pages/notifications">すべて見る ›</a>
+      </div>
+      <div id="home-activity-list"></div>
+    </section>
 
     <nav class="tile-grid" aria-label="機能メニュー">
       <a class="tile" href="/pages/plan">
@@ -86,6 +99,12 @@
         <span class="tile-name">横断検索</span>
         <span class="tile-no">11 過去事例の検索</span>
       </a>
+      <a class="tile" href="/pages/notifications">
+        <span class="tile-badge" id="tile-notif-badge" hidden>0</span>
+        <span class="tile-icon">🔔</span>
+        <span class="tile-name">通知</span>
+        <span class="tile-no">最近の動き・アラート</span>
+      </a>
       <a class="tile is-disabled" aria-disabled="true" id="tile-admin">
         <span class="badge-soon">管理者のみ</span>
         <span class="tile-icon">⚙️</span>
@@ -102,6 +121,7 @@
   <script type="module">
     import { getCurrentUser, hasRole, ROLE_LABELS } from '/js/auth.js';
     import { api } from '/js/api.js';
+    import { el, render, formatDateTime } from '/js/util.js';
 
     // Service Worker 登録（PWA: オフラインでもアプリが起動する）
     if ('serviceWorker' in navigator) {
@@ -127,6 +147,7 @@
       document.getElementById('user-role').textContent = ROLE_LABELS[user.role] || user.role;
       document.getElementById('user-chip').hidden = false;
       showStorageAlertForAdmin(user);
+      loadHomeActivity();
       // 管理者のみ管理タイルを有効化
       if (user.role === 'admin') {
         const tile = document.getElementById('tile-admin');
@@ -142,6 +163,37 @@
       } else {
         notice.textContent = err.message;
         notice.hidden = false;
+      }
+    }
+
+    // 最近の動き（通知）: ベルのバッジ・ホームの一覧を表示。全ログインユーザー対象
+    const ACTIVITY_DOT = { alert: '#dc2626', warning: '#b45309', info: '#1e40af' };
+    async function loadHomeActivity() {
+      try {
+        const { notifications, unread_count } = await api.get('/api/notifications?limit=6');
+        const bell = document.getElementById('notif-bell');
+        if (bell) bell.hidden = false;
+        const badgeText = unread_count > 99 ? '99+' : String(unread_count);
+        for (const id of ['notif-bell-badge', 'tile-notif-badge']) {
+          const b = document.getElementById(id);
+          if (!b) continue;
+          if (unread_count > 0) { b.textContent = badgeText; b.hidden = false; }
+          else b.hidden = true;
+        }
+        if (!notifications || notifications.length === 0) return;
+        render(document.getElementById('home-activity-list'), notifications.map((n) =>
+          el('a', {
+            class: 'home-activity-item' + (n.acknowledged_at ? '' : ' is-unack'),
+            href: n.link_url || '/pages/notifications',
+          }, [
+            el('span', { class: 'home-activity-dot', style: `background:${ACTIVITY_DOT[n.level] || ACTIVITY_DOT.info}` }),
+            el('span', { class: 'home-activity-text' }, n.title),
+            el('span', { class: 'home-activity-time' }, formatDateTime(n.created_at)),
+          ])
+        ));
+        document.getElementById('home-activity').hidden = false;
+      } catch {
+        // 通知の取得失敗はホーム表示を妨げない
       }
     }
 
