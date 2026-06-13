@@ -500,6 +500,29 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_channel
   ON chat_messages (channel, created_at);
 
+-- ---------------------------------------------------------------------
+-- trouble_custom_field — トラブル記録のカスタム項目定義（04 フォームビルダー）
+--   管理画面（09）から項目の追加・編集・削除が可能。
+--   値は trouble_record.custom_fields_json に
+--   [{ field_id, name, value }] 形式で保存（項目を後から変更しても過去の記録は残る）。
+--   変更時は master_history にスナップショットを保存する
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trouble_custom_field (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT    NOT NULL,
+  input_type   TEXT    NOT NULL DEFAULT 'text'
+                       CHECK (input_type IN ('text', 'number', 'select')),
+  options_json TEXT,
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  -- 共通監査列
+  created_by   TEXT    NOT NULL,
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+
 -- =====================================================================
 -- マイグレーション（既存環境向けの変更は以下に追記する）
 --   例: ALTER TABLE xxx ADD COLUMN yyy TEXT;

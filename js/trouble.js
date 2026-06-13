@@ -182,6 +182,7 @@ async function renderDetail(id) {
       infoRow('設備', trouble.equipment_name ? `${trouble.equipment_code} ${trouble.equipment_name}` : null),
       infoRow('原因', trouble.cause),
       infoRow('対策', trouble.countermeasure),
+      ...parseCustomValues(trouble.custom_fields_json).map((v) => infoRow(v.name, v.value)),
       infoRow('記録者', trouble.reporter_name || trouble.created_by),
     ]),
     canEdit
@@ -229,10 +230,22 @@ function field(label, input) {
   return el('div', { class: 'field' }, [el('label', {}, label), input]);
 }
 
+// custom_fields_json（文字列）→ [{ field_id, name, value }] を安全にパース
+function parseCustomValues(jsonStr) {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 async function renderForm(existing) {
-  const [{ categories: cats }, { equipment }] = await Promise.all([
+  const [{ categories: cats }, { equipment }, { fields: customFields }] = await Promise.all([
     api.get('/api/troubles/categories'),
     api.get('/api/equipment'),
+    // カスタム項目テーブル未作成の環境でもフォーム自体は使えるようにする
+    api.get('/api/troubles/fields').catch(() => ({ fields: [] })),
   ]);
 
   const f = {
@@ -257,7 +270,30 @@ async function renderForm(existing) {
     countermeasure: el('textarea', { placeholder: '例: ベルト交換' }, existing?.countermeasure || ''),
   };
 
+  // カスタム項目（管理画面で定義した追加入力欄）
+  const existingCustom = parseCustomValues(existing?.custom_fields_json);
+  const customInputs = customFields.map((fld) => {
+    const prev = existingCustom.find((v) => v.field_id === fld.id);
+    let input;
+    if (fld.input_type === 'select') {
+      let opts = [];
+      try { opts = JSON.parse(fld.options_json) || []; } catch { /* 定義不正時は選択肢なし */ }
+      input = el('select', {}, [
+        el('option', { value: '' }, '— 選択'),
+        ...opts.map((o) => el('option', { value: o, selected: prev?.value === o }, o)),
+      ]);
+    } else if (fld.input_type === 'number') {
+      input = el('input', { type: 'number', value: prev?.value ?? '' });
+    } else {
+      input = el('input', { type: 'text', value: prev?.value ?? '' });
+    }
+    return { fld, input };
+  });
+
   const save = async () => {
+    const customValues = customInputs
+      .map(({ fld, input }) => ({ field_id: fld.id, name: fld.name, value: String(input.value).trim() }))
+      .filter((v) => v.value !== '');
     const body = {
       occurred_at: localInputToIso(f.occurred_at.value),
       category_id: f.category_id.value ? Number(f.category_id.value) : null,
@@ -265,6 +301,7 @@ async function renderForm(existing) {
       phenomenon: f.phenomenon.value.trim(),
       cause: f.cause.value.trim() || null,
       countermeasure: f.countermeasure.value.trim() || null,
+      custom_fields_json: customValues.length > 0 ? customValues : null,
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }
@@ -290,6 +327,7 @@ async function renderForm(existing) {
       field('現象（必須）', f.phenomenon),
       field('原因', f.cause),
       field('対策', f.countermeasure),
+      ...customInputs.map(({ fld, input }) => field(fld.name, input)),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', {
