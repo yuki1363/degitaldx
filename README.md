@@ -171,7 +171,10 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 │   ├── repair.html         # 03 業務依頼（ステータス管理）
 │   ├── parts.html          # 05 部品在庫（入出庫・CSVインポート）
 │   ├── report.html         # 07 日報（記録・閲覧）
-│   └── dashboard.html      # 08 ダッシュボード（グラフ・抽出レポート）
+│   ├── dashboard.html      # 08 ダッシュボード（グラフ・抽出レポート）
+│   ├── admin.html          # 09 管理（ユーザー・マスタ管理・監査ログ・復元）
+│   ├── chat.html           # 10 チャット（グループ引き継ぎ）
+│   └── search.html         # 11 横断検索
 ├── css/style.css           # 共通スタイル（スマホ375px基準）
 ├── js/
 │   ├── api.js              # fetchラッパー
@@ -186,17 +189,25 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 │   ├── parts.js            # 05 部品在庫（+/−更新・発注アラート・CSVインポート）
 │   ├── report.js           # 07 日報（カテゴリ絞り込み・関連記録リンク）
 │   ├── dashboard.js        # 08 ダッシュボード（グラフ・抽出レポート・CSV/PDF出力）
+│   ├── admin.js            # 09 管理（ユーザー・マスタ管理・監査ログ・復元・マスタ履歴）
+│   ├── chat.js             # 10 チャット（30秒ポーリング・個人情報検知）
+│   ├── comments.js         # 10 コメント共通モジュール（各詳細画面に組み込み）
+│   ├── search.js           # 11 横断検索（キーワードAND・ハイライト）
 │   └── vendor/qrcode.mjs   # QRコード生成ライブラリ（qrcode-generator / MIT）
 ├── functions/api/          # Pages Functions（REST API）
 │   ├── _middleware.js      # 共通: Access認証・エラーハンドリング
 │   ├── _lib/               # 共通モジュール（auth/audit/history/http/storage/util）
 │   ├── files/              # ファイル保存API（R2アップロード/取得・容量上限ガード・容量報告）
 │   ├── plans/              # 01 保全計画API
-│   ├── troubles/           # 04 トラブル記録API（categories/ ジャンルマスタ）
+│   ├── troubles/           # 04 トラブル記録API（categories/ ジャンル / fields/ カスタム項目）
 │   ├── repairs/            # 03 業務依頼API（ステータス履歴）
 │   ├── parts/              # 05 部品在庫API（transaction 入出庫 / import CSV取込）
 │   ├── reports/            # 07 日報API（categories/ カテゴリマスタ）
 │   ├── stats/              # 08 集計API（グラフ・サマリー用）
+│   ├── admin/              # 09 管理API（users/ audit/ restore/ masters/ 履歴復元）
+│   ├── comments/           # 10 コメントAPI
+│   ├── chat/               # 10 チャットAPI
+│   ├── search/             # 11 横断検索API
 │   └── me.js               # GET /api/me — ログインユーザー情報
 ├── scripts/make-icons.mjs  # アイコン生成（依存なし）
 ├── schema.sql              # D1テーブル定義（冪等・マイグレーションは末尾に追記）

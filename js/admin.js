@@ -16,6 +16,7 @@ function showError(err) {
 
 const TABS = [
   { id: 'users',   label: 'ユーザー管理' },
+  { id: 'manage',  label: 'マスタ管理' },
   { id: 'audit',   label: '監査ログ' },
   { id: 'restore', label: '削除済みデータ' },
   { id: 'masters', label: 'マスタ変更履歴' },
@@ -35,6 +36,7 @@ function setTab(tabId) {
 async function loadTab() {
   render(tabContent, el('p', { class: 'loading' }, '読み込み中…'));
   if (activeTab === 'users')   await renderUsers();
+  if (activeTab === 'manage')  await renderManage();
   if (activeTab === 'audit')   await renderAudit();
   if (activeTab === 'restore') await renderRestore();
   if (activeTab === 'masters') await renderMasters();
@@ -145,6 +147,198 @@ async function renderUsers() {
           ]),
         ])
       : null,
+  ]);
+}
+
+// ---------------- マスタ管理（カテゴリ・カスタム項目） ----------------
+
+// 並び順を表示順どおり 1..N に振り直し、変わった行だけ PUT する
+async function persistOrder(items, putUrl, buildBody) {
+  for (let i = 0; i < items.length; i++) {
+    const wanted = i + 1;
+    if (items[i].sort_order !== wanted) {
+      await api.put(putUrl(items[i]), buildBody(items[i], wanted));
+    }
+  }
+}
+
+// トラブルジャンル・日報カテゴリ共通のセクション（{id, name, sort_order} 形）
+function categorySection(title, base, hint) {
+  const wrap = el('div', { class: 'card' }, []);
+
+  const reload = async () => {
+    const { categories } = await api.get(base);
+    const addInput = el('input', { type: 'text', placeholder: '新しい名称' });
+
+    const move = async (idx, delta) => {
+      const items = [...categories];
+      [items[idx], items[idx + delta]] = [items[idx + delta], items[idx]];
+      try {
+        await persistOrder(items, (c) => `${base}/${c.id}`, (c, order) => ({ name: c.name, sort_order: order }));
+        await reload();
+      } catch (err) { alert(err.message); }
+    };
+
+    render(wrap, [
+      el('h3', { class: 'card-title' }, title),
+      hint ? el('p', { class: 'hint' }, hint) : null,
+      categories.length === 0
+        ? el('p', { class: 'empty' }, '登録がありません')
+        : el('div', {}, categories.map((c, idx) =>
+            el('div', { class: 'master-row' }, [
+              el('span', { class: 'master-name' }, c.name),
+              el('span', { class: 'master-actions' }, [
+                el('button', { class: 'btn-icon', disabled: idx === 0, onclick: () => move(idx, -1) }, '↑'),
+                el('button', { class: 'btn-icon', disabled: idx === categories.length - 1, onclick: () => move(idx, +1) }, '↓'),
+                el('button', { class: 'btn btn-sm', onclick: async () => {
+                  const name = prompt('新しい名称', c.name);
+                  if (!name?.trim() || name.trim() === c.name) return;
+                  try {
+                    await api.put(`${base}/${c.id}`, { name: name.trim(), sort_order: c.sort_order });
+                    await reload();
+                  } catch (err) { alert(err.message); }
+                }}, '名称変更'),
+                el('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
+                  if (!confirm(`「${c.name}」を削除しますか？`)) return;
+                  try {
+                    await api.del(`${base}/${c.id}`);
+                    await reload();
+                  } catch (err) { alert(err.message); }
+                }}, '削除'),
+              ]),
+            ])
+          )),
+      el('div', { class: 'add-row' }, [
+        addInput,
+        el('button', { class: 'btn btn-sm btn-primary', onclick: async () => {
+          const name = addInput.value.trim();
+          if (!name) return;
+          try {
+            await api.post(base, { name, sort_order: categories.length + 1 });
+            await reload();
+          } catch (err) { alert(err.message); }
+        }}, '＋ 追加'),
+      ]),
+    ]);
+  };
+
+  reload().catch((err) => render(wrap, el('p', { class: 'notice is-error' }, err.message)));
+  return wrap;
+}
+
+// トラブル記録のカスタム項目セクション
+function customFieldSection() {
+  const FIELD_TYPE_LABELS = { text: '自由記述', number: '数値', select: '選択式' };
+  const wrap = el('div', { class: 'card' }, []);
+
+  const reload = async () => {
+    const { fields } = await api.get('/api/troubles/fields');
+
+    const addName = el('input', { type: 'text', placeholder: '項目名（例: 停止時間）' });
+    const addType = el('select', {}, Object.entries(FIELD_TYPE_LABELS).map(([v, l]) => el('option', { value: v }, l)));
+    const addOptions = el('input', { type: 'text', placeholder: '選択肢（カンマ区切り・選択式のみ）' });
+
+    const move = async (idx, delta) => {
+      const items = [...fields];
+      [items[idx], items[idx + delta]] = [items[idx + delta], items[idx]];
+      try {
+        await persistOrder(items, (f) => `/api/troubles/fields/${f.id}`, (f, order) => ({
+          name: f.name,
+          input_type: f.input_type,
+          options: f.options_json ? JSON.parse(f.options_json) : [],
+          sort_order: order,
+        }));
+        await reload();
+      } catch (err) { alert(err.message); }
+    };
+
+    render(wrap, [
+      el('h3', { class: 'card-title' }, 'トラブル記録のカスタム項目'),
+      el('p', { class: 'hint' }, 'トラブル入力フォームに追加される項目です。項目を変更・削除しても過去の記録は当時の内容で残ります。'),
+      fields.length === 0
+        ? el('p', { class: 'empty' }, 'カスタム項目はありません')
+        : el('div', {}, fields.map((fld, idx) => {
+            let optsText = '';
+            try { optsText = (JSON.parse(fld.options_json) || []).join('、'); } catch { /* なし */ }
+            return el('div', { class: 'master-row' }, [
+              el('span', { class: 'master-name' }, [
+                fld.name,
+                el('span', { class: 'master-sub' }, ` ［${FIELD_TYPE_LABELS[fld.input_type] || fld.input_type}${optsText ? ': ' + optsText : ''}］`),
+              ]),
+              el('span', { class: 'master-actions' }, [
+                el('button', { class: 'btn-icon', disabled: idx === 0, onclick: () => move(idx, -1) }, '↑'),
+                el('button', { class: 'btn-icon', disabled: idx === fields.length - 1, onclick: () => move(idx, +1) }, '↓'),
+                el('button', { class: 'btn btn-sm', onclick: async () => {
+                  const name = prompt('項目名', fld.name);
+                  if (!name?.trim()) return;
+                  let options = [];
+                  if (fld.input_type === 'select') {
+                    const optsIn = prompt('選択肢（カンマ区切り）', optsText.replaceAll('、', ','));
+                    if (optsIn == null) return;
+                    options = optsIn.split(',').map((s) => s.trim()).filter(Boolean);
+                  }
+                  try {
+                    await api.put(`/api/troubles/fields/${fld.id}`, {
+                      name: name.trim(), input_type: fld.input_type, options, sort_order: fld.sort_order,
+                    });
+                    await reload();
+                  } catch (err) { alert(err.message); }
+                }}, '編集'),
+                el('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
+                  if (!confirm(`「${fld.name}」を削除しますか？\n（過去の記録の値は残ります）`)) return;
+                  try {
+                    await api.del(`/api/troubles/fields/${fld.id}`);
+                    await reload();
+                  } catch (err) { alert(err.message); }
+                }}, '削除'),
+              ]),
+            ]);
+          })),
+      el('div', { class: 'add-row' }, [addName, addType]),
+      el('div', { class: 'add-row' }, [
+        addOptions,
+        el('button', { class: 'btn btn-sm btn-primary', onclick: async () => {
+          const name = addName.value.trim();
+          if (!name) { alert('項目名を入力してください。'); return; }
+          const options = addOptions.value.split(',').map((s) => s.trim()).filter(Boolean);
+          try {
+            await api.post('/api/troubles/fields', {
+              name, input_type: addType.value, options, sort_order: fields.length + 1,
+            });
+            await reload();
+          } catch (err) { alert(err.message); }
+        }}, '＋ 追加'),
+      ]),
+    ]);
+  };
+
+  reload().catch((err) => render(wrap, el('p', { class: 'notice is-error' }, err.message)));
+  return wrap;
+}
+
+async function renderManage() {
+  const { equipment } = await api.get('/api/equipment');
+
+  const equipSel = el('select', {}, [
+    el('option', { value: '' }, '— 設備を選択'),
+    ...equipment.map((e) => el('option', { value: e.id }, `${e.code} ${e.name}`)),
+  ]);
+
+  render(tabContent, [
+    categorySection('トラブルジャンル', '/api/troubles/categories', '使用中のジャンルは削除できません（先に該当トラブル記録のジャンルを変更してください）。'),
+    categorySection('日報カテゴリ', '/api/reports/categories', '使用中のカテゴリは削除できません。'),
+    customFieldSection(),
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '点検項目マスタ'),
+      el('p', { class: 'hint' }, '点検項目は設備ごとに管理します。設備を選んで管理画面を開いてください。'),
+      el('div', { class: 'add-row' }, [
+        equipSel,
+        el('button', { class: 'btn btn-sm', onclick: () => {
+          if (!equipSel.value) { alert('設備を選択してください。'); return; }
+          window.location.href = `/pages/inspection?masters=${equipSel.value}`;
+        }}, '開く'),
+      ]),
+    ]),
   ]);
 }
 
@@ -287,7 +481,7 @@ async function renderRestore() {
 
 const MASTER_LABELS = {
   inspection_master: '点検項目マスタ', trouble_category: 'トラブルジャンル',
-  report_category: '日報カテゴリ',
+  report_category: '日報カテゴリ', trouble_custom_field: 'トラブルカスタム項目',
 };
 
 async function renderMasters() {
@@ -305,7 +499,7 @@ async function renderMasters() {
     }
     render(listBox, el('div', { style: 'overflow-x:auto' }, [
       el('table', { class: 'extract-table' }, [
-        el('thead', {}, [el('tr', {}, ['マスタ', 'レコードID', '変更者', '変更日時', '変更前スナップショット'].map((h) => el('th', {}, h)))]),
+        el('thead', {}, [el('tr', {}, ['マスタ', 'レコードID', '変更者', '変更日時', '変更前スナップショット', '操作'].map((h) => el('th', {}, h)))]),
         el('tbody', {}, history.map((h) =>
           el('tr', {}, [
             el('td', {}, MASTER_LABELS[h.master_name] || h.master_name),
@@ -315,6 +509,16 @@ async function renderMasters() {
             el('td', { style: 'font-size:11px;max-width:200px;word-break:break-all' },
               String(h.snapshot_json || '').slice(0, 120)
             ),
+            el('td', {}, h.record_id != null
+              ? el('button', { class: 'btn btn-sm', onclick: async () => {
+                  if (!confirm('この時点の内容に復元しますか？\n（復元前の現在値も履歴に残るため、復元の取り消しもできます）')) return;
+                  try {
+                    await api.post('/api/admin/masters/restore', { history_id: h.id });
+                    alert('復元しました。');
+                    await load();
+                  } catch (err) { alert(err.message); }
+                }}, '復元')
+              : '—'),
           ])
         )),
       ]),
@@ -330,7 +534,7 @@ async function renderMasters() {
 
   render(tabContent, [
     el('div', { class: 'filter-bar' }, [el('label', { class: 'filter-label' }, ['対象 ', masterSel])]),
-    el('p', { class: 'hint' }, 'マスタ変更前のスナップショットを確認できます（復元は管理者に相談してください）。'),
+    el('p', { class: 'hint' }, 'マスタ（カテゴリ・点検項目・カスタム項目）の変更前スナップショットを確認し、その時点の内容へ復元できます。'),
     listBox,
   ]);
   await load();
@@ -353,7 +557,7 @@ async function renderMasters() {
         TABS.map(({ id, label }) =>
           el('button', {
             class: `tab-btn ${id === activeTab ? 'is-active' : ''}`,
-            dataset: { tab: id },
+            'data-tab': id,
             onclick: () => setTab(id),
           }, label)
         )

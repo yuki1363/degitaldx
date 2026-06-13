@@ -917,6 +917,8 @@ input.is-abnormal {
   gap: 4px;
   margin-bottom: 16px;
   border-bottom: 2px solid var(--color-border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tab-btn {
@@ -931,6 +933,8 @@ input.is-abnormal {
   margin-bottom: -2px;
   border-bottom: 2px solid transparent;
   transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab-btn.is-active {
@@ -1099,6 +1103,65 @@ input.is-abnormal {
 .btn-icon:hover {
   color: var(--color-danger);
   background: var(--color-danger-bg);
+}
+
+.btn-icon:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* ---- マスタ管理（09） ---- */
+.master-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.master-row:last-of-type {
+  border-bottom: none;
+}
+
+.master-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.master-sub {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.master-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.master-actions .btn-icon {
+  font-size: 16px;
+  min-width: 28px;
+}
+
+.add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.add-row input,
+.add-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.add-row .btn {
+  flex-shrink: 0;
 }
 
 /* ---- チャット（10） ---- */
