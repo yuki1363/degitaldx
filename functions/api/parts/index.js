@@ -64,7 +64,7 @@ export async function onRequestPost({ env, data, request }) {
   const body = await readJson(request);
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
-  const { part_no, name, spec, unit, quantity, safety_stock, location, supplier, note } = body;
+  const { part_no, name, spec, unit, quantity, safety_stock, location, supplier, supplier_email, note } = body;
 
   if (!part_no || !name) {
     return jsonError(400, '部品番号（part_no）と部品名（name）は必須です。');
@@ -87,9 +87,9 @@ export async function onRequestPost({ env, data, request }) {
 
   const result = await DB.prepare(
     `INSERT INTO parts_inventory
-       (part_no, name, spec, unit, quantity, safety_stock, location, supplier, note,
+       (part_no, name, spec, unit, quantity, safety_stock, location, supplier, supplier_email, note,
         created_by, created_at, updated_by, updated_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?10, ?11)`
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?11, ?12)`
   )
     .bind(
       part_no,
@@ -100,6 +100,7 @@ export async function onRequestPost({ env, data, request }) {
       safety_stock ?? 0,
       location ?? null,
       supplier ?? null,
+      supplier_email ?? null,
       note ?? null,
       userEmail,
       now
@@ -113,7 +114,7 @@ export async function onRequestPost({ env, data, request }) {
     recordId: newId,
     action: 'create',
     changedBy: userEmail,
-    diff: { part_no, name, spec, unit, quantity, safety_stock, location, supplier, note },
+    diff: { part_no, name, spec, unit, quantity, safety_stock, location, supplier, supplier_email, note },
   });
 
   return json({ id: newId }, 201);

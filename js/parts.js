@@ -20,6 +20,86 @@ function showError(err) {
   render(app, el('p', { class: 'notice is-error' }, err.message || String(err)));
 }
 
+// ---------------- 発注（Outlook メール作成） ----------------
+
+// 発注メールの件名・本文を自動生成する。
+//   件名「【発注依頼】部品名」／本文は部品名・仕様・現在庫・安全在庫・希望発注数量。
+//   （部品番号・仕入先・依頼者は本文に含めない方針）
+function buildOrderEmail(part, orderQty) {
+  const subject = `【発注依頼】${part.name}`;
+  const body = [
+    '下記の部品の発注をお願いいたします。',
+    '',
+    `部品名: ${part.name}`,
+    part.spec ? `仕様: ${part.spec}` : null,
+    `現在庫: ${part.quantity} ${part.unit}`,
+    `安全在庫: ${part.safety_stock} ${part.unit}`,
+    `希望発注数量: ${orderQty} ${part.unit}`,
+    '',
+    'よろしくお願いいたします。',
+  ].filter((line) => line !== null).join('\n');
+  return { subject, body };
+}
+
+function isMobileDevice() {
+  return /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+}
+
+// PC は Outlook Web（Microsoft 365）の作成画面、スマホは Outlook アプリを開く
+function openInOutlook(to, subject, body) {
+  const t = encodeURIComponent(to || '');
+  const s = encodeURIComponent(subject);
+  const b = encodeURIComponent(body);
+  if (isMobileDevice()) {
+    window.location.href = `ms-outlook://compose?to=${t}&subject=${s}&body=${b}`;
+  } else {
+    window.open(`https://outlook.office.com/mail/deeplink/compose?to=${t}&subject=${s}&body=${b}`,
+      '_blank', 'noopener');
+  }
+}
+
+// 標準のメールアプリ（mailto）で開く — Outlook が開かない場合のフォールバック
+function openInMailto(to, subject, body) {
+  window.location.href =
+    `mailto:${encodeURIComponent(to || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+// 発注ダイアログ（宛先・希望数量・自動生成された本文プレビュー）
+function openOrderDialog(part) {
+  const shortfall = Math.max((part.safety_stock || 0) - (part.quantity || 0), 1);
+  const toInput = el('input', { type: 'email', value: part.supplier_email || '', placeholder: '発注先のメールアドレス' });
+  const qtyInput = el('input', { type: 'number', min: '1', value: String(shortfall), style: 'width:120px' });
+  const preview = el('textarea', { rows: '10', readonly: true });
+
+  const refresh = () => {
+    const qty = Math.max(parseInt(qtyInput.value, 10) || 1, 1);
+    const mail = buildOrderEmail(part, qty);
+    preview.value = `件名: ${mail.subject}\n\n${mail.body}`;
+    return mail;
+  };
+  qtyInput.addEventListener('input', refresh);
+
+  const backdrop = el('div', { class: 'modal-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+
+  const modal = el('div', { class: 'modal' }, [
+    el('h3', { class: 'modal-title' }, `発注メールの作成: ${part.name}`),
+    el('div', { class: 'field' }, [el('label', {}, '宛先メール'), toInput]),
+    el('div', { class: 'field' }, [el('label', {}, `希望発注数量（${part.unit}）`), qtyInput]),
+    el('div', { class: 'field' }, [el('label', {}, '本文プレビュー（自動生成）'), preview]),
+    el('p', { class: 'hint' }, 'PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
+    el('div', { class: 'modal-actions' }, [
+      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook(toInput.value.trim(), m.subject, m.body); } }, '📧 Outlookで作成'),
+      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto(toInput.value.trim(), m.subject, m.body); } }, 'メールアプリで開く'),
+      el('button', { class: 'btn', onclick: close }, '閉じる'),
+    ]),
+  ]);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  refresh();
+}
+
 // ---------------- 一覧 ----------------
 
 async function renderList() {
@@ -43,6 +123,16 @@ async function renderList() {
       listBox,
       parts.map((p) => {
         const isLow = p.quantity <= p.safety_stock;
+        // 要発注の部品には一覧から直接「発注」できるボタンを出す（editor 以上）
+        let orderBtn = null;
+        if (isLow && hasRole(currentUser, 'editor')) {
+          orderBtn = el('button', { class: 'btn btn-sm order-btn' }, '📧 発注');
+          orderBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openOrderDialog(p);
+          });
+        }
         return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
           el('div', { class: 'list-item-main' }, [
             el('div', { class: 'list-item-sub' }, p.part_no),
@@ -57,6 +147,7 @@ async function renderList() {
             el('span', { class: 'parts-qty-unit' }, p.unit),
             isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
           ]),
+          orderBtn,
           el('span', { class: 'chevron' }, '›'),
         ]);
       })
@@ -148,8 +239,14 @@ async function renderDetail(id) {
       infoRow('安全在庫', `${part.safety_stock} ${part.unit}`),
       infoRow('保管場所', part.location),
       infoRow('仕入先', part.supplier),
+      infoRow('仕入先メール', part.supplier_email),
       infoRow('備考', part.note),
     ]),
+    canEdit
+      ? el('div', { class: 'action-row' }, [
+          el('button', { class: isLow ? 'btn btn-primary' : 'btn', onclick: () => openOrderDialog(part) }, '📧 発注メールを作成'),
+        ])
+      : null,
     canEdit
       ? el('div', { class: 'card' }, [
           el('h3', { class: 'card-title' }, '在庫数を更新'),
@@ -212,6 +309,7 @@ async function renderForm(existing) {
     safety_stock: el('input', { type: 'number', min: '0', value: String(existing?.safety_stock ?? 0) }),
     location: el('input', { type: 'text', value: existing?.location || '', placeholder: '例: A棚3段目' }),
     supplier: el('input', { type: 'text', value: existing?.supplier || '' }),
+    supplier_email: el('input', { type: 'email', value: existing?.supplier_email || '', placeholder: '発注メールの宛先（任意）' }),
     note: el('textarea', { value: existing?.note || '' }),
   };
 
@@ -225,6 +323,7 @@ async function renderForm(existing) {
       safety_stock: parseInt(f.safety_stock.value, 10) || 0,
       location: f.location.value.trim() || null,
       supplier: f.supplier.value.trim() || null,
+      supplier_email: f.supplier_email.value.trim() || null,
       note: f.note.value.trim() || null,
     };
     if (!body.part_no || !body.name) { alert('部品番号と部品名は必須です。'); return; }
@@ -252,6 +351,7 @@ async function renderForm(existing) {
       el('div', { class: 'field' }, [el('label', {}, '安全在庫（発注アラート基準）'), f.safety_stock]),
       field('保管場所', f.location),
       field('仕入先', f.supplier),
+      field('仕入先メール（発注先）', f.supplier_email),
       field('備考', f.note),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),

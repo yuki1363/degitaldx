@@ -50,7 +50,7 @@ export async function onRequestPut({ env, data, params, request }) {
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   // quantity は transaction エンドポイント経由で更新するためここでは受け付けない
-  const { name, spec, unit, safety_stock, location, supplier, note } = body;
+  const { name, spec, unit, safety_stock, location, supplier, supplier_email, note } = body;
 
   if (name !== undefined && !name) {
     return jsonError(400, '部品名（name）は空にできません。');
@@ -58,22 +58,23 @@ export async function onRequestPut({ env, data, params, request }) {
 
   const now = nowIso();
 
-  const newName        = name        !== undefined ? name        : part.name;
-  const newSpec        = spec        !== undefined ? spec        : part.spec;
-  const newUnit        = unit        !== undefined ? unit        : part.unit;
-  const newSafetyStock = safety_stock !== undefined ? safety_stock : part.safety_stock;
-  const newLocation    = location    !== undefined ? location    : part.location;
-  const newSupplier    = supplier    !== undefined ? supplier    : part.supplier;
-  const newNote        = note        !== undefined ? note        : part.note;
+  const newName         = name          !== undefined ? name          : part.name;
+  const newSpec         = spec          !== undefined ? spec          : part.spec;
+  const newUnit         = unit          !== undefined ? unit          : part.unit;
+  const newSafetyStock  = safety_stock  !== undefined ? safety_stock  : part.safety_stock;
+  const newLocation     = location      !== undefined ? location      : part.location;
+  const newSupplier     = supplier      !== undefined ? supplier      : part.supplier;
+  const newSupplierEmail = supplier_email !== undefined ? supplier_email : part.supplier_email;
+  const newNote         = note          !== undefined ? note          : part.note;
 
   await DB.prepare(
     `UPDATE parts_inventory
         SET name = ?1, spec = ?2, unit = ?3, safety_stock = ?4,
-            location = ?5, supplier = ?6, note = ?7,
-            updated_by = ?8, updated_at = ?9
-      WHERE id = ?10`
+            location = ?5, supplier = ?6, supplier_email = ?7, note = ?8,
+            updated_by = ?9, updated_at = ?10
+      WHERE id = ?11`
   )
-    .bind(newName, newSpec, newUnit, newSafetyStock, newLocation, newSupplier, newNote, userEmail, now, id)
+    .bind(newName, newSpec, newUnit, newSafetyStock, newLocation, newSupplier, newSupplierEmail, newNote, userEmail, now, id)
     .run();
 
   // 変更差分を記録（変化したフィールドのみ）
@@ -84,6 +85,7 @@ export async function onRequestPut({ env, data, params, request }) {
   if (safety_stock !== undefined && safety_stock !== part.safety_stock) diff.safety_stock = { old: part.safety_stock, new: safety_stock };
   if (location    !== undefined && location    !== part.location)     diff.location    = { old: part.location,     new: location };
   if (supplier    !== undefined && supplier    !== part.supplier)     diff.supplier    = { old: part.supplier,     new: supplier };
+  if (supplier_email !== undefined && supplier_email !== part.supplier_email) diff.supplier_email = { old: part.supplier_email, new: supplier_email };
   if (note        !== undefined && note        !== part.note)         diff.note        = { old: part.note,         new: note };
 
   await writeAuditLog(DB, {
