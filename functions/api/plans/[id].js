@@ -28,7 +28,8 @@ export async function onRequestGet({ params, env }) {
 }
 
 export async function onRequestPut({ request, params, env, data }) {
-  requireRole(data.user, 'editor');
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
   const db = env.DB;
   const id = params.id;
 
@@ -90,7 +91,8 @@ export async function onRequestPut({ request, params, env, data }) {
 }
 
 export async function onRequestDelete({ params, env, data }) {
-  requireRole(data.user, 'editor');
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
   const db = env.DB;
   const id = params.id;
   const userEmail = data.user.email;

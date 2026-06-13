@@ -18,7 +18,8 @@ async function snapshotAll(db) {
 }
 
 export async function onRequestPut({ request, params, env, data }) {
-  requireRole(data.user, 'admin');
+  const denied = requireRole(data.user, 'admin');
+  if (denied) return denied;
   const db = env.DB;
   const cid = params.cid;
   const userEmail = data.user.email;
@@ -82,7 +83,8 @@ export async function onRequestPut({ request, params, env, data }) {
 }
 
 export async function onRequestDelete({ params, env, data }) {
-  requireRole(data.user, 'admin');
+  const denied = requireRole(data.user, 'admin');
+  if (denied) return denied;
   const db = env.DB;
   const cid = params.cid;
   const userEmail = data.user.email;

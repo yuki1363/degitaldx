@@ -54,7 +54,8 @@ export async function onRequestGet({ request, env }) {
 }
 
 export async function onRequestPost({ request, env, data }) {
-  requireRole(data.user, 'editor');
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
   const db = env.DB;
   const body = await readJson(request);
 
