@@ -35,6 +35,8 @@ export function parseEquipmentInput(body) {
     value: {
       code,
       name,
+      line_name: optional(body.line_name, 100),
+      equipment_name: optional(body.equipment_name, 100),
       location: optional(body.location, 100),
       manufacturer: optional(body.manufacturer, 100),
       model: optional(body.model, 100),
@@ -53,7 +55,7 @@ export async function onRequestGet({ request, env }) {
   if (q) {
     const like = `%${q}%`;
     stmt = env.DB.prepare(
-      `SELECT id, code, name, location, manufacturer, model, installed_on, status
+      `SELECT id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status
          FROM equipment_ledger
         WHERE deleted_at IS NULL
           AND (code LIKE ?1 OR name LIKE ?1 OR location LIKE ?1)
@@ -62,7 +64,7 @@ export async function onRequestGet({ request, env }) {
     ).bind(like);
   } else {
     stmt = env.DB.prepare(
-      `SELECT id, code, name, location, manufacturer, model, installed_on, status
+      `SELECT id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status
          FROM equipment_ledger
         WHERE deleted_at IS NULL
         ORDER BY code
@@ -89,11 +91,11 @@ export async function onRequestPost({ request, env, data }) {
 
   const result = await env.DB.prepare(
     `INSERT INTO equipment_ledger
-       (code, name, location, manufacturer, model, installed_on, status, note, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+       (code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note, created_by, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
   )
     .bind(
-      v.code, v.name, v.location, v.manufacturer, v.model,
+      v.code, v.name, v.line_name, v.equipment_name, v.location, v.manufacturer, v.model,
       v.installed_on, v.status, v.note, data.user.email, nowIso()
     )
     .run();

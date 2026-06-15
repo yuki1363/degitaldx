@@ -6,6 +6,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
+import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
 
 const PLAN_TYPES = {
@@ -173,24 +174,13 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
-  // 在庫から「設備名(line_name) → 機器名(equipment_name)」の対応を作る。
-  // 設備名を選ぶと、その設備に属する機器名が候補に出る（自由入力も可）。
-  const lineNames = new Set();
-  const allEquips = new Set();
-  const equipByLine = new Map(); // line_name -> Set(equipment_name)
-  try {
-    const { parts } = await api.get('/api/parts');
-    for (const p of parts || []) {
-      if (p.line_name) lineNames.add(p.line_name);
-      if (p.equipment_name) {
-        allEquips.add(p.equipment_name);
-        const key = p.line_name || '';
-        if (!equipByLine.has(key)) equipByLine.set(key, new Set());
-        equipByLine.get(key).add(p.equipment_name);
-      }
-    }
-  } catch { /* 候補なしでも続行 */ }
-  const sortJa = (arr) => [...arr].sort((a, b) => a.localeCompare(b, 'ja'));
+  // 設備名・機器名は全機能で共有の候補（在庫＋設備台帳）からカスケード入力する
+  const names = await fetchEquipNames();
+  const cascade = buildEquipCascade(names, {
+    line: existing?.line_name || '',
+    equip: existing?.equipment_name || '',
+    idPrefix: 'plan',
+  });
 
   const today = nowLocalInputValue().slice(0, 10);
 
@@ -202,34 +192,6 @@ async function renderForm(existing) {
   );
   const startInput = el('input', { type: 'date', value: existing?.planned_date || today });
   const endInput = el('input', { type: 'date', value: existing?.planned_end_date || '' });
-
-  // 設備: 在庫の「設備名」を選ぶと、その設備の「機器名」が候補に出るカスケード入力。
-  // どちらも datalist で自由入力もできる。
-  const lineListId = 'plan-line-options';
-  const equipListId = 'plan-equip-options';
-  const lineDatalist = el('datalist', { id: lineListId }, sortJa(lineNames).map((n) => el('option', { value: n })));
-  const equipDatalist = el('datalist', { id: equipListId }, []);
-  const lineInput = el('input', { type: 'text', list: lineListId, value: existing?.line_name || '', placeholder: '在庫の設備名から選択 / 自由入力' });
-  const equipInput = el('input', { type: 'text', list: equipListId, value: existing?.equipment_name || '', placeholder: '機器名を選択 / 自由入力' });
-
-  // 設備名を選ぶまでは機器名を入力不可にする（「設備名を選ばないと機器名が出ない」）。
-  // 設備名を選ぶと、その設備に属する機器名が候補に出る（在庫にない設備名なら候補なしの自由入力）。
-  const applyEquipState = (clearOnEmpty) => {
-    const line = lineInput.value.trim();
-    const set = equipByLine.get(line);
-    const list = set && set.size ? sortJa(set) : [];
-    render(equipDatalist, list.map((n) => el('option', { value: n })));
-    if (!line) {
-      if (clearOnEmpty) equipInput.value = '';
-      equipInput.disabled = true;
-      equipInput.placeholder = '先に設備名を選択してください';
-    } else {
-      equipInput.disabled = false;
-      equipInput.placeholder = list.length ? '機器名を選択 / 自由入力' : '機器名を入力';
-    }
-  };
-  lineInput.addEventListener('input', () => applyEquipState(true));
-  applyEquipState(false); // 初期化（既存の機器名は消さない）
 
   // 担当者: 既定は空欄（自由入力）
   const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });
@@ -250,8 +212,8 @@ async function renderForm(existing) {
       plan_type: typeSelect.value,
       planned_date: startInput.value,
       planned_end_date: endInput.value || null,
-      line_name: lineInput.value.trim() || null,
-      equipment_name: equipInput.value.trim() || null,
+      line_name: cascade.lineInput.value.trim() || null,
+      equipment_name: cascade.equipInput.value.trim() || null,
       assignee_name: assigneeInput.value.trim() || null,
       status: statusSelect.value,
       note: noteInput.value.trim() || null,
@@ -281,10 +243,10 @@ async function renderForm(existing) {
       field('種別', typeSelect),
       field('開始日（必須）', startInput),
       endField,
-      field('設備名', lineInput),
-      lineDatalist,
-      field('機器名', equipInput),
-      equipDatalist,
+      field('設備名', cascade.lineInput),
+      cascade.lineDatalist,
+      field('機器名', cascade.equipInput),
+      cascade.equipDatalist,
       field('担当者', assigneeInput),
       field('状態', statusSelect),
       field('備考', noteInput),

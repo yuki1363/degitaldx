@@ -596,6 +596,11 @@ ALTER TABLE maintenance_plan ADD COLUMN planned_end_date TEXT;  -- 終了日（N
 ALTER TABLE maintenance_plan ADD COLUMN equipment_name TEXT;    -- 機器名（自由入力＋在庫機器名の候補）
 ALTER TABLE maintenance_plan ADD COLUMN assignee_name TEXT;     -- 担当者名（自由入力）
 ALTER TABLE maintenance_plan ADD COLUMN line_name TEXT;         -- 設備名（自由入力＋在庫設備名の候補。機器名はこの設備で絞り込み）
+
+-- 設備台帳（06）: 在庫と共有する設備名・機器名を追加。
+--   設備名(line_name)・機器名(equipment_name)の候補は在庫＋設備台帳から横断的に集める（/api/equipment-names）。
+ALTER TABLE equipment_ledger ADD COLUMN line_name TEXT;       -- 設備名（在庫・台帳で共有）
+ALTER TABLE equipment_ledger ADD COLUMN equipment_name TEXT;  -- 機器名（在庫・台帳で共有）
 -- 既存データの設備名・担当者名を旧FKから引き継ぐ（未設定の行のみ・冪等）
 UPDATE maintenance_plan
    SET equipment_name = (SELECT name FROM equipment_ledger WHERE id = maintenance_plan.equipment_id)

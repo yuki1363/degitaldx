@@ -7,6 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
+import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import {
   el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS,
 } from '/js/util.js';
@@ -170,6 +171,8 @@ async function renderDetail(id) {
         el('span', { class: `status-badge is-${eq.status}` }, STATUS_LABELS[eq.status] || eq.status),
       ]),
       infoRow('設備番号', eq.code),
+      infoRow('設備名（共有）', eq.line_name),
+      infoRow('機器名（共有）', eq.equipment_name),
       infoRow('設置場所', eq.location),
       infoRow('メーカー', eq.manufacturer),
       infoRow('型式', eq.model),
@@ -257,6 +260,14 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
+  // 設備名・機器名の共有候補（在庫＋設備台帳）でカスケード入力を作る
+  const names = await fetchEquipNames();
+  const cascade = buildEquipCascade(names, {
+    line: existing?.line_name || '',
+    equip: existing?.equipment_name || '',
+    idPrefix: 'ledger',
+  });
+
   const f = {
     code: el('input', { type: 'text', value: existing ? existing.code : '', placeholder: '例: CP-001' }),
     name: el('input', { type: 'text', value: existing ? existing.name : '', placeholder: '例: 1号コンプレッサ' }),
@@ -276,6 +287,8 @@ async function renderForm(existing) {
     const body = {
       code: f.code.value.trim(),
       name: f.name.value.trim(),
+      line_name: cascade.lineInput.value.trim() || null,
+      equipment_name: cascade.equipInput.value.trim() || null,
       location: f.location.value.trim(),
       manufacturer: f.manufacturer.value.trim(),
       model: f.model.value.trim(),
@@ -305,6 +318,10 @@ async function renderForm(existing) {
       el('h2', { class: 'card-title' }, existing ? '設備を編集' : '設備を追加'),
       field('設備番号（必須・QRラベルに使用）', f.code),
       field('設備名（必須）', f.name),
+      field('設備名（共有・在庫/台帳から選択）', cascade.lineInput),
+      cascade.lineDatalist,
+      field('機器名（共有・設備名を選ぶと候補表示）', cascade.equipInput),
+      cascade.equipDatalist,
       field('設置場所', f.location),
       field('メーカー', f.manufacturer),
       field('型式', f.model),

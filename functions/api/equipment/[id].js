@@ -14,7 +14,7 @@ async function findEquipment(env, idParam) {
   const id = Number(idParam);
   if (!Number.isInteger(id) || id <= 0) return null;
   return env.DB.prepare(
-    `SELECT id, code, name, location, manufacturer, model, installed_on, status, note,
+    `SELECT id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note,
             created_by, created_at, updated_by, updated_at
        FROM equipment_ledger
       WHERE id = ?1 AND deleted_at IS NULL`
@@ -83,12 +83,12 @@ export async function onRequestPut({ request, env, data, params }) {
 
   await env.DB.prepare(
     `UPDATE equipment_ledger
-        SET code = ?1, name = ?2, location = ?3, manufacturer = ?4, model = ?5,
-            installed_on = ?6, status = ?7, note = ?8, updated_by = ?9, updated_at = ?10
-      WHERE id = ?11 AND deleted_at IS NULL`
+        SET code = ?1, name = ?2, line_name = ?3, equipment_name = ?4, location = ?5, manufacturer = ?6, model = ?7,
+            installed_on = ?8, status = ?9, note = ?10, updated_by = ?11, updated_at = ?12
+      WHERE id = ?13 AND deleted_at IS NULL`
   )
     .bind(
-      v.code, v.name, v.location, v.manufacturer, v.model,
+      v.code, v.name, v.line_name, v.equipment_name, v.location, v.manufacturer, v.model,
       v.installed_on, v.status, v.note, data.user.email, nowIso(), existing.id
     )
     .run();
