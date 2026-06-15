@@ -10,33 +10,23 @@ export async function onRequestGet({ request, env, data }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
   const month = sp.get('month');       // YYYY-MM
-  const equipmentId = sp.get('equipment_id');
 
+  // 設備名・担当者名は予定そのものに保存（自由入力）。旧FK用のJOINは廃止。
   let sql = `
-    SELECT
-      p.*,
-      u.name  AS assignee_name,
-      e.name  AS equipment_name,
-      e.code  AS equipment_code
+    SELECT p.*
     FROM maintenance_plan p
-    LEFT JOIN users           u ON p.assignee_id = u.id
-    LEFT JOIN equipment_ledger e ON p.equipment_id = e.id
     WHERE p.deleted_at IS NULL
   `;
   const binds = [];
 
   if (month) {
-    sql += ` AND p.planned_date >= ? AND p.planned_date < ?`;
+    // 期間が当月と重なる予定を取得（開始 < 翌月初日 かつ 終了 >= 当月初日）
     const [y, m] = month.split('-').map(Number);
     const start = `${month}-01`;
     const endDate = new Date(y, m, 1); // first day of next month
     const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-01`;
-    binds.push(start, end);
-  }
-
-  if (equipmentId) {
-    sql += ` AND p.equipment_id = ?`;
-    binds.push(equipmentId);
+    sql += ` AND p.planned_date < ? AND COALESCE(p.planned_end_date, p.planned_date) >= ?`;
+    binds.push(end, start);
   }
 
   sql += ` ORDER BY p.planned_date ASC, p.id ASC`;
@@ -53,11 +43,14 @@ export async function onRequestPost({ request, env, data }) {
   const db = env.DB;
   const body = await readJson(request);
 
-  const { title, planned_date, plan_type, equipment_id, recurrence_rule, assignee_id, status, note } = body;
+  const { title, planned_date, planned_end_date, plan_type, equipment_name, assignee_name, status, note } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
   if (!planned_date) return jsonError(400, 'planned_date は必須です');
   if (!PLAN_TYPES.includes(plan_type)) return jsonError(400, `plan_type は ${PLAN_TYPES.join('/')} のいずれかです`);
+  if (planned_end_date && planned_end_date < planned_date) {
+    return jsonError(400, '終了日は開始日以降にしてください');
+  }
 
   const resolvedStatus = STATUSES.includes(status) ? status : 'pending';
   const now = nowIso();
@@ -65,16 +58,16 @@ export async function onRequestPost({ request, env, data }) {
 
   const result = await db.prepare(`
     INSERT INTO maintenance_plan
-      (title, planned_date, plan_type, equipment_id, recurrence_rule, assignee_id, status, note,
+      (title, planned_date, planned_end_date, plan_type, equipment_name, assignee_name, status, note,
        created_by, created_at, updated_by, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     title.trim(),
     planned_date,
+    planned_end_date ?? null,
     plan_type,
-    equipment_id ?? null,
-    recurrence_rule ?? null,
-    assignee_id ?? null,
+    equipment_name?.trim() || null,
+    assignee_name?.trim() || null,
     resolvedStatus,
     note ?? null,
     userEmail,
@@ -90,7 +83,7 @@ export async function onRequestPost({ request, env, data }) {
     recordId: String(id),
     action: 'create',
     changedBy: userEmail,
-    diff: { title, planned_date, plan_type, equipment_id, recurrence_rule, assignee_id, status: resolvedStatus, note },
+    diff: { title, planned_date, planned_end_date, plan_type, equipment_name, assignee_name, status: resolvedStatus, note },
   });
 
   return json({ id }, 201);

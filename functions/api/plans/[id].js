@@ -7,15 +7,10 @@ const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
 
 async function getPlan(db, id) {
+  // 設備名・担当者名は予定に保存（自由入力）。旧FK用のJOINは廃止。
   return db.prepare(`
-    SELECT
-      p.*,
-      u.name  AS assignee_name,
-      e.name  AS equipment_name,
-      e.code  AS equipment_code
+    SELECT p.*
     FROM maintenance_plan p
-    LEFT JOIN users            u ON p.assignee_id = u.id
-    LEFT JOIN equipment_ledger e ON p.equipment_id = e.id
     WHERE p.id = ? AND p.deleted_at IS NULL
   `).bind(id).first();
 }
@@ -40,7 +35,15 @@ export async function onRequestPut({ request, params, env, data }) {
   const now = nowIso();
   const userEmail = data.user.email;
 
-  const UPDATABLE = ['title', 'planned_date', 'plan_type', 'equipment_id', 'recurrence_rule', 'assignee_id', 'status', 'note'];
+  // 期間の整合性チェック（終了日 < 開始日 はエラー）
+  const newStart = ('planned_date' in body) ? body.planned_date : existing.planned_date;
+  const newEnd = ('planned_end_date' in body) ? body.planned_end_date : existing.planned_end_date;
+  if (newEnd && newStart && newEnd < newStart) {
+    return jsonError(400, '終了日は開始日以降にしてください');
+  }
+
+  const UPDATABLE = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'equipment_name', 'assignee_name', 'status', 'note'];
+  const TRIM_FIELDS = new Set(['title', 'equipment_name', 'assignee_name']);
   const setClauses = [];
   const binds = [];
   const diff = {};
@@ -60,7 +63,7 @@ export async function onRequestPut({ request, params, env, data }) {
     }
 
     const oldValue = existing[field];
-    const newValue = (field === 'title') ? value.trim() : (value ?? null);
+    const newValue = TRIM_FIELDS.has(field) ? (value?.trim() || null) : (value ?? null);
     if (String(oldValue ?? '') !== String(newValue ?? '')) {
       diff[field] = { from: oldValue, to: newValue };
     }

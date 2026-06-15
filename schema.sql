@@ -588,3 +588,17 @@ ALTER TABLE parts_inventory ADD COLUMN importance TEXT;      -- 重要度（高/
 UPDATE parts_inventory SET model_no = part_no WHERE model_no IS NULL;
 -- 発注メール宛先（前回機能で追加済みの場合は duplicate column エラーを無視）
 ALTER TABLE parts_inventory ADD COLUMN supplier_email TEXT;
+
+-- 保全計画（01）: 期間指定・設備名/担当者の自由入力化（繰り返しは廃止）
+--   planned_end_date が NULL の予定は「1日のみ」。設定があれば planned_date〜planned_end_date の期間。
+--   equipment_name は在庫の設備名(line_name)を参照しつつ自由入力。assignee_name は登録者を自動入力。
+ALTER TABLE maintenance_plan ADD COLUMN planned_end_date TEXT;  -- 終了日（NULL=1日のみ）
+ALTER TABLE maintenance_plan ADD COLUMN equipment_name TEXT;    -- 設備名（自由入力＋在庫設備名の候補）
+ALTER TABLE maintenance_plan ADD COLUMN assignee_name TEXT;     -- 担当者名（自由入力＋自動入力）
+-- 既存データの設備名・担当者名を旧FKから引き継ぐ（未設定の行のみ・冪等）
+UPDATE maintenance_plan
+   SET equipment_name = (SELECT name FROM equipment_ledger WHERE id = maintenance_plan.equipment_id)
+ WHERE equipment_name IS NULL AND equipment_id IS NOT NULL;
+UPDATE maintenance_plan
+   SET assignee_name = (SELECT name FROM users WHERE id = maintenance_plan.assignee_id)
+ WHERE assignee_name IS NULL AND assignee_id IS NOT NULL;

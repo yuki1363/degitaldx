@@ -33,12 +33,12 @@ async function renderCalendar(year, month) {
   const monthStr = `${year}-${String(month).padStart(2, '0')}`;
   const { plans } = await api.get(`/api/plans?month=${monthStr}`);
 
-  // 日→予定リスト のマップ
-  const byDay = {};
-  for (const p of plans) {
-    const day = p.planned_date.slice(8, 10);
-    (byDay[day] || (byDay[day] = [])).push(p);
-  }
+  // 期間予定（planned_end_date あり）は開始〜終了の各日に表示する
+  const inRange = (p, fullDate) => {
+    const s = p.planned_date.slice(0, 10);
+    const e = (p.planned_end_date || p.planned_date).slice(0, 10);
+    return s <= fullDate && fullDate <= e;
+  };
 
   const firstDay = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -53,7 +53,7 @@ async function renderCalendar(year, month) {
   for (let d = 1; d <= daysInMonth; d++) {
     const dayStr = String(d).padStart(2, '0');
     const fullDate = `${year}-${String(month).padStart(2, '0')}-${dayStr}`;
-    const dayPlans = byDay[dayStr] || [];
+    const dayPlans = plans.filter((p) => inRange(p, fullDate));
     const isToday = fullDate === todayStr;
     cells.push(
       el('div', { class: `cal-cell${isToday ? ' is-today' : ''}` }, [
@@ -130,10 +130,14 @@ async function renderDetail(id) {
         }, type.label),
       ]),
       infoRow('状態', STATUS_LABELS[plan.status] || plan.status),
-      infoRow('予定日', formatDate(plan.planned_date)),
-      infoRow('設備', plan.equipment_name ? `${plan.equipment_code} ${plan.equipment_name}` : null),
+      infoRow(
+        plan.planned_end_date && plan.planned_end_date !== plan.planned_date ? '期間' : '予定日',
+        plan.planned_end_date && plan.planned_end_date !== plan.planned_date
+          ? `${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)}`
+          : formatDate(plan.planned_date)
+      ),
+      infoRow('設備', plan.equipment_name),
       infoRow('担当者', plan.assignee_name),
-      infoRow('繰り返し', plan.recurrence_rule),
       infoRow('備考', plan.note),
     ]),
     canEdit
@@ -168,53 +172,73 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
-  const [{ results: equipmentList }, { results: userList }] = await Promise.all([
-    api.get('/api/equipment').then((r) => ({ results: r.equipment })),
-    api.get('/api/users').then((r) => ({ results: r.users })),
-  ]);
+  // 設備名の入力候補に在庫の設備名(line_name)を使う（候補が取れなくても自由入力で続行）
+  let lineNames = [];
+  try {
+    const { parts } = await api.get('/api/parts');
+    lineNames = [...new Set((parts || []).map((p) => p.line_name).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+  } catch { /* 候補なしでも続行 */ }
 
-  const f = {
-    title: el('input', { type: 'text', value: existing?.title || '', placeholder: '例: 1号機 月次点検' }),
-    plan_type: el('select', {},
-      Object.entries(PLAN_TYPES).map(([value, { label }]) =>
-        el('option', { value, selected: (existing?.plan_type || 'inspection') === value }, label)
-      )
-    ),
-    planned_date: el('input', { type: 'date', value: existing?.planned_date || nowLocalInputValue().slice(0, 10) }),
-    equipment_id: el('select', {},
-      [el('option', { value: '' }, '— 設備を選択（任意）'),
-      ...equipmentList.map((e) =>
-        el('option', { value: e.id, selected: existing?.equipment_id === e.id }, `${e.code} ${e.name}`)
-      )]
-    ),
-    assignee_id: el('select', {},
-      [el('option', { value: '' }, '— 担当者を選択（任意）'),
-      ...userList.map((u) =>
-        el('option', { value: u.id, selected: existing?.assignee_id === u.id }, u.name || u.email)
-      )]
-    ),
-    status: el('select', {},
-      Object.entries(STATUS_LABELS).map(([value, label]) =>
-        el('option', { value, selected: (existing?.status || 'pending') === value }, label)
-      )
-    ),
-    recurrence_rule: el('input', { type: 'text', value: existing?.recurrence_rule || '', placeholder: '例: monthly / yearly / every:30' }),
-    note: el('textarea', { value: existing?.note || '' }),
-  };
+  const today = nowLocalInputValue().slice(0, 10);
+  const isRange = !!existing?.planned_end_date;
+
+  const titleInput = el('input', { type: 'text', value: existing?.title || '', placeholder: '例: 1号機 月次点検' });
+  const typeSelect = el('select', {},
+    Object.entries(PLAN_TYPES).map(([value, { label }]) =>
+      el('option', { value, selected: (existing?.plan_type || 'inspection') === value }, label)
+    )
+  );
+  const startInput = el('input', { type: 'date', value: existing?.planned_date || today });
+  const endInput = el('input', { type: 'date', value: existing?.planned_end_date || '' });
+  const rangeChk = el('input', { type: 'checkbox', checked: isRange });
+
+  // 設備名: 在庫の設備名を候補に出しつつ自由入力できる datalist
+  const datalistId = 'plan-equip-options';
+  const datalist = el('datalist', { id: datalistId }, lineNames.map((n) => el('option', { value: n })));
+  const equipInput = el('input', { type: 'text', list: datalistId, value: existing?.equipment_name || '', placeholder: '在庫の設備名から選択 / 自由入力' });
+
+  // 担当者: 新規時は現在のユーザー名を自動入力（編集可）
+  const defaultAssignee = currentUser?.name || currentUser?.email || '';
+  const assigneeInput = el('input', { type: 'text', value: existing ? (existing.assignee_name || '') : defaultAssignee, placeholder: '担当者名' });
+
+  const statusSelect = el('select', {},
+    Object.entries(STATUS_LABELS).map(([value, label]) =>
+      el('option', { value, selected: (existing?.status || 'pending') === value }, label)
+    )
+  );
+  const noteInput = el('textarea', { value: existing?.note || '' });
+
+  // 「期間にする」チェックで終了日フィールドの表示を切り替える
+  const endField = field('終了日', endInput);
+  endField.style.display = isRange ? '' : 'none';
+  rangeChk.addEventListener('change', () => {
+    endField.style.display = rangeChk.checked ? '' : 'none';
+    if (rangeChk.checked && !endInput.value) endInput.value = startInput.value;
+  });
+  const rangeField = el('div', { class: 'field' }, [
+    el('label', { style: 'display:flex;align-items:center;gap:8px;cursor:pointer' }, [
+      rangeChk,
+      el('span', {}, '期間（複数日）にする'),
+    ]),
+  ]);
 
   const save = async () => {
     const body = {
-      title: f.title.value.trim(),
-      plan_type: f.plan_type.value,
-      planned_date: f.planned_date.value,
-      equipment_id: f.equipment_id.value ? Number(f.equipment_id.value) : null,
-      assignee_id: f.assignee_id.value ? Number(f.assignee_id.value) : null,
-      status: f.status.value,
-      recurrence_rule: f.recurrence_rule.value.trim() || null,
-      note: f.note.value.trim() || null,
+      title: titleInput.value.trim(),
+      plan_type: typeSelect.value,
+      planned_date: startInput.value,
+      planned_end_date: rangeChk.checked ? (endInput.value || null) : null,
+      equipment_name: equipInput.value.trim() || null,
+      assignee_name: assigneeInput.value.trim() || null,
+      status: statusSelect.value,
+      note: noteInput.value.trim() || null,
     };
     if (!body.title) { alert('タイトルは必須です。'); return; }
-    if (!body.planned_date) { alert('予定日は必須です。'); return; }
+    if (!body.planned_date) { alert('開始日は必須です。'); return; }
+    if (body.planned_end_date && body.planned_end_date < body.planned_date) {
+      alert('終了日は開始日以降にしてください。'); return;
+    }
     try {
       if (existing) {
         await api.put(`/api/plans/${existing.id}`, body);
@@ -231,14 +255,16 @@ async function renderForm(existing) {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '予定を編集' : '予定を追加'),
-      field('タイトル（必須）', f.title),
-      field('種別', f.plan_type),
-      field('予定日（必須）', f.planned_date),
-      field('設備', f.equipment_id),
-      field('担当者', f.assignee_id),
-      field('状態', f.status),
-      field('繰り返し', f.recurrence_rule),
-      field('備考', f.note),
+      field('タイトル（必須）', titleInput),
+      field('種別', typeSelect),
+      field('開始日（必須）', startInput),
+      rangeField,
+      endField,
+      field('設備', equipInput),
+      datalist,
+      field('担当者', assigneeInput),
+      field('状態', statusSelect),
+      field('備考', noteInput),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', {
