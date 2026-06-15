@@ -108,22 +108,35 @@ function openOrderDialog(part) {
 
 // ---------------- 一覧 ----------------
 
-const ALL_LINES = '__ALL__'; // 設備セレクタの「すべての設備を表示」を表す内部値
+const ALL_LINES = '__ALL__';  // 設備セレクタの「すべての設備を表示」を表す内部値
+const ALL_EQUIPS = '__ALL__'; // 機器セレクタの「すべての機器」を表す内部値
 
 async function renderList() {
   let filterLow = false;
   let searchQuery = '';
-  let selectedLine = ''; // 設備名フィルタ（空 = 未選択／プロンプト表示）
+  let selectedLine = '';  // 設備名フィルタ（空 = 未選択／プロンプト表示）
+  let selectedEquip = ''; // 機器名フィルタ（設備選択後に有効。ALL_EQUIPS = その設備の全機器）
   let allParts = [];
   let timer = null;
 
   const listBox = el('div', { class: 'row-list' }, []);
 
-  // 設備名で表示を絞り込むセレクタ（1ページに全部出さず、選んだ設備だけ見る）
+  // 設備名 → 機器名の2段階で表示を絞り込むセレクタ
+  // 設備を選ぶと機器セレクタが有効になり、選んだ機器の部品だけを表示する
   const lineSelect = el('select', {
     class: 'parts-line-select',
-    onchange: (e) => { selectedLine = e.target.value; renderParts(); },
-  }, [el('option', { value: '' }, 'すべての設備')]);
+    onchange: (e) => {
+      selectedLine = e.target.value;
+      selectedEquip = ALL_EQUIPS; // 設備を変えたら機器は「すべての機器」に戻す
+      refreshEquipOptions();
+      renderParts();
+    },
+  }, [el('option', { value: '' }, '設備を選択してください')]);
+
+  const equipSelect = el('select', {
+    class: 'parts-line-select',
+    onchange: (e) => { selectedEquip = e.target.value; renderParts(); },
+  }, [el('option', { value: '' }, '（設備を選択）')]);
 
   // 部品1件分の行を生成（発注ボタン・削除ボタンは editor 以上）
   const makePartRow = (p) => {
@@ -137,8 +150,15 @@ async function renderList() {
         openOrderDialog(p);
       });
     }
+    let editBtn = null;
     let delBtn = null;
     if (hasRole(currentUser, 'editor')) {
+      editBtn = el('button', { class: 'btn btn-sm row-edit-btn', title: '編集' }, '✏️');
+      editBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        go(`?edit=${p.id}`);
+      });
       delBtn = el('button', { class: 'btn btn-sm row-del-btn', title: '削除' }, '🗑');
       delBtn.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -165,13 +185,15 @@ async function renderList() {
         isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
       ]),
       orderBtn,
+      editBtn,
       delBtn,
       el('span', { class: 'chevron' }, '›'),
     ]);
   };
 
-  // allParts を「選択中の設備」で絞り込み → 設備名→機器名でグループ化して描画。
+  // allParts を「設備 → 機器」の2段階で絞り込み → 設備名→機器名でグループ化して描画。
   //   ・設備未選択（初期状態）で検索も要発注フィルタも無ければ、選択を促すだけで一覧は出さない
+  //   ・設備を選ぶとその設備の部品を表示。機器を選ぶとさらにその機器だけに絞り込む
   //   ・「すべての設備を表示」を選んだとき、または検索/要発注フィルタ中は全件を出す
   const renderParts = () => {
     const hasQuery = !!(searchQuery || filterLow);
@@ -180,6 +202,10 @@ async function renderList() {
       parts = allParts;
     } else if (selectedLine) {
       parts = allParts.filter((p) => (p.line_name || '') === selectedLine);
+      // 機器でさらに絞り込み（「すべての機器」以外を選んでいるとき）
+      if (selectedEquip !== ALL_EQUIPS) {
+        parts = parts.filter((p) => (p.equipment_name || '') === selectedEquip);
+      }
     } else if (hasQuery) {
       parts = allParts;
     } else {
@@ -225,6 +251,30 @@ async function renderList() {
     else { selectedLine = ''; lineSelect.value = ''; }
   };
 
+  // 機器セレクタの選択肢を「選択中の設備」に属する機器から更新する。
+  //   設備が未選択／すべての設備のときは機器セレクタを無効化する。
+  const refreshEquipOptions = () => {
+    if (!selectedLine || selectedLine === ALL_LINES) {
+      render(equipSelect, [el('option', { value: '' }, '（設備を選択）')]);
+      equipSelect.value = '';
+      equipSelect.disabled = true;
+      return;
+    }
+    equipSelect.disabled = false;
+    const equips = [...new Set(
+      allParts
+        .filter((p) => (p.line_name || '') === selectedLine)
+        .map((p) => p.equipment_name || '')
+    )].sort((a, b) => a.localeCompare(b, 'ja'));
+    render(equipSelect, [
+      el('option', { value: ALL_EQUIPS }, 'すべての機器'),
+      ...equips.map((eq) => el('option', { value: eq }, eq || '（機器未設定）')),
+    ]);
+    const valid = [ALL_EQUIPS, ...equips];
+    if (!valid.includes(selectedEquip)) selectedEquip = ALL_EQUIPS;
+    equipSelect.value = selectedEquip;
+  };
+
   const load = async () => {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
     const params = new URLSearchParams();
@@ -233,6 +283,7 @@ async function renderList() {
     const { parts } = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
     allParts = parts;
     refreshLineOptions();
+    refreshEquipOptions();
     renderParts();
   };
 
@@ -256,9 +307,15 @@ async function renderList() {
   }, '全部品');
 
   render(app, [
-    el('div', { class: 'field', style: 'margin-bottom:10px' }, [
-      el('label', {}, '設備で絞り込み'),
-      lineSelect,
+    el('div', { class: 'field-pair', style: 'margin-bottom:10px' }, [
+      el('div', { class: 'field' }, [
+        el('label', {}, '設備で絞り込み'),
+        lineSelect,
+      ]),
+      el('div', { class: 'field' }, [
+        el('label', {}, '機器で絞り込み'),
+        equipSelect,
+      ]),
     ]),
     el('div', { class: 'toolbar' }, [
       searchInput,

@@ -1607,6 +1607,14 @@ input.is-abnormal {
   color: var(--color-primary);
 }
 
+/* 在庫一覧から直接編集するボタン */
+.row-edit-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
 /* 在庫一覧から直接削除するボタン */
 .row-del-btn {
   flex-shrink: 0;
