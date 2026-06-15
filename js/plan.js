@@ -181,7 +181,6 @@ async function renderForm(existing) {
   } catch { /* 候補なしでも続行 */ }
 
   const today = nowLocalInputValue().slice(0, 10);
-  const isRange = !!existing?.planned_end_date;
 
   const titleInput = el('input', { type: 'text', value: existing?.title || '', placeholder: '例: 1号機 月次点検' });
   const typeSelect = el('select', {},
@@ -191,7 +190,6 @@ async function renderForm(existing) {
   );
   const startInput = el('input', { type: 'date', value: existing?.planned_date || today });
   const endInput = el('input', { type: 'date', value: existing?.planned_end_date || '' });
-  const rangeChk = el('input', { type: 'checkbox', checked: isRange });
 
   // 設備名: 在庫の設備名を候補に出しつつ自由入力できる datalist
   const datalistId = 'plan-equip-options';
@@ -209,26 +207,15 @@ async function renderForm(existing) {
   );
   const noteInput = el('textarea', { value: existing?.note || '' });
 
-  // 「期間にする」チェックで終了日フィールドの表示を切り替える
-  const endField = field('終了日', endInput);
-  endField.style.display = isRange ? '' : 'none';
-  rangeChk.addEventListener('change', () => {
-    endField.style.display = rangeChk.checked ? '' : 'none';
-    if (rangeChk.checked && !endInput.value) endInput.value = startInput.value;
-  });
-  const rangeField = el('div', { class: 'field' }, [
-    el('label', { style: 'display:flex;align-items:center;gap:8px;cursor:pointer' }, [
-      rangeChk,
-      el('span', {}, '期間（複数日）にする'),
-    ]),
-  ]);
+  // 終了日は常に表示。空なら「1日のみ」、入力すれば「開始日〜終了日」の期間になる
+  const endField = field('終了日（空欄なら1日のみ）', endInput);
 
   const save = async () => {
     const body = {
       title: titleInput.value.trim(),
       plan_type: typeSelect.value,
       planned_date: startInput.value,
-      planned_end_date: rangeChk.checked ? (endInput.value || null) : null,
+      planned_end_date: endInput.value || null,
       equipment_name: equipInput.value.trim() || null,
       assignee_name: assigneeInput.value.trim() || null,
       status: statusSelect.value,
@@ -258,7 +245,6 @@ async function renderForm(existing) {
       field('タイトル（必須）', titleInput),
       field('種別', typeSelect),
       field('開始日（必須）', startInput),
-      rangeField,
       endField,
       field('設備', equipInput),
       datalist,
