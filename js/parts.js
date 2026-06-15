@@ -111,52 +111,73 @@ function openOrderDialog(part) {
 async function renderList() {
   let filterLow = false;
   let searchQuery = '';
+  let selectedLine = ''; // 設備名フィルタ（空 = すべての設備）
+  let allParts = [];
   let timer = null;
 
   const listBox = el('div', { class: 'row-list' }, []);
 
-  const load = async () => {
-    render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
-    const params = new URLSearchParams();
-    if (searchQuery) params.set('q', searchQuery);
-    if (filterLow) params.set('low_stock', '1');
-    const { parts } = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
+  // 設備名で表示を絞り込むセレクタ（1ページに全部出さず、選んだ設備だけ見る）
+  const lineSelect = el('select', {
+    class: 'parts-line-select',
+    onchange: (e) => { selectedLine = e.target.value; renderParts(); },
+  }, [el('option', { value: '' }, 'すべての設備')]);
+
+  // 部品1件分の行を生成（発注ボタン・削除ボタンは editor 以上）
+  const makePartRow = (p) => {
+    const isLow = p.quantity < p.safety_stock;
+    let orderBtn = null;
+    if (isLow && hasRole(currentUser, 'editor')) {
+      orderBtn = el('button', { class: 'btn btn-sm order-btn' }, '📧 発注');
+      orderBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openOrderDialog(p);
+      });
+    }
+    let delBtn = null;
+    if (hasRole(currentUser, 'editor')) {
+      delBtn = el('button', { class: 'btn btn-sm row-del-btn', title: '削除' }, '🗑');
+      delBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!confirm(`「${p.name}」を削除しますか？`)) return;
+        try {
+          await api.del(`/api/parts/${p.id}`);
+          await load();
+        } catch (err) { alert(err.message); }
+      });
+    }
+    const sub = [
+      p.model_no ? `型番: ${p.model_no}` : '',
+      p.location ? `場所: ${p.location}` : '',
+    ].filter(Boolean).join(' / ');
+    return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
+      el('div', { class: 'list-item-main' }, [
+        el('div', { class: 'list-item-title' }, [p.name, importanceBadge(p.importance)]),
+        sub ? el('div', { class: 'list-item-sub' }, sub) : null,
+      ]),
+      el('div', { class: 'parts-qty', style: isLow ? 'color:#dc2626;font-weight:700' : '' }, [
+        el('span', { class: 'parts-qty-num' }, String(p.quantity)),
+        el('span', { class: 'parts-qty-unit' }, `/ 必要 ${p.safety_stock}`),
+        isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
+      ]),
+      orderBtn,
+      delBtn,
+      el('span', { class: 'chevron' }, '›'),
+    ]);
+  };
+
+  // allParts を「選択中の設備」で絞り込み → 設備名→機器名でグループ化して描画
+  const renderParts = () => {
+    const parts = selectedLine
+      ? allParts.filter((p) => (p.line_name || '') === selectedLine)
+      : allParts;
     if (parts.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
       return;
     }
-
-    const makePartRow = (p) => {
-      const isLow = p.quantity < p.safety_stock;
-      let orderBtn = null;
-      if (isLow && hasRole(currentUser, 'editor')) {
-        orderBtn = el('button', { class: 'btn btn-sm order-btn' }, '📧 発注');
-        orderBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          openOrderDialog(p);
-        });
-      }
-      const sub = [
-        p.model_no ? `型番: ${p.model_no}` : '',
-        p.location ? `場所: ${p.location}` : '',
-      ].filter(Boolean).join(' / ');
-      return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
-        el('div', { class: 'list-item-main' }, [
-          el('div', { class: 'list-item-title' }, [p.name, importanceBadge(p.importance)]),
-          sub ? el('div', { class: 'list-item-sub' }, sub) : null,
-        ]),
-        el('div', { class: 'parts-qty', style: isLow ? 'color:#dc2626;font-weight:700' : '' }, [
-          el('span', { class: 'parts-qty-num' }, String(p.quantity)),
-          el('span', { class: 'parts-qty-unit' }, `/ 必要 ${p.safety_stock}`),
-          isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
-        ]),
-        orderBtn,
-        el('span', { class: 'chevron' }, '›'),
-      ]);
-    };
-
-    // ライン名 → 機器名でグループ化（APIは line_name, equipment_name, name 順でソート済み）
+    // 設備名 → 機器名でグループ化（APIは line_name, equipment_name, name 順でソート済み）
     const lineMap = new Map();
     for (const p of parts) {
       const line = p.line_name || '';
@@ -166,7 +187,6 @@ async function renderList() {
       if (!equipMap.has(equip)) equipMap.set(equip, []);
       equipMap.get(equip).push(p);
     }
-
     const nodes = [];
     for (const [line, equipMap] of lineMap) {
       nodes.push(el('div', { class: 'group-header-line' }, line || '（設備未設定）'));
@@ -176,6 +196,29 @@ async function renderList() {
       }
     }
     render(listBox, nodes);
+  };
+
+  // 設備セレクタの選択肢を現在のデータから更新（選択は維持。消えていたら「すべて」へ）
+  const refreshLineOptions = () => {
+    const lines = [...new Set(allParts.map((p) => p.line_name || '').filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+    render(lineSelect, [
+      el('option', { value: '' }, `すべての設備（${allParts.length}件）`),
+      ...lines.map((l) => el('option', { value: l }, l)),
+    ]);
+    if (lines.includes(selectedLine)) lineSelect.value = selectedLine;
+    else { selectedLine = ''; lineSelect.value = ''; }
+  };
+
+  const load = async () => {
+    render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('q', searchQuery);
+    if (filterLow) params.set('low_stock', '1');
+    const { parts } = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
+    allParts = parts;
+    refreshLineOptions();
+    renderParts();
   };
 
   const searchInput = el('input', {
@@ -198,6 +241,10 @@ async function renderList() {
   }, '全部品');
 
   render(app, [
+    el('div', { class: 'field', style: 'margin-bottom:10px' }, [
+      el('label', {}, '設備で絞り込み'),
+      lineSelect,
+    ]),
     el('div', { class: 'toolbar' }, [
       searchInput,
       lowToggle,
@@ -507,13 +554,17 @@ async function renderImport() {
       return obj;
     }).filter((r) => r.name);
 
+    if (rows.length === 0) { alert('取り込める行がありません（部品名が必須です）。'); return; }
+    // 全置き換え（破壊的）なので取込前に確認する
+    if (!confirm(`既存の部品データをすべて削除し、CSV ${rows.length}件で置き換えます。\nこの操作は元に戻せます（削除済みデータから復元可能）が、現在の在庫数は上書きされます。\n実行しますか？`)) return;
+
     importBtn.disabled = true;
     importBtn.textContent = '取込中…';
     try {
       const result = await api.post('/api/parts/import', { rows });
       render(resultBox, [
         el('div', { class: 'notice' }, [
-          el('p', {}, `✅ 取込完了: 新規${result.inserted}件 / スキップ${result.skipped}件`),
+          el('p', {}, `✅ 全置き換え完了: 既存${result.deleted ?? 0}件を削除 → 新規${result.inserted}件を登録（スキップ${result.skipped}件）`),
           result.errors?.length > 0
             ? el('ul', {}, result.errors.slice(0, 10).map((e) =>
                 el('li', { style: 'font-size:12px;color:#dc2626' }, `行${e.row}: ${e.reason}`)
@@ -551,8 +602,9 @@ async function renderImport() {
 
   render(app, [
     el('div', { class: 'card' }, [
-      el('h2', { class: 'card-title' }, 'CSVインポート'),
-      el('p', { class: 'hint' }, '1行目をヘッダー行とするCSVファイルを選択してください（UTF-8 / Shift_JIS 両対応）。各行は新規登録され、CSVにない項目は空欄で取り込みます（部品名のみ必須）。'),
+      el('h2', { class: 'card-title' }, 'CSVインポート（全置き換え）'),
+      el('p', { class: 'notice is-error', style: 'margin-bottom:8px' }, '⚠ 既存の部品データはすべて置き換えられます。CSVの内容が新しい正データになります（現在の在庫数も上書き）。'),
+      el('p', { class: 'hint' }, '1行目をヘッダー行とするCSVファイルを選択してください（UTF-8 / Shift_JIS 両対応）。CSVにない項目は空欄で取り込みます（部品名のみ必須）。'),
       el('div', { class: 'field' }, [
         el('label', {}, 'CSVファイル'),
         fileInput,

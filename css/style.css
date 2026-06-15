@@ -1607,6 +1607,22 @@ input.is-abnormal {
   color: var(--color-primary);
 }
 
+/* 在庫一覧から直接削除するボタン */
+.row-del-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* 設備で絞り込むセレクタ（一覧上部） */
+.parts-line-select {
+  width: 100%;
+  min-height: 40px;
+}
+
 /* 部品の重要度バッジ（高/中/低） */
 .imp-badge {
   display: inline-block;
