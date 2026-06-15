@@ -110,6 +110,7 @@ function openOrderDialog(part) {
 
 const ALL_LINES = '__ALL__';  // 設備セレクタの「すべての設備を表示」を表す内部値
 const ALL_EQUIPS = '__ALL__'; // 機器セレクタの「すべての機器」を表す内部値
+const NO_EQUIP = '__NONE__';  // 機器名が空の部品（機器未設定）を表す内部値
 
 async function renderList() {
   let filterLow = false;
@@ -127,7 +128,7 @@ async function renderList() {
     class: 'parts-line-select',
     onchange: (e) => {
       selectedLine = e.target.value;
-      selectedEquip = ALL_EQUIPS; // 設備を変えたら機器は「すべての機器」に戻す
+      selectedEquip = ''; // 設備を変えたら機器は未選択に戻す（機器を選ぶまで表示しない）
       refreshEquipOptions();
       renderParts();
     },
@@ -191,32 +192,13 @@ async function renderList() {
     ]);
   };
 
-  // allParts を「設備 → 機器」の2段階で絞り込み → 設備名→機器名でグループ化して描画。
-  //   ・設備未選択（初期状態）で検索も要発注フィルタも無ければ、選択を促すだけで一覧は出さない
-  //   ・設備を選ぶとその設備の部品を表示。機器を選ぶとさらにその機器だけに絞り込む
-  //   ・「すべての設備を表示」を選んだとき、または検索/要発注フィルタ中は全件を出す
-  const renderParts = () => {
-    const hasQuery = !!(searchQuery || filterLow);
-    let parts;
-    if (selectedLine === ALL_LINES) {
-      parts = allParts;
-    } else if (selectedLine) {
-      parts = allParts.filter((p) => (p.line_name || '') === selectedLine);
-      // 機器でさらに絞り込み（「すべての機器」以外を選んでいるとき）
-      if (selectedEquip !== ALL_EQUIPS) {
-        parts = parts.filter((p) => (p.equipment_name || '') === selectedEquip);
-      }
-    } else if (hasQuery) {
-      parts = allParts;
-    } else {
-      render(listBox, el('p', { class: 'empty' }, '上の「設備で絞り込み」から設備を選んでください（「すべての設備を表示」で全件表示）。'));
-      return;
-    }
+  // 部品配列を 設備名→機器名 でグループ化して listBox に描画する
+  //   （APIは line_name, equipment_name, name 順でソート済み）
+  const renderGroups = (parts) => {
     if (parts.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
       return;
     }
-    // 設備名 → 機器名でグループ化（APIは line_name, equipment_name, name 順でソート済み）
     const lineMap = new Map();
     for (const p of parts) {
       const line = p.line_name || '';
@@ -237,6 +219,34 @@ async function renderList() {
     render(listBox, nodes);
   };
 
+  // 表示する部品を「設備 → 機器」の2段階選択で決める。
+  //   ・検索キーワードがあるときは、選択に関係なく該当部品を全件表示（名前で探す用途）
+  //   ・設備未選択: 要発注フィルタ中のみ全件、それ以外は設備選択を促す
+  //   ・設備を選んでも、機器を選ぶまでは部品を表示しない（「すべての機器」で設備全件）
+  const renderParts = () => {
+    if (searchQuery) { renderGroups(allParts); return; }
+
+    if (!selectedLine) {
+      if (filterLow) { renderGroups(allParts); return; }
+      render(listBox, el('p', { class: 'empty' }, '「設備で絞り込み」から設備を選んでください（「すべての設備を表示」で全件表示）。'));
+      return;
+    }
+    if (selectedLine === ALL_LINES) { renderGroups(allParts); return; }
+
+    // 設備は選択済み。機器を選ぶまでデータは表示しない
+    if (!selectedEquip) {
+      render(listBox, el('p', { class: 'empty' }, '「機器で絞り込み」から機器を選んでください（「すべての機器」でこの設備の全件表示）。'));
+      return;
+    }
+    let parts = allParts.filter((p) => (p.line_name || '') === selectedLine);
+    if (selectedEquip === NO_EQUIP) {
+      parts = parts.filter((p) => (p.equipment_name || '') === '');
+    } else if (selectedEquip !== ALL_EQUIPS) {
+      parts = parts.filter((p) => (p.equipment_name || '') === selectedEquip);
+    }
+    renderGroups(parts);
+  };
+
   // 設備セレクタの選択肢を現在のデータから更新（選択は維持。消えていたら未選択へ戻す）
   const refreshLineOptions = () => {
     const lines = [...new Set(allParts.map((p) => p.line_name || '').filter(Boolean))]
@@ -253,6 +263,7 @@ async function renderList() {
 
   // 機器セレクタの選択肢を「選択中の設備」に属する機器から更新する。
   //   設備が未選択／すべての設備のときは機器セレクタを無効化する。
+  //   機器を選ぶまではデータを出さないため、初期値は未選択（プロンプト）にする。
   const refreshEquipOptions = () => {
     if (!selectedLine || selectedLine === ALL_LINES) {
       render(equipSelect, [el('option', { value: '' }, '（設備を選択）')]);
@@ -266,12 +277,15 @@ async function renderList() {
         .filter((p) => (p.line_name || '') === selectedLine)
         .map((p) => p.equipment_name || '')
     )].sort((a, b) => a.localeCompare(b, 'ja'));
+    // 機器名が空の部品はセンチネル値 NO_EQUIP で扱う（未選択の '' と区別するため）
+    const optValue = (eq) => (eq === '' ? NO_EQUIP : eq);
     render(equipSelect, [
+      el('option', { value: '' }, '機器を選択してください'),
       el('option', { value: ALL_EQUIPS }, 'すべての機器'),
-      ...equips.map((eq) => el('option', { value: eq }, eq || '（機器未設定）')),
+      ...equips.map((eq) => el('option', { value: optValue(eq) }, eq || '（機器未設定）')),
     ]);
-    const valid = [ALL_EQUIPS, ...equips];
-    if (!valid.includes(selectedEquip)) selectedEquip = ALL_EQUIPS;
+    const valid = ['', ALL_EQUIPS, ...equips.map(optValue)];
+    if (!valid.includes(selectedEquip)) selectedEquip = '';
     equipSelect.value = selectedEquip;
   };
 
