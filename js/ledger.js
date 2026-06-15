@@ -66,13 +66,33 @@ async function renderList() {
     },
   });
 
+  // 在庫の設備名・機器名から、未登録の設備を台帳に一括登録する
+  const importFromParts = async (btn) => {
+    if (!confirm('在庫の設備名・機器名から、まだ台帳に無い設備をまとめて登録します。よろしいですか？')) return;
+    btn.disabled = true;
+    btn.textContent = '登録中…';
+    try {
+      const res = await api.post('/api/equipment/import-from-parts', {});
+      alert(res.created > 0
+        ? `${res.created}件の設備を台帳に登録しました。`
+        : (res.message || '新規に追加する設備はありませんでした。'));
+      await load('');
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📥 在庫から一括登録';
+    }
+  };
+
   render(app, [
-    el('div', { class: 'toolbar' }, [
-      searchInput,
-      hasRole(currentUser, 'editor')
-        ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 設備を追加')
-        : null,
-    ]),
+    el('div', { class: 'toolbar' }, [searchInput]),
+    hasRole(currentUser, 'editor')
+      ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
+          el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 設備を追加'),
+          el('button', { class: 'btn', onclick: (e) => importFromParts(e.currentTarget) }, '📥 在庫から一括登録'),
+        ])
+      : null,
     listBox,
   ]);
   await load('');
