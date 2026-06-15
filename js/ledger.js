@@ -171,8 +171,8 @@ async function renderDetail(id) {
         el('span', { class: `status-badge is-${eq.status}` }, STATUS_LABELS[eq.status] || eq.status),
       ]),
       infoRow('設備番号', eq.code),
-      infoRow('設備名（共有）', eq.line_name),
-      infoRow('機器名（共有）', eq.equipment_name),
+      infoRow('設備名', eq.line_name),
+      infoRow('機器名', eq.equipment_name),
       infoRow('設置場所', eq.location),
       infoRow('メーカー', eq.manufacturer),
       infoRow('型式', eq.model),
@@ -260,17 +260,17 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
-  // 設備名・機器名の共有候補（在庫＋設備台帳）でカスケード入力を作る
+  // 設備名・機器名は全機能で共有の候補（在庫＋設備台帳）からカスケード入力する。
+  // 旧データ（line_name 未設定で name のみ）の編集時は name を設備名の初期値に流用する。
   const names = await fetchEquipNames();
   const cascade = buildEquipCascade(names, {
-    line: existing?.line_name || '',
+    line: existing?.line_name || existing?.name || '',
     equip: existing?.equipment_name || '',
     idPrefix: 'ledger',
   });
 
   const f = {
     code: el('input', { type: 'text', value: existing ? existing.code : '', placeholder: '例: CP-001' }),
-    name: el('input', { type: 'text', value: existing ? existing.name : '', placeholder: '例: 1号コンプレッサ' }),
     location: el('input', { type: 'text', value: existing?.location || '', placeholder: '例: 第1工場' }),
     manufacturer: el('input', { type: 'text', value: existing?.manufacturer || '' }),
     model: el('input', { type: 'text', value: existing?.model || '' }),
@@ -284,9 +284,9 @@ async function renderForm(existing) {
   };
 
   const save = async () => {
+    // 表示名(name)はサーバー側で「設備名＋機器名」から自動生成する
     const body = {
       code: f.code.value.trim(),
-      name: f.name.value.trim(),
       line_name: cascade.lineInput.value.trim() || null,
       equipment_name: cascade.equipInput.value.trim() || null,
       location: f.location.value.trim(),
@@ -296,10 +296,8 @@ async function renderForm(existing) {
       status: f.status.value,
       note: f.note.value.trim(),
     };
-    if (!body.code || !body.name) {
-      alert('設備番号と設備名は必須です。');
-      return;
-    }
+    if (!body.code) { alert('設備番号は必須です。'); return; }
+    if (!body.line_name) { alert('設備名は必須です。'); return; }
     try {
       if (existing) {
         await api.put(`/api/equipment/${existing.id}`, body);
@@ -317,10 +315,9 @@ async function renderForm(existing) {
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '設備を編集' : '設備を追加'),
       field('設備番号（必須・QRラベルに使用）', f.code),
-      field('設備名（必須）', f.name),
-      field('設備名（共有・在庫/台帳から選択）', cascade.lineInput),
+      field('設備名（必須・在庫/台帳から選択 or 自由入力）', cascade.lineInput),
       cascade.lineDatalist,
-      field('機器名（共有・設備名を選ぶと候補表示）', cascade.equipInput),
+      field('機器名（設備名を選ぶと候補表示）', cascade.equipInput),
       cascade.equipDatalist,
       field('設置場所', f.location),
       field('メーカー', f.manufacturer),

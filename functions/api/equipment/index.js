@@ -12,13 +12,25 @@ export const EQUIPMENT_STATUS = ['active', 'stopped', 'retired'];
 /** リクエストボディから設備の入力値を取り出して検証する */
 export function parseEquipmentInput(body) {
   if (!body) return { error: 'リクエストボディが不正です。' };
+  const optional = (v, max) => {
+    const s = v === undefined || v === null ? '' : String(v).trim();
+    return s ? s.slice(0, max) : null;
+  };
+
   const code = String(body.code || '').trim();
-  const name = String(body.name || '').trim();
+  const lineName = optional(body.line_name, 100);       // 設備名（共有）
+  const equipmentName = optional(body.equipment_name, 100); // 機器名（共有）
+
+  // 表示名(name)は各機能の見出し・検索に使う。明示があればそれを、無ければ
+  // 「設備名＋機器名」から自動生成する（設備名・機器名に一本化したため）。
+  let name = String(body.name || '').trim();
+  if (!name) name = [lineName, equipmentName].filter(Boolean).join(' ');
+  name = name.slice(0, 100);
+
   if (!code) return { error: '設備番号（code）は必須です。' };
-  if (!name) return { error: '設備名（name）は必須です。' };
-  if (code.length > 50 || name.length > 100) {
-    return { error: '設備番号は50文字以内、設備名は100文字以内で入力してください。' };
-  }
+  if (!name) return { error: '設備名は必須です。' };
+  if (code.length > 50) return { error: '設備番号は50文字以内で入力してください。' };
+
   const status = body.status === undefined || body.status === '' ? 'active' : String(body.status);
   if (!EQUIPMENT_STATUS.includes(status)) {
     return { error: `status が不正です: ${status}` };
@@ -27,16 +39,12 @@ export function parseEquipmentInput(body) {
   if (installedOn && !/^\d{4}-\d{2}-\d{2}$/.test(installedOn)) {
     return { error: '設置日（installed_on）は YYYY-MM-DD 形式で入力してください。' };
   }
-  const optional = (v, max) => {
-    const s = v === undefined || v === null ? '' : String(v).trim();
-    return s ? s.slice(0, max) : null;
-  };
   return {
     value: {
       code,
       name,
-      line_name: optional(body.line_name, 100),
-      equipment_name: optional(body.equipment_name, 100),
+      line_name: lineName,
+      equipment_name: equipmentName,
       location: optional(body.location, 100),
       manufacturer: optional(body.manufacturer, 100),
       model: optional(body.model, 100),
