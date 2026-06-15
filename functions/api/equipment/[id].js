@@ -13,14 +13,24 @@ import { parseEquipmentInput } from './index.js';
 async function findEquipment(env, idParam) {
   const id = Number(idParam);
   if (!Number.isInteger(id) || id <= 0) return null;
-  return env.DB.prepare(
-    `SELECT id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note,
-            created_by, created_at, updated_by, updated_at
-       FROM equipment_ledger
-      WHERE id = ?1 AND deleted_at IS NULL`
-  )
-    .bind(id)
-    .first();
+  const run = (cols) =>
+    env.DB.prepare(
+      `SELECT ${cols} FROM equipment_ledger WHERE id = ?1 AND deleted_at IS NULL`
+    )
+      .bind(id)
+      .first();
+  try {
+    return await run(
+      `id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note,
+       created_by, created_at, updated_by, updated_at`
+    );
+  } catch {
+    // line_name / equipment_name 列が未追加の環境でも詳細が開くようにフォールバック
+    return run(
+      `id, code, name, location, manufacturer, model, installed_on, status, note,
+       created_by, created_at, updated_by, updated_at`
+    );
+  }
 }
 
 export async function onRequestGet({ env, params }) {

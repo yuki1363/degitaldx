@@ -15,6 +15,11 @@ import qrcode from '/js/vendor/qrcode.mjs';
 
 const STATUS_LABELS = { active: '稼働中', stopped: '停止中', retired: '廃棄' };
 
+// 一覧の設備名→機器名フィルタの内部値
+const ALL_LINES = '__ALL__';
+const ALL_EQUIPS = '__ALL__';
+const NO_EQUIP = '__NONE__';
+
 const app = document.getElementById('app');
 let currentUser = null;
 
@@ -29,32 +34,126 @@ function showError(err) {
 // ---------------- 一覧 ----------------
 
 async function renderList() {
-  const listBox = el('div', { class: 'row-list' }, []);
+  let searchQuery = '';
+  let selectedLine = '';  // 設備名フィルタ（空 = 未選択／プロンプト）
+  let selectedEquip = ''; // 機器名フィルタ（設備選択後に有効）
+  let allEquipment = [];
   let timer = null;
 
-  const load = async (q) => {
-    render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
-    const { equipment } = await api.get(`/api/equipment${q ? `?q=${encodeURIComponent(q)}` : ''}`);
-    if (equipment.length === 0) {
-      render(listBox, el('p', { class: 'empty' }, q ? '該当する設備がありません。' : '設備が未登録です。「設備を追加」から登録してください。'));
+  const listBox = el('div', { class: 'row-list' }, []);
+
+  // 設備名 → 機器名の2段階セレクタ（選ぶまで一覧は出さない）
+  const lineSelect = el('select', {
+    class: 'parts-line-select',
+    onchange: (e) => { selectedLine = e.target.value; selectedEquip = ''; refreshEquipOptions(); renderFiltered(); },
+  }, [el('option', { value: '' }, '設備を選択してください')]);
+
+  const equipSelect = el('select', {
+    class: 'parts-line-select',
+    onchange: (e) => { selectedEquip = e.target.value; renderFiltered(); },
+  }, [el('option', { value: '' }, '（設備を選択）')]);
+
+  const makeRow = (eq) => {
+    const sub = [eq.line_name, eq.equipment_name].filter(Boolean).join(' / ') || eq.location || '';
+    return el('a', { class: 'list-item', href: `/pages/ledger?id=${eq.id}` }, [
+      el('div', { class: 'list-item-main' }, [
+        el('div', { class: 'list-item-sub' }, [
+          eq.code,
+          el('span', { class: `status-badge is-${eq.status}` }, STATUS_LABELS[eq.status] || eq.status),
+        ]),
+        el('div', { class: 'list-item-title' }, eq.name),
+        sub ? el('div', { class: 'list-item-sub' }, sub) : null,
+      ]),
+      el('span', { class: 'chevron' }, '›'),
+    ]);
+  };
+
+  // 設備名→機器名でグループ化して描画
+  const renderGroups = (list) => {
+    if (list.length === 0) {
+      render(listBox, el('p', { class: 'empty' }, '該当する設備がありません。'));
       return;
     }
-    render(
-      listBox,
-      equipment.map((eq) =>
-        el('a', { class: 'list-item', href: `/pages/ledger?id=${eq.id}` }, [
-          el('div', { class: 'list-item-main' }, [
-            el('div', { class: 'list-item-sub' }, [
-              eq.code,
-              el('span', { class: `status-badge is-${eq.status}` }, STATUS_LABELS[eq.status] || eq.status),
-            ]),
-            el('div', { class: 'list-item-title' }, eq.name),
-            el('div', { class: 'list-item-sub' }, eq.location || ''),
-          ]),
-          el('span', { class: 'chevron' }, '›'),
-        ])
-      )
-    );
+    const lineMap = new Map();
+    for (const eq of list) {
+      const line = eq.line_name || '';
+      const equip = eq.equipment_name || '';
+      if (!lineMap.has(line)) lineMap.set(line, new Map());
+      const em = lineMap.get(line);
+      if (!em.has(equip)) em.set(equip, []);
+      em.get(equip).push(eq);
+    }
+    const nodes = [];
+    for (const [line, em] of lineMap) {
+      nodes.push(el('div', { class: 'group-header-line' }, line || '（設備名なし）'));
+      for (const [equip, items] of em) {
+        nodes.push(el('div', { class: 'group-header-equip' }, equip || '（機器名なし）'));
+        nodes.push(el('div', { class: 'row-list' }, items.map(makeRow)));
+      }
+    }
+    render(listBox, nodes);
+  };
+
+  // 設備名→機器名を選ぶまで一覧は出さない（検索中は選択に関係なく該当を表示）
+  const renderFiltered = () => {
+    if (searchQuery) { renderGroups(allEquipment); return; }
+    if (!selectedLine) {
+      render(listBox, el('p', { class: 'empty' }, '「設備名で絞り込み」から設備を選んでください（「すべての設備を表示」で全件表示）。'));
+      return;
+    }
+    if (selectedLine === ALL_LINES) { renderGroups(allEquipment); return; }
+    if (!selectedEquip) {
+      render(listBox, el('p', { class: 'empty' }, '「機器名で絞り込み」から機器を選んでください（「すべての機器」でこの設備の全件表示）。'));
+      return;
+    }
+    let list = allEquipment.filter((eq) => (eq.line_name || '') === selectedLine);
+    if (selectedEquip === NO_EQUIP) list = list.filter((eq) => (eq.equipment_name || '') === '');
+    else if (selectedEquip !== ALL_EQUIPS) list = list.filter((eq) => (eq.equipment_name || '') === selectedEquip);
+    renderGroups(list);
+  };
+
+  const refreshLineOptions = () => {
+    const lines = [...new Set(allEquipment.map((eq) => eq.line_name || '').filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+    render(lineSelect, [
+      el('option', { value: '' }, '設備を選択してください'),
+      el('option', { value: ALL_LINES }, `すべての設備を表示（${allEquipment.length}件）`),
+      ...lines.map((l) => el('option', { value: l }, l)),
+    ]);
+    const valid = ['', ALL_LINES, ...lines];
+    if (valid.includes(selectedLine)) lineSelect.value = selectedLine;
+    else { selectedLine = ''; lineSelect.value = ''; }
+  };
+
+  const refreshEquipOptions = () => {
+    if (!selectedLine || selectedLine === ALL_LINES) {
+      render(equipSelect, [el('option', { value: '' }, '（設備を選択）')]);
+      equipSelect.value = '';
+      equipSelect.disabled = true;
+      return;
+    }
+    equipSelect.disabled = false;
+    const equips = [...new Set(
+      allEquipment.filter((eq) => (eq.line_name || '') === selectedLine).map((eq) => eq.equipment_name || '')
+    )].sort((a, b) => a.localeCompare(b, 'ja'));
+    const optValue = (e) => (e === '' ? NO_EQUIP : e);
+    render(equipSelect, [
+      el('option', { value: '' }, '機器を選択してください'),
+      el('option', { value: ALL_EQUIPS }, 'すべての機器'),
+      ...equips.map((e) => el('option', { value: optValue(e) }, e || '（機器名なし）')),
+    ]);
+    const valid = ['', ALL_EQUIPS, ...equips.map(optValue)];
+    if (!valid.includes(selectedEquip)) selectedEquip = '';
+    equipSelect.value = selectedEquip;
+  };
+
+  const load = async () => {
+    render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
+    const { equipment } = await api.get(`/api/equipment${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`);
+    allEquipment = equipment || [];
+    refreshLineOptions();
+    refreshEquipOptions();
+    renderFiltered();
   };
 
   const searchInput = el('input', {
@@ -62,7 +161,7 @@ async function renderList() {
     placeholder: '設備番号・名称・場所で検索',
     oninput: (e) => {
       clearTimeout(timer);
-      timer = setTimeout(() => load(e.target.value.trim()).catch(showError), 300);
+      timer = setTimeout(() => { searchQuery = e.target.value.trim(); load().catch(showError); }, 300);
     },
   });
 
@@ -76,7 +175,7 @@ async function renderList() {
       alert(res.created > 0
         ? `${res.created}件の設備を台帳に登録しました。`
         : (res.message || '新規に追加する設備はありませんでした。'));
-      await load('');
+      await load();
     } catch (err) {
       alert(err.message);
     } finally {
@@ -86,6 +185,10 @@ async function renderList() {
   };
 
   render(app, [
+    el('div', { class: 'field-pair', style: 'margin-bottom:10px' }, [
+      el('div', { class: 'field' }, [el('label', {}, '設備名で絞り込み'), lineSelect]),
+      el('div', { class: 'field' }, [el('label', {}, '機器名で絞り込み'), equipSelect]),
+    ]),
     el('div', { class: 'toolbar' }, [searchInput]),
     hasRole(currentUser, 'editor')
       ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
@@ -95,7 +198,7 @@ async function renderList() {
       : null,
     listBox,
   ]);
-  await load('');
+  await load();
 }
 
 // ---------------- 詳細 ----------------

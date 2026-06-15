@@ -59,27 +59,28 @@ export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const q = (url.searchParams.get('q') || '').trim();
 
-  let stmt;
-  if (q) {
-    const like = `%${q}%`;
-    stmt = env.DB.prepare(
-      `SELECT id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status
-         FROM equipment_ledger
-        WHERE deleted_at IS NULL
-          AND (code LIKE ?1 OR name LIKE ?1 OR location LIKE ?1)
-        ORDER BY code
-        LIMIT 300`
-    ).bind(like);
-  } else {
-    stmt = env.DB.prepare(
-      `SELECT id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status
-         FROM equipment_ledger
-        WHERE deleted_at IS NULL
-        ORDER BY code
-        LIMIT 300`
+  const where = q
+    ? `WHERE deleted_at IS NULL AND (code LIKE ?1 OR name LIKE ?1 OR location LIKE ?1)`
+    : `WHERE deleted_at IS NULL`;
+  const binds = q ? [`%${q}%`] : [];
+
+  const run = async (cols) => {
+    const stmt = env.DB.prepare(
+      `SELECT ${cols} FROM equipment_ledger ${where} ORDER BY code LIMIT 300`
     );
+    const r = await (binds.length ? stmt.bind(...binds) : stmt).all();
+    return r.results;
+  };
+
+  let results;
+  try {
+    results = await run(
+      'id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status'
+    );
+  } catch {
+    // line_name / equipment_name 列が未追加の環境でも一覧が開くようにフォールバック
+    results = await run('id, code, name, location, manufacturer, model, installed_on, status');
   }
-  const { results } = await stmt.all();
   return json({ equipment: results });
 }
 
