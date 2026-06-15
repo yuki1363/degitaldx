@@ -71,7 +71,9 @@ export async function onRequestPost({ env, data, request }) {
           normImportance(row.importance),
           cell(row.supplier),
           cell(row.note),
-          '個'
+          '個',
+          userEmail,
+          now
         )
         .run();
       inserted++;
