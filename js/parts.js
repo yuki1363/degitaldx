@@ -125,41 +125,57 @@ async function renderList() {
       render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
       return;
     }
-    render(
-      listBox,
-      parts.map((p) => {
-        const isLow = p.quantity < p.safety_stock; // 在庫数 < 必要数 で要発注
-        // 要発注の部品には一覧から直接「発注」できるボタンを出す（editor 以上）
-        let orderBtn = null;
-        if (isLow && hasRole(currentUser, 'editor')) {
-          orderBtn = el('button', { class: 'btn btn-sm order-btn' }, '📧 発注');
-          orderBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openOrderDialog(p);
-          });
-        }
-        const sub1 = [p.line_name, p.equipment_name].filter(Boolean).join(' / ');
-        const sub2 = [
-          p.model_no ? `型番: ${p.model_no}` : '',
-          p.location ? `場所: ${p.location}` : '',
-        ].filter(Boolean).join(' / ');
-        return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
-          el('div', { class: 'list-item-main' }, [
-            sub1 ? el('div', { class: 'list-item-sub' }, sub1) : null,
-            el('div', { class: 'list-item-title' }, [p.name, importanceBadge(p.importance)]),
-            sub2 ? el('div', { class: 'list-item-sub' }, sub2) : null,
-          ]),
-          el('div', { class: 'parts-qty', style: isLow ? 'color:#dc2626;font-weight:700' : '' }, [
-            el('span', { class: 'parts-qty-num' }, String(p.quantity)),
-            el('span', { class: 'parts-qty-unit' }, `/ 必要 ${p.safety_stock}`),
-            isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
-          ]),
-          orderBtn,
-          el('span', { class: 'chevron' }, '›'),
-        ]);
-      })
-    );
+
+    const makePartRow = (p) => {
+      const isLow = p.quantity < p.safety_stock;
+      let orderBtn = null;
+      if (isLow && hasRole(currentUser, 'editor')) {
+        orderBtn = el('button', { class: 'btn btn-sm order-btn' }, '📧 発注');
+        orderBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openOrderDialog(p);
+        });
+      }
+      const sub = [
+        p.model_no ? `型番: ${p.model_no}` : '',
+        p.location ? `場所: ${p.location}` : '',
+      ].filter(Boolean).join(' / ');
+      return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
+        el('div', { class: 'list-item-main' }, [
+          el('div', { class: 'list-item-title' }, [p.name, importanceBadge(p.importance)]),
+          sub ? el('div', { class: 'list-item-sub' }, sub) : null,
+        ]),
+        el('div', { class: 'parts-qty', style: isLow ? 'color:#dc2626;font-weight:700' : '' }, [
+          el('span', { class: 'parts-qty-num' }, String(p.quantity)),
+          el('span', { class: 'parts-qty-unit' }, `/ 必要 ${p.safety_stock}`),
+          isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
+        ]),
+        orderBtn,
+        el('span', { class: 'chevron' }, '›'),
+      ]);
+    };
+
+    // ライン名 → 機器名でグループ化（APIは line_name, equipment_name, name 順でソート済み）
+    const lineMap = new Map();
+    for (const p of parts) {
+      const line = p.line_name || '';
+      const equip = p.equipment_name || '';
+      if (!lineMap.has(line)) lineMap.set(line, new Map());
+      const equipMap = lineMap.get(line);
+      if (!equipMap.has(equip)) equipMap.set(equip, []);
+      equipMap.get(equip).push(p);
+    }
+
+    const nodes = [];
+    for (const [line, equipMap] of lineMap) {
+      nodes.push(el('div', { class: 'group-header-line' }, line || '（ライン未設定）'));
+      for (const [equip, equipParts] of equipMap) {
+        nodes.push(el('div', { class: 'group-header-equip' }, equip || '（機器未設定）'));
+        nodes.push(el('div', { class: 'row-list' }, equipParts.map(makePartRow)));
+      }
+    }
+    render(listBox, nodes);
   };
 
   const searchInput = el('input', {
