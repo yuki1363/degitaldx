@@ -212,14 +212,24 @@ async function renderForm(existing) {
   const lineInput = el('input', { type: 'text', list: lineListId, value: existing?.line_name || '', placeholder: '在庫の設備名から選択 / 自由入力' });
   const equipInput = el('input', { type: 'text', list: equipListId, value: existing?.equipment_name || '', placeholder: '機器名を選択 / 自由入力' });
 
-  // 機器名の候補を「選択中の設備名」に属する機器に更新（該当なし or 未選択なら全機器）
-  const refreshEquipList = () => {
-    const set = equipByLine.get(lineInput.value.trim());
-    const list = set && set.size ? set : allEquips;
-    render(equipDatalist, sortJa(list).map((n) => el('option', { value: n })));
+  // 設備名を選ぶまでは機器名を入力不可にする（「設備名を選ばないと機器名が出ない」）。
+  // 設備名を選ぶと、その設備に属する機器名が候補に出る（在庫にない設備名なら候補なしの自由入力）。
+  const applyEquipState = (clearOnEmpty) => {
+    const line = lineInput.value.trim();
+    const set = equipByLine.get(line);
+    const list = set && set.size ? sortJa(set) : [];
+    render(equipDatalist, list.map((n) => el('option', { value: n })));
+    if (!line) {
+      if (clearOnEmpty) equipInput.value = '';
+      equipInput.disabled = true;
+      equipInput.placeholder = '先に設備名を選択してください';
+    } else {
+      equipInput.disabled = false;
+      equipInput.placeholder = list.length ? '機器名を選択 / 自由入力' : '機器名を入力';
+    }
   };
-  lineInput.addEventListener('input', refreshEquipList);
-  refreshEquipList();
+  lineInput.addEventListener('input', () => applyEquipState(true));
+  applyEquipState(false); // 初期化（既存の機器名は消さない）
 
   // 担当者: 既定は空欄（自由入力）
   const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });
