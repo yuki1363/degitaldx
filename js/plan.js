@@ -172,12 +172,17 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
-  // 設備名の入力候補に在庫の設備名(line_name)を使う（候補が取れなくても自由入力で続行）
-  let lineNames = [];
+  // 設備欄の入力候補に在庫の「設備名(line_name)」と「機器名(equipment_name)」の両方を使う。
+  // どちらでも選べて、自由入力もできる（候補が取れなくても続行）。
+  let equipOptions = [];
   try {
     const { parts } = await api.get('/api/parts');
-    lineNames = [...new Set((parts || []).map((p) => p.line_name).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, 'ja'));
+    const names = new Set();
+    for (const p of parts || []) {
+      if (p.line_name) names.add(p.line_name);
+      if (p.equipment_name) names.add(p.equipment_name);
+    }
+    equipOptions = [...names].sort((a, b) => a.localeCompare(b, 'ja'));
   } catch { /* 候補なしでも続行 */ }
 
   const today = nowLocalInputValue().slice(0, 10);
@@ -191,14 +196,13 @@ async function renderForm(existing) {
   const startInput = el('input', { type: 'date', value: existing?.planned_date || today });
   const endInput = el('input', { type: 'date', value: existing?.planned_end_date || '' });
 
-  // 設備名: 在庫の設備名を候補に出しつつ自由入力できる datalist
+  // 設備: 在庫の設備名・機器名を候補に出しつつ自由入力できる datalist
   const datalistId = 'plan-equip-options';
-  const datalist = el('datalist', { id: datalistId }, lineNames.map((n) => el('option', { value: n })));
-  const equipInput = el('input', { type: 'text', list: datalistId, value: existing?.equipment_name || '', placeholder: '在庫の設備名から選択 / 自由入力' });
+  const datalist = el('datalist', { id: datalistId }, equipOptions.map((n) => el('option', { value: n })));
+  const equipInput = el('input', { type: 'text', list: datalistId, value: existing?.equipment_name || '', placeholder: '在庫の設備名・機器名から選択 / 自由入力' });
 
-  // 担当者: 新規時は現在のユーザー名を自動入力（編集可）
-  const defaultAssignee = currentUser?.name || currentUser?.email || '';
-  const assigneeInput = el('input', { type: 'text', value: existing ? (existing.assignee_name || '') : defaultAssignee, placeholder: '担当者名' });
+  // 担当者: 既定は空欄（自由入力）
+  const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });
 
   const statusSelect = el('select', {},
     Object.entries(STATUS_LABELS).map(([value, label]) =>
