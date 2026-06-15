@@ -12,6 +12,13 @@ import { el, render, formatDateTime } from '/js/util.js';
 const app = document.getElementById('app');
 let currentUser = null;
 
+// 重要度（高/中/低）→ バッジのCSSクラス
+const IMP_CLASS = { '高': 'imp-high', '中': 'imp-mid', '低': 'imp-low' };
+function importanceBadge(v) {
+  if (!v) return null;
+  return el('span', { class: `imp-badge ${IMP_CLASS[v] || ''}` }, v);
+}
+
 function go(query) {
   window.location.href = `/pages/parts${query}`;
 }
@@ -23,21 +30,20 @@ function showError(err) {
 // ---------------- 発注（Outlook メール作成） ----------------
 
 // 発注メールの件名・本文を自動生成する。
-//   件名「【発注依頼】部品名」／本文は部品名・仕様・現在庫・安全在庫・希望発注数量。
-//   （部品番号・仕入先・依頼者は本文に含めない方針）
+//   件名「【発注依頼】部品名」／本文は部品名・現在庫・必要数・希望発注数量。
+//   （型番・仕入先・依頼者は本文に含めない方針）
 function buildOrderEmail(part, orderQty) {
   const subject = `【発注依頼】${part.name}`;
   const body = [
     '下記の部品の発注をお願いいたします。',
     '',
     `部品名: ${part.name}`,
-    part.spec ? `仕様: ${part.spec}` : null,
-    `現在庫: ${part.quantity} ${part.unit}`,
-    `安全在庫: ${part.safety_stock} ${part.unit}`,
-    `希望発注数量: ${orderQty} ${part.unit}`,
+    `現在庫: ${part.quantity}`,
+    `必要数: ${part.safety_stock}`,
+    `希望発注数量: ${orderQty}`,
     '',
     'よろしくお願いいたします。',
-  ].filter((line) => line !== null).join('\n');
+  ].join('\n');
   return { subject, body };
 }
 
@@ -86,7 +92,7 @@ function openOrderDialog(part) {
   const modal = el('div', { class: 'modal' }, [
     el('h3', { class: 'modal-title' }, `発注メールの作成: ${part.name}`),
     el('div', { class: 'field' }, [el('label', {}, '宛先メール'), toInput]),
-    el('div', { class: 'field' }, [el('label', {}, `希望発注数量（${part.unit}）`), qtyInput]),
+    el('div', { class: 'field' }, [el('label', {}, '希望発注数量'), qtyInput]),
     el('div', { class: 'field' }, [el('label', {}, '本文プレビュー（自動生成）'), preview]),
     el('p', { class: 'hint' }, 'PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
     el('div', { class: 'modal-actions' }, [
@@ -122,7 +128,7 @@ async function renderList() {
     render(
       listBox,
       parts.map((p) => {
-        const isLow = p.quantity <= p.safety_stock;
+        const isLow = p.quantity < p.safety_stock; // 在庫数 < 必要数 で要発注
         // 要発注の部品には一覧から直接「発注」できるボタンを出す（editor 以上）
         let orderBtn = null;
         if (isLow && hasRole(currentUser, 'editor')) {
@@ -133,18 +139,20 @@ async function renderList() {
             openOrderDialog(p);
           });
         }
+        const sub1 = [p.line_name, p.equipment_name].filter(Boolean).join(' / ');
+        const sub2 = [
+          p.model_no ? `型番: ${p.model_no}` : '',
+          p.location ? `場所: ${p.location}` : '',
+        ].filter(Boolean).join(' / ');
         return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
           el('div', { class: 'list-item-main' }, [
-            el('div', { class: 'list-item-sub' }, p.part_no),
-            el('div', { class: 'list-item-title' }, p.name),
-            el('div', { class: 'list-item-sub' }, [
-              p.spec || '',
-              p.location ? `保管場所: ${p.location}` : '',
-            ].filter(Boolean).join(' / ')),
+            sub1 ? el('div', { class: 'list-item-sub' }, sub1) : null,
+            el('div', { class: 'list-item-title' }, [p.name, importanceBadge(p.importance)]),
+            sub2 ? el('div', { class: 'list-item-sub' }, sub2) : null,
           ]),
           el('div', { class: 'parts-qty', style: isLow ? 'color:#dc2626;font-weight:700' : '' }, [
             el('span', { class: 'parts-qty-num' }, String(p.quantity)),
-            el('span', { class: 'parts-qty-unit' }, p.unit),
+            el('span', { class: 'parts-qty-unit' }, `/ 必要 ${p.safety_stock}`),
             isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
           ]),
           orderBtn,
@@ -156,7 +164,7 @@ async function renderList() {
 
   const searchInput = el('input', {
     type: 'search',
-    placeholder: '部品番号・名称で検索',
+    placeholder: '型番・部品名・ライン・機器で検索',
     oninput: (e) => {
       clearTimeout(timer);
       timer = setTimeout(() => { searchQuery = e.target.value.trim(); load().catch(showError); }, 300);
@@ -201,7 +209,7 @@ function infoRow(label, value) {
 async function renderDetail(id) {
   const { part, transactions } = await api.get(`/api/parts/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
-  const isLow = part.quantity <= part.safety_stock;
+  const isLow = part.quantity < part.safety_stock; // 在庫数 < 必要数 で要発注
 
   // 在庫数更新フォーム
   const txTypeEl = el('select', {},
@@ -228,17 +236,19 @@ async function renderDetail(id) {
   render(app, [
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('h2', { class: 'card-title' }, part.name),
+        el('h2', { class: 'card-title' }, [part.name, importanceBadge(part.importance)]),
         isLow
           ? el('span', { class: 'abn-badge is-abn' }, '要発注')
           : el('span', { class: 'abn-badge' }, '在庫あり'),
       ]),
-      infoRow('部品番号', part.part_no),
-      infoRow('仕様', part.spec),
-      infoRow('現在庫', `${part.quantity} ${part.unit}`),
-      infoRow('安全在庫', `${part.safety_stock} ${part.unit}`),
-      infoRow('保管場所', part.location),
-      infoRow('仕入先', part.supplier),
+      infoRow('ライン名', part.line_name),
+      infoRow('機器名', part.equipment_name),
+      infoRow('型番', part.model_no),
+      infoRow('在庫数', String(part.quantity)),
+      infoRow('必要数', String(part.safety_stock)),
+      infoRow('重要度', part.importance),
+      infoRow('在庫場所', part.location),
+      infoRow('仕入れ先', part.supplier),
       infoRow('仕入先メール', part.supplier_email),
       infoRow('備考', part.note),
     ]),
@@ -282,7 +292,7 @@ async function renderDetail(id) {
                   class: `action-badge ${t.type === 'in' ? 'is-create' : t.type === 'out' ? 'is-delete' : 'is-update'}`,
                 }, TYPE_LABELS[t.type] || t.type),
                 el('span', { style: t.quantity < 0 ? 'color:#dc2626' : '' },
-                  `${t.quantity > 0 ? '+' : ''}${t.quantity} ${part.unit}`),
+                  `${t.quantity > 0 ? '+' : ''}${t.quantity}`),
                 el('span', {}, t.created_by),
                 el('span', { class: 'list-item-sub' }, formatDateTime(t.created_at)),
                 t.note ? el('span', { class: 'list-item-sub' }, t.note) : null,
@@ -300,14 +310,20 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
+  const impSelect = el('select', {},
+    [['', '（なし）'], ['高', '高'], ['中', '中'], ['低', '低']].map(([v, l]) =>
+      el('option', { value: v, selected: (existing?.importance || '') === v }, l)
+    )
+  );
   const f = {
-    part_no: el('input', { type: 'text', value: existing?.part_no || '', placeholder: '例: BRG-6205' }),
+    line_name: el('input', { type: 'text', value: existing?.line_name || '', placeholder: '例: 第1ライン' }),
+    equipment_name: el('input', { type: 'text', value: existing?.equipment_name || '', placeholder: '例: 充填機' }),
     name: el('input', { type: 'text', value: existing?.name || '', placeholder: '例: ベアリング 6205' }),
-    spec: el('input', { type: 'text', value: existing?.spec || '', placeholder: '例: 内径25mm' }),
-    unit: el('input', { type: 'text', value: existing?.unit || '個' }),
-    quantity: el('input', { type: 'number', min: '0', value: String(existing?.quantity ?? 0) }),
-    safety_stock: el('input', { type: 'number', min: '0', value: String(existing?.safety_stock ?? 0) }),
+    model_no: el('input', { type: 'text', value: existing?.model_no || '', placeholder: '例: 6205ZZ' }),
     location: el('input', { type: 'text', value: existing?.location || '', placeholder: '例: A棚3段目' }),
+    safety_stock: el('input', { type: 'number', min: '0', value: String(existing?.safety_stock ?? 0) }),
+    quantity: el('input', { type: 'number', min: '0', value: String(existing?.quantity ?? 0) }),
+    importance: impSelect,
     supplier: el('input', { type: 'text', value: existing?.supplier || '' }),
     supplier_email: el('input', { type: 'email', value: existing?.supplier_email || '', placeholder: '発注メールの宛先（任意）' }),
     note: el('textarea', { value: existing?.note || '' }),
@@ -315,18 +331,20 @@ async function renderForm(existing) {
 
   const save = async () => {
     const body = {
-      part_no: f.part_no.value.trim(),
+      line_name: f.line_name.value.trim() || null,
+      equipment_name: f.equipment_name.value.trim() || null,
       name: f.name.value.trim(),
-      spec: f.spec.value.trim() || null,
-      unit: f.unit.value.trim() || '個',
-      quantity: parseInt(f.quantity.value, 10) || 0,
-      safety_stock: parseInt(f.safety_stock.value, 10) || 0,
+      model_no: f.model_no.value.trim() || null,
       location: f.location.value.trim() || null,
+      safety_stock: parseInt(f.safety_stock.value, 10) || 0,
+      importance: f.importance.value || null,
       supplier: f.supplier.value.trim() || null,
       supplier_email: f.supplier_email.value.trim() || null,
       note: f.note.value.trim() || null,
     };
-    if (!body.part_no || !body.name) { alert('部品番号と部品名は必須です。'); return; }
+    // 在庫数は新規登録時のみ初期値として送る（編集時は「在庫数を更新」から変更）
+    if (!existing) body.quantity = parseInt(f.quantity.value, 10) || 0;
+    if (!body.name) { alert('部品名は必須です。'); return; }
     try {
       if (existing) {
         await api.put(`/api/parts/${existing.id}`, body);
@@ -341,16 +359,19 @@ async function renderForm(existing) {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '部品を編集' : '部品を追加'),
-      field('部品番号（必須・一意）', f.part_no),
+      field('ライン名', f.line_name),
+      field('機器名', f.equipment_name),
       field('部品名（必須）', f.name),
-      field('仕様', f.spec),
-      el('div', { class: 'field-pair' }, [
-        el('div', { class: 'field' }, [el('label', {}, '単位'), f.unit]),
-        el('div', { class: 'field' }, [el('label', {}, '現在庫数'), f.quantity]),
-      ]),
-      el('div', { class: 'field' }, [el('label', {}, '安全在庫（発注アラート基準）'), f.safety_stock]),
-      field('保管場所', f.location),
-      field('仕入先', f.supplier),
+      field('型番', f.model_no),
+      field('在庫場所', f.location),
+      existing
+        ? field('必要数（発注アラート基準）', f.safety_stock)
+        : el('div', { class: 'field-pair' }, [
+            el('div', { class: 'field' }, [el('label', {}, '必要数（発注アラート基準）'), f.safety_stock]),
+            el('div', { class: 'field' }, [el('label', {}, '在庫数（初期）'), f.quantity]),
+          ]),
+      field('重要度', f.importance),
+      field('仕入れ先', f.supplier),
       field('仕入先メール（発注先）', f.supplier_email),
       field('備考', f.note),
       el('div', { class: 'action-row' }, [
@@ -366,12 +387,12 @@ async function renderForm(existing) {
 async function renderImport() {
   if (!hasRole(currentUser, 'editor')) throw new Error('権限がありません。');
 
-  // 列マッピング設定
-  const COLS = ['part_no', 'name', 'spec', 'unit', 'quantity', 'safety_stock', 'location', 'supplier', 'note'];
+  // 列マッピング設定（ユーザー指定の項目順）
+  const COLS = ['line_name', 'equipment_name', 'name', 'model_no', 'location', 'safety_stock', 'quantity', 'importance', 'supplier', 'note'];
   const COL_LABELS = {
-    part_no: '部品番号', name: '部品名', spec: '仕様', unit: '単位',
-    quantity: '現在庫', safety_stock: '安全在庫', location: '保管場所',
-    supplier: '仕入先', note: '備考',
+    line_name: 'ライン名', equipment_name: '機器名', name: '部品名', model_no: '型番',
+    location: '在庫場所', safety_stock: '必要数', quantity: '在庫数', importance: '重要度',
+    supplier: '仕入れ先', note: '備考',
   };
 
   let csvHeaders = [];
@@ -468,7 +489,7 @@ async function renderImport() {
         if (idx !== '') obj[field] = row[Number(idx)]?.trim() || '';
       }
       return obj;
-    }).filter((r) => r.part_no || r.name);
+    }).filter((r) => r.name);
 
     importBtn.disabled = true;
     importBtn.textContent = '取込中…';
@@ -476,7 +497,7 @@ async function renderImport() {
       const result = await api.post('/api/parts/import', { rows });
       render(resultBox, [
         el('div', { class: 'notice' }, [
-          el('p', {}, `✅ 取込完了: 新規${result.inserted}件 / 更新${result.updated}件 / スキップ${result.skipped}件`),
+          el('p', {}, `✅ 取込完了: 新規${result.inserted}件 / スキップ${result.skipped}件`),
           result.errors?.length > 0
             ? el('ul', {}, result.errors.slice(0, 10).map((e) =>
                 el('li', { style: 'font-size:12px;color:#dc2626' }, `行${e.row}: ${e.reason}`)
@@ -515,7 +536,7 @@ async function renderImport() {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, 'CSVインポート'),
-      el('p', { class: 'hint' }, '1行目をヘッダー行とするCSVファイルを選択してください（UTF-8 / Shift_JIS 両対応）。既存部品番号は上書き更新されます。'),
+      el('p', { class: 'hint' }, '1行目をヘッダー行とするCSVファイルを選択してください（UTF-8 / Shift_JIS 両対応）。各行は新規登録され、CSVにない項目は空欄で取り込みます（部品名のみ必須）。'),
       el('div', { class: 'field' }, [
         el('label', {}, 'CSVファイル'),
         fileInput,

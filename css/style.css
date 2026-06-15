@@ -1606,3 +1606,31 @@ input.is-abnormal {
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
+
+/* 部品の重要度バッジ（高/中/低） */
+.imp-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+  background: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.imp-badge.imp-high {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.imp-badge.imp-mid {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.imp-badge.imp-low {
+  background: #eff6ff;
+  color: #1e40af;
+}

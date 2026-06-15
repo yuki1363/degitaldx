@@ -5,6 +5,7 @@
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
+import { normImportance } from './index.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
@@ -49,44 +50,51 @@ export async function onRequestPut({ env, data, params, request }) {
   const body = await readJson(request);
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
-  // quantity は transaction エンドポイント経由で更新するためここでは受け付けない
-  const { name, spec, unit, safety_stock, location, supplier, supplier_email, note } = body;
+  // quantity は transaction エンドポイント経由で更新するためここでは受け付けない。
+  // part_no は内部キーのため変更しない（型番は model_no）。
+  const { model_no, name, line_name, equipment_name, safety_stock, location, importance, supplier, supplier_email, note } = body;
 
-  if (name !== undefined && !name) {
+  if (name !== undefined && (!name || !String(name).trim())) {
     return jsonError(400, '部品名（name）は空にできません。');
   }
 
   const now = nowIso();
 
-  const newName         = name          !== undefined ? name          : part.name;
-  const newSpec         = spec          !== undefined ? spec          : part.spec;
-  const newUnit         = unit          !== undefined ? unit          : part.unit;
-  const newSafetyStock  = safety_stock  !== undefined ? safety_stock  : part.safety_stock;
-  const newLocation     = location      !== undefined ? location      : part.location;
-  const newSupplier     = supplier      !== undefined ? supplier      : part.supplier;
-  const newSupplierEmail = supplier_email !== undefined ? supplier_email : part.supplier_email;
-  const newNote         = note          !== undefined ? note          : part.note;
+  const newModelNo      = model_no       !== undefined ? (model_no ? String(model_no).trim() : null)             : part.model_no;
+  const newName         = name           !== undefined ? String(name).trim()                                    : part.name;
+  const newLineName     = line_name      !== undefined ? (line_name ? String(line_name).trim() : null)           : part.line_name;
+  const newEquipName    = equipment_name !== undefined ? (equipment_name ? String(equipment_name).trim() : null) : part.equipment_name;
+  const newSafetyStock  = safety_stock   !== undefined ? (Number.isFinite(Number(safety_stock)) ? Math.trunc(Number(safety_stock)) : part.safety_stock) : part.safety_stock;
+  const newLocation     = location       !== undefined ? (location ? String(location).trim() : null)             : part.location;
+  const newImportance   = importance     !== undefined ? normImportance(importance)                              : part.importance;
+  const newSupplier     = supplier       !== undefined ? (supplier ? String(supplier).trim() : null)             : part.supplier;
+  const newSupplierEmail = supplier_email !== undefined ? (supplier_email ? String(supplier_email).trim() : null) : part.supplier_email;
+  const newNote         = note           !== undefined ? (note ? String(note).trim() : null)                     : part.note;
 
   await DB.prepare(
     `UPDATE parts_inventory
-        SET name = ?1, spec = ?2, unit = ?3, safety_stock = ?4,
-            location = ?5, supplier = ?6, supplier_email = ?7, note = ?8,
-            updated_by = ?9, updated_at = ?10
-      WHERE id = ?11`
+        SET model_no = ?1, name = ?2, line_name = ?3, equipment_name = ?4, safety_stock = ?5,
+            location = ?6, importance = ?7, supplier = ?8, supplier_email = ?9, note = ?10,
+            updated_by = ?11, updated_at = ?12
+      WHERE id = ?13`
   )
-    .bind(newName, newSpec, newUnit, newSafetyStock, newLocation, newSupplier, newSupplierEmail, newNote, userEmail, now, id)
+    .bind(newModelNo, newName, newLineName, newEquipName, newSafetyStock, newLocation,
+          newImportance, newSupplier, newSupplierEmail, newNote, userEmail, now, id)
     .run();
 
   // 変更差分を記録（変化したフィールドのみ）
   const diff = {};
-  if (name        !== undefined && name        !== part.name)         diff.name        = { old: part.name,         new: name };
-  if (spec        !== undefined && spec        !== part.spec)         diff.spec        = { old: part.spec,         new: spec };
-  if (unit        !== undefined && unit        !== part.unit)         diff.unit        = { old: part.unit,         new: unit };
-  if (safety_stock !== undefined && safety_stock !== part.safety_stock) diff.safety_stock = { old: part.safety_stock, new: safety_stock };
-  if (location    !== undefined && location    !== part.location)     diff.location    = { old: part.location,     new: location };
-  if (supplier    !== undefined && supplier    !== part.supplier)     diff.supplier    = { old: part.supplier,     new: supplier };
-  if (supplier_email !== undefined && supplier_email !== part.supplier_email) diff.supplier_email = { old: part.supplier_email, new: supplier_email };
-  if (note        !== undefined && note        !== part.note)         diff.note        = { old: part.note,         new: note };
+  const track = (key, oldVal, newVal) => { if (String(oldVal ?? '') !== String(newVal ?? '')) diff[key] = { old: oldVal, new: newVal }; };
+  track('model_no', part.model_no, newModelNo);
+  track('name', part.name, newName);
+  track('line_name', part.line_name, newLineName);
+  track('equipment_name', part.equipment_name, newEquipName);
+  track('safety_stock', part.safety_stock, newSafetyStock);
+  track('location', part.location, newLocation);
+  track('importance', part.importance, newImportance);
+  track('supplier', part.supplier, newSupplier);
+  track('supplier_email', part.supplier_email, newSupplierEmail);
+  track('note', part.note, newNote);
 
   await writeAuditLog(DB, {
     tableName: 'parts_inventory',
