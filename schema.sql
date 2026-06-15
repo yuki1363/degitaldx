@@ -565,10 +565,26 @@ CREATE INDEX IF NOT EXISTS idx_notifications_type
   ON notifications (type, created_at);
 
 -- ---------------------------------------------------------------------
--- parts_inventory に発注メールの宛先列を追加（在庫からのOutlook発注）
---   ※ 既存DBへの一度きりのマイグレーション。
---     再実行すると「duplicate column name: supplier_email」エラーになるが、
---     既に適用済みであることを示すだけなので無視してよい
---     （その場合はこの ALTER 行をコメントアウトして schema.sql を再実行する）。
+-- parts_inventory の項目見直し（05 部品在庫）
+--   表示項目: ライン名 / 機器名 / 部品名 / 型番(model_no) / 在庫場所(location) /
+--             必要数(safety_stock) / 在庫数(quantity) / 重要度(importance) /
+--             仕入れ先(supplier) / 備考(note)
+--   ・ライン/機器ごとに同じ型番を別行で持てるよう、型番は新列 model_no で管理する
+--     （重複可）。内部の一意キー part_no は残し、新規行はアプリ側で自動採番する
+--     （画面には出さない内部キー）。テーブルを作り直さないので外部キー
+--     （parts_transaction → parts_inventory）にも影響せず、再実行しても安全。
+--   ・発注メール用の supplier_email も追加する
+--   ・旧列 spec(仕様) / unit(単位) は列だけ残す（画面では非表示）
+--
+--   ※ ALTER は初回のみ。適用済みのDBで再実行すると「duplicate column name」
+--     エラーになるが、移行は完了済みなので無視してよい（必要なら適用済みの
+--     ALTER 行をコメントアウトして再実行する）。
 -- ---------------------------------------------------------------------
+ALTER TABLE parts_inventory ADD COLUMN model_no TEXT;        -- 型番（重複可）
+ALTER TABLE parts_inventory ADD COLUMN line_name TEXT;       -- ライン名
+ALTER TABLE parts_inventory ADD COLUMN equipment_name TEXT;  -- 機器名
+ALTER TABLE parts_inventory ADD COLUMN importance TEXT;      -- 重要度（高/中/低）
+-- 既存の部品番号(part_no)を型番(model_no)として引き継ぐ（未設定の行のみ・冪等）
+UPDATE parts_inventory SET model_no = part_no WHERE model_no IS NULL;
+-- 発注メール宛先（前回機能で追加済みの場合は duplicate column エラーを無視）
 ALTER TABLE parts_inventory ADD COLUMN supplier_email TEXT;
