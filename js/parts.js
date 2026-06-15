@@ -108,10 +108,12 @@ function openOrderDialog(part) {
 
 // ---------------- 一覧 ----------------
 
+const ALL_LINES = '__ALL__'; // 設備セレクタの「すべての設備を表示」を表す内部値
+
 async function renderList() {
   let filterLow = false;
   let searchQuery = '';
-  let selectedLine = ''; // 設備名フィルタ（空 = すべての設備）
+  let selectedLine = ''; // 設備名フィルタ（空 = 未選択／プロンプト表示）
   let allParts = [];
   let timer = null;
 
@@ -168,11 +170,22 @@ async function renderList() {
     ]);
   };
 
-  // allParts を「選択中の設備」で絞り込み → 設備名→機器名でグループ化して描画
+  // allParts を「選択中の設備」で絞り込み → 設備名→機器名でグループ化して描画。
+  //   ・設備未選択（初期状態）で検索も要発注フィルタも無ければ、選択を促すだけで一覧は出さない
+  //   ・「すべての設備を表示」を選んだとき、または検索/要発注フィルタ中は全件を出す
   const renderParts = () => {
-    const parts = selectedLine
-      ? allParts.filter((p) => (p.line_name || '') === selectedLine)
-      : allParts;
+    const hasQuery = !!(searchQuery || filterLow);
+    let parts;
+    if (selectedLine === ALL_LINES) {
+      parts = allParts;
+    } else if (selectedLine) {
+      parts = allParts.filter((p) => (p.line_name || '') === selectedLine);
+    } else if (hasQuery) {
+      parts = allParts;
+    } else {
+      render(listBox, el('p', { class: 'empty' }, '上の「設備で絞り込み」から設備を選んでください（「すべての設備を表示」で全件表示）。'));
+      return;
+    }
     if (parts.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
       return;
@@ -198,15 +211,17 @@ async function renderList() {
     render(listBox, nodes);
   };
 
-  // 設備セレクタの選択肢を現在のデータから更新（選択は維持。消えていたら「すべて」へ）
+  // 設備セレクタの選択肢を現在のデータから更新（選択は維持。消えていたら未選択へ戻す）
   const refreshLineOptions = () => {
     const lines = [...new Set(allParts.map((p) => p.line_name || '').filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'ja'));
     render(lineSelect, [
-      el('option', { value: '' }, `すべての設備（${allParts.length}件）`),
+      el('option', { value: '' }, '設備を選択してください'),
+      el('option', { value: ALL_LINES }, `すべての設備を表示（${allParts.length}件）`),
       ...lines.map((l) => el('option', { value: l }, l)),
     ]);
-    if (lines.includes(selectedLine)) lineSelect.value = selectedLine;
+    const valid = ['', ALL_LINES, ...lines];
+    if (valid.includes(selectedLine)) lineSelect.value = selectedLine;
     else { selectedLine = ''; lineSelect.value = ''; }
   };
 
