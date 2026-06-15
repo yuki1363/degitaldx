@@ -169,7 +169,7 @@ async function renderList() {
 
     const nodes = [];
     for (const [line, equipMap] of lineMap) {
-      nodes.push(el('div', { class: 'group-header-line' }, line || '（ライン未設定）'));
+      nodes.push(el('div', { class: 'group-header-line' }, line || '（設備未設定）'));
       for (const [equip, equipParts] of equipMap) {
         nodes.push(el('div', { class: 'group-header-equip' }, equip || '（機器未設定）'));
         nodes.push(el('div', { class: 'row-list' }, equipParts.map(makePartRow)));
@@ -180,7 +180,7 @@ async function renderList() {
 
   const searchInput = el('input', {
     type: 'search',
-    placeholder: '型番・部品名・ライン・機器で検索',
+    placeholder: '型番・部品名・設備・機器で検索',
     oninput: (e) => {
       clearTimeout(timer);
       timer = setTimeout(() => { searchQuery = e.target.value.trim(); load().catch(showError); }, 300);
@@ -257,7 +257,7 @@ async function renderDetail(id) {
           ? el('span', { class: 'abn-badge is-abn' }, '要発注')
           : el('span', { class: 'abn-badge' }, '在庫あり'),
       ]),
-      infoRow('ライン名', part.line_name),
+      infoRow('設備名', part.line_name),
       infoRow('機器名', part.equipment_name),
       infoRow('型番', part.model_no),
       infoRow('在庫数', String(part.quantity)),
@@ -332,7 +332,7 @@ async function renderForm(existing) {
     )
   );
   const f = {
-    line_name: el('input', { type: 'text', value: existing?.line_name || '', placeholder: '例: 第1ライン' }),
+    line_name: el('input', { type: 'text', value: existing?.line_name || '', placeholder: '例: 第1設備' }),
     equipment_name: el('input', { type: 'text', value: existing?.equipment_name || '', placeholder: '例: 充填機' }),
     name: el('input', { type: 'text', value: existing?.name || '', placeholder: '例: ベアリング 6205' }),
     model_no: el('input', { type: 'text', value: existing?.model_no || '', placeholder: '例: 6205ZZ' }),
@@ -375,7 +375,7 @@ async function renderForm(existing) {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '部品を編集' : '部品を追加'),
-      field('ライン名', f.line_name),
+      field('設備名', f.line_name),
       field('機器名', f.equipment_name),
       field('部品名（必須）', f.name),
       field('型番', f.model_no),
@@ -406,7 +406,7 @@ async function renderImport() {
   // 列マッピング設定（ユーザー指定の項目順）
   const COLS = ['line_name', 'equipment_name', 'name', 'model_no', 'location', 'safety_stock', 'quantity', 'importance', 'supplier', 'note'];
   const COL_LABELS = {
-    line_name: 'ライン名', equipment_name: '機器名', name: '部品名', model_no: '型番',
+    line_name: '設備名', equipment_name: '機器名', name: '部品名', model_no: '型番',
     location: '在庫場所', safety_stock: '必要数', quantity: '在庫数', importance: '重要度',
     supplier: '仕入れ先', note: '備考',
   };
