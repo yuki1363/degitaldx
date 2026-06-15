@@ -43,7 +43,7 @@ export async function onRequestPost({ request, env, data }) {
   const db = env.DB;
   const body = await readJson(request);
 
-  const { title, planned_date, planned_end_date, plan_type, equipment_name, assignee_name, status, note } = body;
+  const { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status, note } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
   if (!planned_date) return jsonError(400, 'planned_date は必須です');
@@ -58,14 +58,15 @@ export async function onRequestPost({ request, env, data }) {
 
   const result = await db.prepare(`
     INSERT INTO maintenance_plan
-      (title, planned_date, planned_end_date, plan_type, equipment_name, assignee_name, status, note,
+      (title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status, note,
        created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     title.trim(),
     planned_date,
     planned_end_date ?? null,
     plan_type,
+    line_name?.trim() || null,
     equipment_name?.trim() || null,
     assignee_name?.trim() || null,
     resolvedStatus,
@@ -83,7 +84,7 @@ export async function onRequestPost({ request, env, data }) {
     recordId: String(id),
     action: 'create',
     changedBy: userEmail,
-    diff: { title, planned_date, planned_end_date, plan_type, equipment_name, assignee_name, status: resolvedStatus, note },
+    diff: { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status: resolvedStatus, note },
   });
 
   return json({ id }, 201);

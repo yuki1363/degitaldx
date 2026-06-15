@@ -42,8 +42,8 @@ export async function onRequestPut({ request, params, env, data }) {
     return jsonError(400, '終了日は開始日以降にしてください');
   }
 
-  const UPDATABLE = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'equipment_name', 'assignee_name', 'status', 'note'];
-  const TRIM_FIELDS = new Set(['title', 'equipment_name', 'assignee_name']);
+  const UPDATABLE = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'line_name', 'equipment_name', 'assignee_name', 'status', 'note'];
+  const TRIM_FIELDS = new Set(['title', 'line_name', 'equipment_name', 'assignee_name']);
   const setClauses = [];
   const binds = [];
   const diff = {};

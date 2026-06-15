@@ -136,7 +136,8 @@ async function renderDetail(id) {
           ? `${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)}`
           : formatDate(plan.planned_date)
       ),
-      infoRow('設備', plan.equipment_name),
+      infoRow('設備名', plan.line_name),
+      infoRow('機器名', plan.equipment_name),
       infoRow('担当者', plan.assignee_name),
       infoRow('備考', plan.note),
     ]),
@@ -172,18 +173,24 @@ function field(label, input) {
 }
 
 async function renderForm(existing) {
-  // 設備欄の入力候補に在庫の「設備名(line_name)」と「機器名(equipment_name)」の両方を使う。
-  // どちらでも選べて、自由入力もできる（候補が取れなくても続行）。
-  let equipOptions = [];
+  // 在庫から「設備名(line_name) → 機器名(equipment_name)」の対応を作る。
+  // 設備名を選ぶと、その設備に属する機器名が候補に出る（自由入力も可）。
+  const lineNames = new Set();
+  const allEquips = new Set();
+  const equipByLine = new Map(); // line_name -> Set(equipment_name)
   try {
     const { parts } = await api.get('/api/parts');
-    const names = new Set();
     for (const p of parts || []) {
-      if (p.line_name) names.add(p.line_name);
-      if (p.equipment_name) names.add(p.equipment_name);
+      if (p.line_name) lineNames.add(p.line_name);
+      if (p.equipment_name) {
+        allEquips.add(p.equipment_name);
+        const key = p.line_name || '';
+        if (!equipByLine.has(key)) equipByLine.set(key, new Set());
+        equipByLine.get(key).add(p.equipment_name);
+      }
     }
-    equipOptions = [...names].sort((a, b) => a.localeCompare(b, 'ja'));
   } catch { /* 候補なしでも続行 */ }
+  const sortJa = (arr) => [...arr].sort((a, b) => a.localeCompare(b, 'ja'));
 
   const today = nowLocalInputValue().slice(0, 10);
 
@@ -196,10 +203,23 @@ async function renderForm(existing) {
   const startInput = el('input', { type: 'date', value: existing?.planned_date || today });
   const endInput = el('input', { type: 'date', value: existing?.planned_end_date || '' });
 
-  // 設備: 在庫の設備名・機器名を候補に出しつつ自由入力できる datalist
-  const datalistId = 'plan-equip-options';
-  const datalist = el('datalist', { id: datalistId }, equipOptions.map((n) => el('option', { value: n })));
-  const equipInput = el('input', { type: 'text', list: datalistId, value: existing?.equipment_name || '', placeholder: '在庫の設備名・機器名から選択 / 自由入力' });
+  // 設備: 在庫の「設備名」を選ぶと、その設備の「機器名」が候補に出るカスケード入力。
+  // どちらも datalist で自由入力もできる。
+  const lineListId = 'plan-line-options';
+  const equipListId = 'plan-equip-options';
+  const lineDatalist = el('datalist', { id: lineListId }, sortJa(lineNames).map((n) => el('option', { value: n })));
+  const equipDatalist = el('datalist', { id: equipListId }, []);
+  const lineInput = el('input', { type: 'text', list: lineListId, value: existing?.line_name || '', placeholder: '在庫の設備名から選択 / 自由入力' });
+  const equipInput = el('input', { type: 'text', list: equipListId, value: existing?.equipment_name || '', placeholder: '機器名を選択 / 自由入力' });
+
+  // 機器名の候補を「選択中の設備名」に属する機器に更新（該当なし or 未選択なら全機器）
+  const refreshEquipList = () => {
+    const set = equipByLine.get(lineInput.value.trim());
+    const list = set && set.size ? set : allEquips;
+    render(equipDatalist, sortJa(list).map((n) => el('option', { value: n })));
+  };
+  lineInput.addEventListener('input', refreshEquipList);
+  refreshEquipList();
 
   // 担当者: 既定は空欄（自由入力）
   const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });
@@ -220,6 +240,7 @@ async function renderForm(existing) {
       plan_type: typeSelect.value,
       planned_date: startInput.value,
       planned_end_date: endInput.value || null,
+      line_name: lineInput.value.trim() || null,
       equipment_name: equipInput.value.trim() || null,
       assignee_name: assigneeInput.value.trim() || null,
       status: statusSelect.value,
@@ -250,8 +271,10 @@ async function renderForm(existing) {
       field('種別', typeSelect),
       field('開始日（必須）', startInput),
       endField,
-      field('設備', equipInput),
-      datalist,
+      field('設備名', lineInput),
+      lineDatalist,
+      field('機器名', equipInput),
+      equipDatalist,
       field('担当者', assigneeInput),
       field('状態', statusSelect),
       field('備考', noteInput),

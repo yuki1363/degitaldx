@@ -593,8 +593,9 @@ ALTER TABLE parts_inventory ADD COLUMN supplier_email TEXT;
 --   planned_end_date が NULL の予定は「1日のみ」。設定があれば planned_date〜planned_end_date の期間。
 --   equipment_name は在庫の設備名(line_name)を参照しつつ自由入力。assignee_name は登録者を自動入力。
 ALTER TABLE maintenance_plan ADD COLUMN planned_end_date TEXT;  -- 終了日（NULL=1日のみ）
-ALTER TABLE maintenance_plan ADD COLUMN equipment_name TEXT;    -- 設備名（自由入力＋在庫設備名の候補）
-ALTER TABLE maintenance_plan ADD COLUMN assignee_name TEXT;     -- 担当者名（自由入力＋自動入力）
+ALTER TABLE maintenance_plan ADD COLUMN equipment_name TEXT;    -- 機器名（自由入力＋在庫機器名の候補）
+ALTER TABLE maintenance_plan ADD COLUMN assignee_name TEXT;     -- 担当者名（自由入力）
+ALTER TABLE maintenance_plan ADD COLUMN line_name TEXT;         -- 設備名（自由入力＋在庫設備名の候補。機器名はこの設備で絞り込み）
 -- 既存データの設備名・担当者名を旧FKから引き継ぐ（未設定の行のみ・冪等）
 UPDATE maintenance_plan
    SET equipment_name = (SELECT name FROM equipment_ledger WHERE id = maintenance_plan.equipment_id)
