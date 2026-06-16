@@ -37,29 +37,46 @@ export async function onRequestGet({ env, params }) {
   const equipment = await findEquipment(env, params.id);
   if (!equipment) return jsonError(404, '設備が見つかりません。');
 
+  // 関連情報（資料・点検履歴・変更履歴）はそれぞれ独立して取得し、
+  // 一部の取得に失敗しても詳細ページ自体は必ず開けるようにする
+  // （テーブルのスキーマ差異などで 1 クエリが失敗しても 500 にしない）。
+  const safe = async (fn) => {
+    try {
+      const r = await fn();
+      return r || [];
+    } catch (err) {
+      console.error('equipment detail subquery failed:', err && err.stack ? err.stack : err);
+      return [];
+    }
+  };
+
   const [files, inspections, history] = await Promise.all([
-    listAttachedFiles(env, 'equipment_ledger', equipment.id),
-    env.DB.prepare(
-      `SELECT r.id, r.inspected_at, r.has_abnormal, u.name AS assignee_name
-         FROM inspection_result r
-         JOIN users u ON u.id = r.assignee_id
-        WHERE r.equipment_id = ?1 AND r.deleted_at IS NULL
-        ORDER BY r.inspected_at DESC
-        LIMIT 10`
-    )
-      .bind(equipment.id)
-      .all()
-      .then((r) => r.results),
-    env.DB.prepare(
-      `SELECT action, changed_by, changed_at, diff_json
-         FROM audit_log
-        WHERE table_name = 'equipment_ledger' AND record_id = ?1
-        ORDER BY changed_at DESC, id DESC
-        LIMIT 20`
-    )
-      .bind(equipment.id)
-      .all()
-      .then((r) => r.results),
+    safe(() => listAttachedFiles(env, 'equipment_ledger', equipment.id)),
+    safe(() =>
+      env.DB.prepare(
+        `SELECT r.id, r.inspected_at, r.has_abnormal, u.name AS assignee_name
+           FROM inspection_result r
+           JOIN users u ON u.id = r.assignee_id
+          WHERE r.equipment_id = ?1 AND r.deleted_at IS NULL
+          ORDER BY r.inspected_at DESC
+          LIMIT 10`
+      )
+        .bind(equipment.id)
+        .all()
+        .then((r) => r.results)
+    ),
+    safe(() =>
+      env.DB.prepare(
+        `SELECT action, changed_by, changed_at, diff_json
+           FROM audit_log
+          WHERE table_name = 'equipment_ledger' AND record_id = ?1
+          ORDER BY changed_at DESC, id DESC
+          LIMIT 20`
+      )
+        .bind(equipment.id)
+        .all()
+        .then((r) => r.results)
+    ),
   ]);
 
   return json({ equipment, files, inspections, history });
