@@ -37,7 +37,7 @@ export async function onRequestGet({ request, env }) {
   const limit       = Math.min(Number(sp.get('limit')) || 50, 200);
 
   const keywords = q ? q.split(/\s+/).filter(Boolean).slice(0, 5) : [];
-  const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment'];
+  const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan'];
 
   const results = [];
 
@@ -218,6 +218,71 @@ export async function onRequestGet({ request, env }) {
           category_name:  null,
           equipment_name: null,
           url:            `/pages/ledger?id=${r.id}`,
+        });
+      }
+    }
+  }
+
+  // ---------- 部品在庫 ----------
+  if (types.includes('parts')) {
+    const cols = ['name', 'model_no', 'line_name', 'equipment_name', 'location', 'supplier', 'note'];
+    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+    // 全件は多すぎるため、キーワードがあるときだけ検索する
+    if (keywords.length) {
+      let sql = `
+        SELECT id, name, model_no, line_name, equipment_name, location, quantity, safety_stock
+        FROM parts_inventory
+        WHERE deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      sql += ` ORDER BY name LIMIT ${limit}`;
+      const { results: rows } = await db.prepare(sql).bind(...binds).all();
+      for (const r of rows ?? []) {
+        const equip = [r.line_name, r.equipment_name].filter(Boolean).join(' / ');
+        results.push({
+          type:           'parts',
+          id:             r.id,
+          date:           null,
+          title:          r.model_no ? `${r.model_no}（${r.name}）` : r.name,
+          snippet:        [equip, r.location, `在庫${r.quantity}/必要${r.safety_stock}`].filter(Boolean).join(' / '),
+          category_name:  r.quantity < r.safety_stock ? '要発注' : null,
+          equipment_name: null,
+          url:            `/pages/parts?id=${r.id}`,
+        });
+      }
+    }
+  }
+
+  // ---------- 保全計画 ----------
+  if (types.includes('plan')) {
+    const cols = ['title', 'note', 'line_name', 'equipment_name'];
+    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+    const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
+    let sql = `
+      SELECT id, title, plan_type, planned_date, line_name, equipment_name, note, status
+      FROM maintenance_plan
+      WHERE deleted_at IS NULL
+    `;
+    const binds = [...kwBinds];
+    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+    if (from) { sql += ` AND planned_date >= ?`; binds.push(from); }
+    if (to)   { sql += ` AND planned_date <= ?`; binds.push(to); }
+    // キーワードも期間もなければ全件になるのでスキップ
+    if (keywords.length || from || to) {
+      sql += ` ORDER BY planned_date DESC LIMIT ${limit}`;
+      const { results: rows } = await db.prepare(sql).bind(...binds).all();
+      for (const r of rows ?? []) {
+        const equip = [r.line_name, r.equipment_name].filter(Boolean).join(' / ');
+        results.push({
+          type:           'plan',
+          id:             r.id,
+          date:           r.planned_date?.slice(0, 10),
+          title:          r.title,
+          snippet:        [PLAN_TYPE[r.plan_type] || r.plan_type, equip, r.note].filter(Boolean).join(' / ').slice(0, 80),
+          category_name:  null,
+          equipment_name: null,
+          url:            `/pages/plan?id=${r.id}`,
         });
       }
     }

@@ -13,6 +13,8 @@ const TYPE_CONFIG = {
   report:     { label: '日報',      color: '#15803d', bg: '#dcfce7' },
   inspection: { label: '点検',      color: '#1e40af', bg: '#dbeafe' },
   equipment:  { label: '設備台帳',  color: '#0f766e', bg: '#ccfbf1' },
+  parts:      { label: '部品在庫',  color: '#9a3412', bg: '#ffedd5' },
+  plan:       { label: '保全計画',  color: '#0369a1', bg: '#e0f2fe' },
 };
 
 const ALL_TYPES = Object.keys(TYPE_CONFIG);
