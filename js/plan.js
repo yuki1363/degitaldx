@@ -144,9 +144,31 @@ async function renderDetail(id) {
     ]),
     canEdit
       ? el('div', { class: 'action-row' }, [
-          plan.status !== 'done'
+          // 点検予定 → 点検実施画面へワンタップ（計画は設備名で保存されるため
+          // 台帳から名前で設備を解決し、見つかれば設備をプリセットして開く）
+          plan.plan_type === 'inspection'
             ? el('button', {
                 class: 'btn btn-primary',
+                onclick: async () => {
+                  let equipmentId = null;
+                  try {
+                    const { equipment } = await api.get('/api/equipment');
+                    const match = equipment.find((e) =>
+                      (e.line_name || '') === (plan.line_name || '') &&
+                      (e.equipment_name || '') === (plan.equipment_name || '')
+                    );
+                    if (match) equipmentId = match.id;
+                  } catch { /* 解決失敗時は設備未指定で点検入力を開く */ }
+                  const q = new URLSearchParams({ new: '1' });
+                  if (equipmentId) q.set('equipment_id', String(equipmentId));
+                  window.location.href = `/pages/inspection?${q}`;
+                },
+              }, '✅ 点検を開始')
+            : null,
+          plan.status !== 'done'
+            ? el('button', {
+                // 点検予定のときは「点検を開始」が主ボタンなので完了は副ボタンにする
+                class: plan.plan_type === 'inspection' ? 'btn' : 'btn btn-primary',
                 onclick: async () => {
                   await api.put(`/api/plans/${id}`, { status: 'done' });
                   go(`?id=${id}`);
