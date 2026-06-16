@@ -5,36 +5,110 @@ import { nowIso } from '../_lib/util.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
+const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 
-export async function onRequestGet({ request, env, data }) {
-  const db = env.DB;
-  const sp = new URL(request.url).searchParams;
-  const month = sp.get('month');       // YYYY-MM
+// 繰り返し予定を指定範囲内に展開して返す
+function expandRecurring(plan, rangeStart, rangeEnd) {
+  let rule;
+  try { rule = JSON.parse(plan.recurrence_rule); } catch { return []; }
+  const { freq, interval = 1, until } = rule;
+  if (!VALID_FREQS.includes(freq)) return [];
 
-  // 設備名・担当者名は予定そのものに保存（自由入力）。旧FK用のJOINは廃止。
-  let sql = `
-    SELECT p.*
-    FROM maintenance_plan p
-    WHERE p.deleted_at IS NULL
-  `;
-  const binds = [];
+  const msDay = 86400000;
+  const rStart = new Date(rangeStart + 'T00:00:00Z');
+  const rEnd = new Date(rangeEnd + 'T00:00:00Z'); // exclusive
+  const untilDate = until ? new Date(until + 'T00:00:00Z') : new Date('2099-12-31T00:00:00Z');
+  let cur = new Date(plan.planned_date.slice(0, 10) + 'T00:00:00Z');
 
-  if (month) {
-    // 期間が当月と重なる予定を取得（開始 < 翌月初日 かつ 終了 >= 当月初日）
-    const [y, m] = month.split('-').map(Number);
-    const start = `${month}-01`;
-    const endDate = new Date(y, m, 1); // first day of next month
-    const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-01`;
-    sql += ` AND p.planned_date < ? AND COALESCE(p.planned_end_date, p.planned_date) >= ?`;
-    binds.push(end, start);
+  // 範囲開始付近まで高速早送り（ループ回数を最小化）
+  if (cur < rStart) {
+    if (freq === 'daily') {
+      const steps = Math.floor((rStart - cur) / (interval * msDay));
+      cur.setUTCDate(cur.getUTCDate() + steps * interval);
+    } else if (freq === 'weekly') {
+      const steps = Math.floor((rStart - cur) / (interval * 7 * msDay));
+      cur.setUTCDate(cur.getUTCDate() + steps * interval * 7);
+    }
+    // monthly/yearly はステップ数が少ないので単純ループ
+    while (cur < rStart) advance();
   }
 
-  sql += ` ORDER BY p.planned_date ASC, p.id ASC`;
+  function advance() {
+    switch (freq) {
+      case 'daily':   cur.setUTCDate(cur.getUTCDate() + interval); break;
+      case 'weekly':  cur.setUTCDate(cur.getUTCDate() + interval * 7); break;
+      case 'monthly': cur.setUTCMonth(cur.getUTCMonth() + interval); break;
+      case 'yearly':  cur.setUTCFullYear(cur.getUTCFullYear() + interval); break;
+    }
+  }
 
-  const stmt = db.prepare(sql);
-  const { results } = await stmt.bind(...binds).all();
+  const instances = [];
+  let guard = 0;
+  while (cur < rEnd && cur <= untilDate && guard++ < 200) {
+    instances.push({ ...plan, planned_date: cur.toISOString().slice(0, 10) });
+    advance();
+  }
+  return instances;
+}
 
-  return json({ plans: results ?? [] });
+export async function onRequestGet({ request, env }) {
+  const db = env.DB;
+  const sp = new URL(request.url).searchParams;
+  const month = sp.get('month');   // YYYY-MM
+  const from  = sp.get('from');    // YYYY-MM-DD（週表示用）
+  const to    = sp.get('to');      // YYYY-MM-DD exclusive
+
+  let rangeStart, rangeEnd;
+
+  if (month) {
+    const [y, m] = month.split('-').map(Number);
+    rangeStart = `${month}-01`;
+    const nextMonthDate = new Date(Date.UTC(y, m, 1));
+    rangeEnd = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+  } else if (from && to) {
+    rangeStart = from;
+    rangeEnd = to;
+  }
+
+  let results;
+
+  if (rangeStart && rangeEnd) {
+    // 非繰り返し: 範囲と重なるもの
+    // 繰り返し  : 基準日が範囲終了より前（until 判定はJS側）
+    const { results: rows } = await db.prepare(`
+      SELECT p.*
+      FROM maintenance_plan p
+      WHERE p.deleted_at IS NULL
+        AND (
+          (p.recurrence_rule IS NULL
+            AND p.planned_date < ?
+            AND COALESCE(p.planned_end_date, p.planned_date) >= ?)
+          OR
+          (p.recurrence_rule IS NOT NULL AND p.planned_date < ?)
+        )
+      ORDER BY p.planned_date ASC, p.id ASC
+    `).bind(rangeEnd, rangeStart, rangeEnd).all();
+
+    const plans = [];
+    for (const plan of rows ?? []) {
+      if (!plan.recurrence_rule) {
+        plans.push(plan);
+      } else {
+        plans.push(...expandRecurring(plan, rangeStart, rangeEnd));
+      }
+    }
+    plans.sort((a, b) => a.planned_date.localeCompare(b.planned_date) || a.id - b.id);
+    results = plans;
+  } else {
+    const { results: rows } = await db.prepare(`
+      SELECT p.* FROM maintenance_plan p
+      WHERE p.deleted_at IS NULL
+      ORDER BY p.planned_date ASC, p.id ASC
+    `).all();
+    results = rows ?? [];
+  }
+
+  return json({ plans: results });
 }
 
 export async function onRequestPost({ request, env, data }) {
@@ -43,7 +117,11 @@ export async function onRequestPost({ request, env, data }) {
   const db = env.DB;
   const body = await readJson(request);
 
-  const { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status, note } = body;
+  const {
+    title, planned_date, planned_end_date, plan_type,
+    line_name, equipment_name, assignee_name, status, note,
+    recurrence_rule,
+  } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
   if (!planned_date) return jsonError(400, 'planned_date は必須です');
@@ -52,15 +130,31 @@ export async function onRequestPost({ request, env, data }) {
     return jsonError(400, '終了日は開始日以降にしてください');
   }
 
+  // recurrence_rule の検証・正規化
+  let recRule = null;
+  if (recurrence_rule) {
+    try {
+      const parsed = typeof recurrence_rule === 'string' ? JSON.parse(recurrence_rule) : recurrence_rule;
+      if (!VALID_FREQS.includes(parsed.freq)) return jsonError(400, 'recurrence_rule.freq が不正です');
+      const interval = Number(parsed.interval) || 1;
+      const clean = { freq: parsed.freq, interval };
+      if (parsed.until) clean.until = String(parsed.until);
+      recRule = JSON.stringify(clean);
+    } catch {
+      return jsonError(400, 'recurrence_rule の形式が不正です');
+    }
+  }
+
   const resolvedStatus = STATUSES.includes(status) ? status : 'pending';
   const now = nowIso();
   const userEmail = data.user.email;
 
   const result = await db.prepare(`
     INSERT INTO maintenance_plan
-      (title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status, note,
+      (title, planned_date, planned_end_date, plan_type, line_name, equipment_name,
+       assignee_name, status, note, recurrence_rule,
        created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     title.trim(),
     planned_date,
@@ -71,10 +165,8 @@ export async function onRequestPost({ request, env, data }) {
     assignee_name?.trim() || null,
     resolvedStatus,
     note ?? null,
-    userEmail,
-    now,
-    userEmail,
-    now
+    recRule,
+    userEmail, now, userEmail, now
   ).run();
 
   const id = result.meta?.last_row_id;
@@ -84,7 +176,7 @@ export async function onRequestPost({ request, env, data }) {
     recordId: String(id),
     action: 'create',
     changedBy: userEmail,
-    diff: { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status: resolvedStatus, note },
+    diff: { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status: resolvedStatus, note, recurrence_rule: recRule },
   });
 
   return json({ id }, 201);

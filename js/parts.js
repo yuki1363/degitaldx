@@ -536,7 +536,6 @@ async function renderForm(existing) {
 async function renderImport() {
   if (!hasRole(currentUser, 'editor')) throw new Error('権限がありません。');
 
-  // 列マッピング設定（ユーザー指定の項目順）
   const COLS = ['line_name', 'equipment_name', 'name', 'model_no', 'location', 'safety_stock', 'quantity', 'importance', 'supplier', 'note'];
   const COL_LABELS = {
     line_name: '設備名', equipment_name: '機器名', name: '部品名', model_no: '型番',
@@ -546,12 +545,13 @@ async function renderImport() {
 
   let csvHeaders = [];
   let csvRows = [];
-  let mapping = {}; // appField → csvColIndex
+  let mapping = {};
+  let importMode = 'replace'; // 'replace' | 'merge'
 
   const mappingBox = el('div', {}, []);
   const previewBox = el('div', {}, []);
-  const resultBox = el('div', {}, []);
-  const importBtn = el('button', { class: 'btn btn-primary', disabled: true }, '取込実行');
+  const resultBox  = el('div', {}, []);
+  const importBtn  = el('button', { class: 'btn btn-primary', disabled: true }, '取込実行');
 
   const parseCSV = (text) => {
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
@@ -571,6 +571,18 @@ async function renderImport() {
     });
   };
 
+  // CSV内で重複する型番（model_no）を検出する
+  const detectDuplicates = () => {
+    const modelNoIdx = mapping['model_no'];
+    if (modelNoIdx === '' || modelNoIdx === undefined) return [];
+    const counts = new Map();
+    for (const row of csvRows) {
+      const v = row[Number(modelNoIdx)]?.trim();
+      if (v) counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    return [...counts.entries()].filter(([, n]) => n > 1).map(([v, n]) => `${v}（${n}件）`);
+  };
+
   const buildPreview = () => {
     if (csvRows.length === 0) return;
     const sample = csvRows.slice(0, 5).map((row) => {
@@ -580,13 +592,19 @@ async function renderImport() {
       }
       return obj;
     });
+
+    const dups = detectDuplicates();
+    const dupWarn = dups.length > 0
+      ? el('p', { class: 'notice is-error', style: 'margin:8px 0;font-size:12px' },
+          `⚠ CSV内で型番が重複しています: ${dups.join(' / ')}（先着の行を優先します）`)
+      : null;
+
     render(previewBox, [
       el('p', { style: 'font-size:13px;color:#64748b;margin:8px 0' }, `${csvRows.length}行を検出（先頭5件プレビュー）`),
+      dupWarn,
       el('div', { style: 'overflow-x:auto' }, [
         el('table', { class: 'import-table' }, [
-          el('thead', {}, [
-            el('tr', {}, COLS.map((c) => el('th', {}, COL_LABELS[c]))),
-          ]),
+          el('thead', {}, [el('tr', {}, COLS.map((c) => el('th', {}, COL_LABELS[c])))]),
           el('tbody', {}, sample.map((row) =>
             el('tr', {}, COLS.map((c) => el('td', {}, row[c] || '')))
           )),
@@ -601,29 +619,19 @@ async function renderImport() {
       el('p', { style: 'font-size:13px;color:#64748b;margin:0 0 8px' }, 'CSV の列とアプリ項目を対応付けてください:'),
       ...COLS.map((field) => {
         const sel = el('select', {
-          onchange: (e) => {
-            mapping[field] = e.target.value;
-            buildPreview();
-          },
+          onchange: (e) => { mapping[field] = e.target.value; buildPreview(); },
         }, [
           el('option', { value: '' }, '— 対応なし'),
           ...csvHeaders.map((h, i) => el('option', { value: i }, `[${i + 1}] ${h}`)),
         ]);
-        // 自動マッピング（同名の場合）
         const autoIdx = csvHeaders.findIndex(
           (h) => h.toLowerCase().replace(/[\s_-]/g, '') === field.toLowerCase()
             || h === COL_LABELS[field]
         );
-        if (autoIdx >= 0) {
-          sel.value = autoIdx;
-          mapping[field] = autoIdx;
-        } else {
-          mapping[field] = '';
-        }
+        if (autoIdx >= 0) { sel.value = autoIdx; mapping[field] = autoIdx; }
+        else { mapping[field] = ''; }
         return el('div', { class: 'field-pair' }, [
-          el('div', { class: 'field', style: 'flex:0 0 100px' }, [
-            el('label', {}, COL_LABELS[field]),
-          ]),
+          el('div', { class: 'field', style: 'flex:0 0 100px' }, [el('label', {}, COL_LABELS[field])]),
           el('div', { class: 'field', style: 'flex:1' }, [sel]),
         ]);
       }),
@@ -632,25 +640,40 @@ async function renderImport() {
   };
 
   importBtn.onclick = async () => {
+    // 型番重複を除去（先着優先）
+    const seen = new Set();
     const rows = csvRows.map((row) => {
       const obj = {};
       for (const [field, idx] of Object.entries(mapping)) {
         if (idx !== '') obj[field] = row[Number(idx)]?.trim() || '';
       }
       return obj;
-    }).filter((r) => r.name);
+    }).filter((r) => {
+      if (!r.name) return false;
+      const key = r.model_no || '';
+      if (key && seen.has(key)) return false;
+      if (key) seen.add(key);
+      return true;
+    });
 
     if (rows.length === 0) { alert('取り込める行がありません（部品名が必須です）。'); return; }
-    // 全置き換え（破壊的）なので取込前に確認する
-    if (!confirm(`既存の部品データをすべて削除し、CSV ${rows.length}件で置き換えます。\nこの操作は元に戻せます（削除済みデータから復元可能）が、現在の在庫数は上書きされます。\n実行しますか？`)) return;
+
+    const modeLabel = importMode === 'merge' ? '差分マージ（追加・更新のみ）' : '全置き換え';
+    const confirmMsg = importMode === 'merge'
+      ? `差分マージを実行します。\n・型番が一致する既存部品は更新されます\n・CSV に新規型番は追加されます\n・CSV にない既存部品は変更されません\n（CSV ${rows.length}件）\n実行しますか？`
+      : `既存の部品データをすべて削除し、CSV ${rows.length}件で置き換えます。\nこの操作は元に戻せます（削除済みデータから復元可能）が、現在の在庫数は上書きされます。\n実行しますか？`;
+    if (!confirm(confirmMsg)) return;
 
     importBtn.disabled = true;
     importBtn.textContent = '取込中…';
     try {
-      const result = await api.post('/api/parts/import', { rows });
+      const result = await api.post('/api/parts/import', { rows, mode: importMode });
+      const summary = importMode === 'merge'
+        ? `✅ 差分マージ完了: 新規追加 ${result.inserted}件・更新 ${result.updated ?? 0}件（スキップ${result.skipped}件）`
+        : `✅ 全置き換え完了: 既存${result.deleted ?? 0}件を削除 → 新規${result.inserted}件を登録（スキップ${result.skipped}件）`;
       render(resultBox, [
         el('div', { class: 'notice' }, [
-          el('p', {}, `✅ 全置き換え完了: 既存${result.deleted ?? 0}件を削除 → 新規${result.inserted}件を登録（スキップ${result.skipped}件）`),
+          el('p', {}, summary),
           result.errors?.length > 0
             ? el('ul', {}, result.errors.slice(0, 10).map((e) =>
                 el('li', { style: 'font-size:12px;color:#dc2626' }, `行${e.row}: ${e.reason}`)
@@ -665,6 +688,24 @@ async function renderImport() {
       importBtn.textContent = '取込実行';
     }
   };
+
+  // 取込モードセレクタ
+  const modeSelect = el('select', {
+    onchange: (e) => {
+      importMode = e.target.value;
+      // モードごとに警告文を切り替え
+      modeWarnEl.style.display = importMode === 'replace' ? '' : 'none';
+      mergeTipEl.style.display  = importMode === 'merge'   ? '' : 'none';
+    },
+  }, [
+    el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）'),
+    el('option', { value: 'merge' },   '差分マージ（型番一致で更新・新規のみ追加）'),
+  ]);
+
+  const modeWarnEl = el('p', { class: 'notice is-error', style: 'margin-bottom:8px' },
+    '⚠ 既存の部品データはすべて置き換えられます。CSVの内容が新しい正データになります（現在の在庫数も上書き）。');
+  const mergeTipEl = el('p', { class: 'notice', style: 'margin-bottom:8px;display:none' },
+    'ℹ 型番（model_no）が一致する既存部品は更新されます。CSV にない既存部品はそのまま残ります。型番が空の行は常に新規追加されます。');
 
   const fileInput = el('input', {
     type: 'file',
@@ -681,20 +722,18 @@ async function renderImport() {
         mapping = {};
         buildMapping();
       };
-      // Shift_JIS 対応
       reader.readAsText(file, 'UTF-8');
     },
   });
 
   render(app, [
     el('div', { class: 'card' }, [
-      el('h2', { class: 'card-title' }, 'CSVインポート（全置き換え）'),
-      el('p', { class: 'notice is-error', style: 'margin-bottom:8px' }, '⚠ 既存の部品データはすべて置き換えられます。CSVの内容が新しい正データになります（現在の在庫数も上書き）。'),
+      el('h2', { class: 'card-title' }, 'CSVインポート'),
+      el('div', { class: 'field' }, [el('label', {}, '取込モード'), modeSelect]),
+      modeWarnEl,
+      mergeTipEl,
       el('p', { class: 'hint' }, '1行目をヘッダー行とするCSVファイルを選択してください（UTF-8 / Shift_JIS 両対応）。CSVにない項目は空欄で取り込みます（部品名のみ必須）。'),
-      el('div', { class: 'field' }, [
-        el('label', {}, 'CSVファイル'),
-        fileInput,
-      ]),
+      el('div', { class: 'field' }, [el('label', {}, 'CSVファイル'), fileInput]),
       mappingBox,
       previewBox,
       el('div', { class: 'action-row' }, [

@@ -1,15 +1,8 @@
-// 05: 部品在庫 — CSVインポート（全置き換え）
-// POST /api/parts/import   フロントが CSV をパースして送った行データで全件を置き換える（editor以上）
+// 05: 部品在庫 — CSVインポート
+// POST /api/parts/import  フロントが CSV をパースして送った行データを取り込む（editor以上）
 //
-// 方針:
-//   ・項目: line_name(設備名) / equipment_name(機器名) / name(部品名) / model_no(型番) /
-//           location(在庫場所) / safety_stock(必要数) / quantity(在庫数) /
-//           importance(重要度) / supplier(仕入れ先) / note(備考)
-//   ・CSV にない項目は空欄で取り込む（部品名 name のみ必須）
-//   ・「全置き換え」: 既存の部品を全件 論理削除 → CSV の内容で作り直す。
-//     CSV が完全な正となる。削除と登録は batch で原子的に実行する
-//     （途中で失敗しても既存データは変更されない）。
-//   ・内部キー part_no はアプリ側で自動採番する
+// mode: 'replace'（デフォルト）= 全置き換え（既存を全論理削除 → 再作成）
+// mode: 'merge'               = 差分マージ（型番一致で更新・新規のみ追加・既存不変）
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
@@ -36,11 +29,12 @@ export async function onRequestPost({ env, data, request }) {
     return jsonError(400, 'リクエストボディが不正です。rows 配列が必要です。');
   }
 
+  const mode = body.mode === 'merge' ? 'merge' : 'replace';
   const { DB } = env;
   const userEmail = data.user.email;
   const now = nowIso();
 
-  // 取り込む行を先に検証（部品名必須）。有効行が0なら既存を消さずに中断する
+  // 取り込む行を先に検証（部品名必須）
   const validRows = [];
   const errors = [];
   let skipped = 0;
@@ -59,12 +53,19 @@ export async function onRequestPost({ env, data, request }) {
     return jsonError(400, '取り込める行がありません（部品名が必須です）。既存データは変更していません。');
   }
 
-  // 既存件数を記録（監査用）
+  if (mode === 'replace') {
+    return doReplace(DB, userEmail, now, validRows, skipped, errors);
+  } else {
+    return doMerge(DB, userEmail, now, validRows, skipped, errors);
+  }
+}
+
+// --- 全置き換えモード ---
+async function doReplace(DB, userEmail, now, validRows, skipped, errors) {
   const before = await DB.prepare(
     `SELECT COUNT(*) AS n FROM parts_inventory WHERE deleted_at IS NULL`
   ).first();
 
-  // 全置き換え: 既存を全件論理削除 → CSV を一括登録（batch で原子的に実行）
   const statements = [];
   statements.push(
     DB.prepare(
@@ -81,8 +82,8 @@ export async function onRequestPost({ env, data, request }) {
             importance, supplier, note, unit, created_by, created_at, updated_by, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?13, ?14)`
       ).bind(
-        crypto.randomUUID(),       // 内部一意キー（自動採番）
-        cell(row.model_no),        // 型番（重複可）
+        crypto.randomUUID(),
+        cell(row.model_no),
         name,
         cell(row.line_name),
         cell(row.equipment_name),
@@ -107,16 +108,102 @@ export async function onRequestPost({ env, data, request }) {
 
   const inserted = validRows.length;
   const deleted = before?.n || 0;
-
-  // 全置き換えのサマリーを監査ログに1件記録
   await writeAuditLog(DB, {
     tableName: 'parts_inventory',
     recordId: 0,
     action: 'update',
     changedBy: userEmail,
-    diff: { mode: 'replace_all', deleted, inserted, skipped, total: body.rows.length },
+    diff: { mode: 'replace_all', deleted, inserted, skipped, total: validRows.length + skipped },
   });
 
-  // updated はこの方式では発生しない。フロント互換のため 0 を返す
   return json({ inserted, updated: 0, deleted, skipped, errors });
+}
+
+// --- 差分マージモード ---
+async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
+  // 既存部品を型番（model_no）でインデックス化
+  const { results: existing } = await DB.prepare(
+    `SELECT id, model_no FROM parts_inventory WHERE deleted_at IS NULL AND model_no IS NOT NULL`
+  ).all();
+  const existingByModelNo = new Map((existing ?? []).map((r) => [r.model_no, r.id]));
+
+  const statements = [];
+  let inserted = 0;
+  let updated = 0;
+
+  for (const { row, name } of validRows) {
+    const modelNo = cell(row.model_no);
+    const existingId = modelNo ? existingByModelNo.get(modelNo) : null;
+
+    if (existingId) {
+      // UPDATE: 既存レコードを上書き
+      statements.push(
+        DB.prepare(
+          `UPDATE parts_inventory SET
+             name = ?1, line_name = ?2, equipment_name = ?3, location = ?4,
+             quantity = ?5, safety_stock = ?6, importance = ?7,
+             supplier = ?8, note = ?9, updated_by = ?10, updated_at = ?11
+           WHERE id = ?12`
+        ).bind(
+          name,
+          cell(row.line_name),
+          cell(row.equipment_name),
+          cell(row.location),
+          num(row.quantity),
+          num(row.safety_stock),
+          normImportance(row.importance),
+          cell(row.supplier),
+          cell(row.note),
+          userEmail,
+          now,
+          existingId
+        )
+      );
+      updated++;
+    } else {
+      // INSERT: 新規追加
+      statements.push(
+        DB.prepare(
+          `INSERT INTO parts_inventory
+             (part_no, model_no, name, line_name, equipment_name, location, quantity, safety_stock,
+              importance, supplier, note, unit, created_by, created_at, updated_by, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?13, ?14)`
+        ).bind(
+          crypto.randomUUID(),
+          modelNo,
+          name,
+          cell(row.line_name),
+          cell(row.equipment_name),
+          cell(row.location),
+          num(row.quantity),
+          num(row.safety_stock),
+          normImportance(row.importance),
+          cell(row.supplier),
+          cell(row.note),
+          '個',
+          userEmail,
+          now
+        )
+      );
+      inserted++;
+    }
+  }
+
+  if (statements.length > 0) {
+    try {
+      await DB.batch(statements);
+    } catch (err) {
+      return jsonError(500, `取り込みに失敗しました: ${err.message}`);
+    }
+  }
+
+  await writeAuditLog(DB, {
+    tableName: 'parts_inventory',
+    recordId: 0,
+    action: 'update',
+    changedBy: userEmail,
+    diff: { mode: 'merge', inserted, updated, skipped, total: validRows.length + skipped },
+  });
+
+  return json({ inserted, updated, deleted: 0, skipped, errors });
 }
