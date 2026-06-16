@@ -239,27 +239,29 @@ function field(label, input) {
   return el('div', { class: 'field' }, [el('label', {}, label), input]);
 }
 
-async function renderForm(existing) {
+async function renderForm(existing, prefill = null) {
   const [{ equipment }, { users }] = await Promise.all([
     api.get('/api/equipment'),
     api.get('/api/users'),
   ]);
 
+  // existing = 本物の編集（PUT）。prefill = 点検異常などからの新規プリフィル（POST のまま）。
+  const init = existing || prefill || {};
   const f = {
-    title: el('input', { type: 'text', value: existing?.title || '', placeholder: '例: 3号機 ポンプ異音' }),
+    title: el('input', { type: 'text', value: init.title || '', placeholder: '例: 3号機 ポンプ異音' }),
     equipment_id: el('select', {},
       [el('option', { value: '' }, '— 設備を選択（任意）'),
       ...equipment.map((e) =>
-        el('option', { value: e.id, selected: existing?.equipment_id === e.id }, `${e.code} ${e.name}`)
+        el('option', { value: e.id, selected: init.equipment_id === e.id }, `${e.code} ${e.name}`)
       )]
     ),
     assignee_name: el('input', {
       type: 'text',
-      value: existing?.assignee_name || '',
+      value: init.assignee_name || '',
       placeholder: '担当者名（自由入力・任意）',
       list: 'repair-assignee-options',
     }),
-    description: el('textarea', { placeholder: '状況・症状の詳細' }, existing?.description || ''),
+    description: el('textarea', { placeholder: '状況・症状の詳細' }, init.description || ''),
   };
   // 登録済みユーザー名を候補として表示（自由入力は可）
   const assigneeOptions = el('datalist', { id: 'repair-assignee-options' },
@@ -314,7 +316,13 @@ async function renderForm(existing) {
       await renderForm(repair);
     } else if (params.get('new')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
-      await renderForm(null);
+      // 点検異常などからのプリフィル（設備・タイトル・詳細）を受け取る
+      const prefill = {
+        equipment_id: Number(params.get('equipment_id')) || null,
+        title: params.get('title') || '',
+        description: params.get('description') || '',
+      };
+      await renderForm(null, prefill);
     } else {
       await renderList(Number(params.get('equipment_id')) || undefined);
     }

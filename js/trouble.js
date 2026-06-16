@@ -240,7 +240,9 @@ function parseCustomValues(jsonStr) {
   }
 }
 
-async function renderForm(existing) {
+async function renderForm(existing, prefill = null) {
+  // existing = 本物の編集（PUT）。prefill = 点検異常などからの新規プリフィル（POST のまま）。
+  const init = existing || prefill || {};
   const [{ categories: cats }, { equipment }, { fields: customFields }] = await Promise.all([
     api.get('/api/troubles/categories'),
     api.get('/api/equipment'),
@@ -262,10 +264,10 @@ async function renderForm(existing) {
     equipment_id: el('select', {},
       [el('option', { value: '' }, '— 設備を選択（任意）'),
       ...equipment.map((e) =>
-        el('option', { value: e.id, selected: existing?.equipment_id === e.id }, `${e.code} ${e.name}`)
+        el('option', { value: e.id, selected: init.equipment_id === e.id }, `${e.code} ${e.name}`)
       )]
     ),
-    phenomenon: el('textarea', { placeholder: '例: 異音が発生した' }, existing?.phenomenon || ''),
+    phenomenon: el('textarea', { placeholder: '例: 異音が発生した' }, init.phenomenon || ''),
     cause: el('textarea', { placeholder: '例: ベルトの摩耗' }, existing?.cause || ''),
     countermeasure: el('textarea', { placeholder: '例: ベルト交換' }, existing?.countermeasure || ''),
   };
@@ -353,7 +355,12 @@ async function renderForm(existing) {
       await renderForm(trouble);
     } else if (params.get('new')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
-      await renderForm(null);
+      // 点検異常などからのプリフィル（設備・現象）を受け取る
+      const prefill = {
+        equipment_id: Number(params.get('equipment_id')) || null,
+        phenomenon: params.get('phenomenon') || '',
+      };
+      await renderForm(null, prefill);
     } else {
       await renderList(Number(params.get('equipment_id')) || undefined);
     }

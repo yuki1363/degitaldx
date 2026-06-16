@@ -389,6 +389,35 @@ async function renderDetail(id) {
       ),
       inspection.note ? el('p', { class: 'note-box' }, inspection.note) : null,
     ]),
+    // 異常あり → その場で業務依頼・トラブル記録を作成（設備・異常内容をプリフィル）
+    inspection.has_abnormal === 1 && canEdit
+      ? (() => {
+          const summary = inspection.items
+            .filter((it) => it.abnormal)
+            .map((it) => `${it.name}: ${formatItemValue(it)}`)
+            .join('、');
+          const when = formatDateTime(inspection.inspected_at);
+          const repairQuery = new URLSearchParams({
+            new: '1',
+            equipment_id: String(inspection.equipment_id),
+            title: `【点検異常】${inspection.equipment_name}`,
+            description: `${when} の点検で異常を検知しました。\n異常項目: ${summary}`,
+          });
+          const troubleQuery = new URLSearchParams({
+            new: '1',
+            equipment_id: String(inspection.equipment_id),
+            phenomenon: `点検異常（${when}）: ${summary}`,
+          });
+          return el('div', { class: 'card' }, [
+            el('h3', { class: 'card-title' }, '⚠ 異常への対応'),
+            el('p', { class: 'list-item-sub' }, `異常項目: ${summary}`),
+            el('div', { class: 'action-row' }, [
+              el('a', { class: 'btn btn-primary', href: `/pages/repair?${repairQuery}` }, '🔧 業務依頼を作成'),
+              el('a', { class: 'btn', href: `/pages/trouble?${troubleQuery}` }, '⚠ トラブルを記録'),
+            ]),
+          ]);
+        })()
+      : null,
     images.length > 0 || others.length > 0
       ? el('div', { class: 'card' }, [
           el('h3', { class: 'card-title' }, '写真・動画'),
