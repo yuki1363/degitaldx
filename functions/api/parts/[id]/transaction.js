@@ -39,6 +39,18 @@ export async function onRequestPost({ env, data, params, request }) {
     return jsonError(400, 'quantity は1以上の整数を指定してください。');
   }
 
+  // 任意: 入出庫を業務依頼・トラブル対応に紐づける（使用部品の記録）
+  const RELATED_TABLES = ['repair_request', 'trouble_record'];
+  const relatedTable = body.related_table ?? null;
+  const relatedId =
+    body.related_id === undefined || body.related_id === null ? null : Number(body.related_id);
+  if (relatedTable !== null && !RELATED_TABLES.includes(relatedTable)) {
+    return jsonError(400, `related_table が不正です: ${relatedTable}`);
+  }
+  if (relatedId !== null && !Number.isInteger(relatedId)) {
+    return jsonError(400, 'related_id は整数で指定してください。');
+  }
+
   const oldQty = part.quantity;
   let newQty;
   let delta;
@@ -71,10 +83,10 @@ export async function onRequestPost({ env, data, params, request }) {
 
   // 入出庫履歴を登録（adjust のとき delta は負になることもある）
   await DB.prepare(
-    `INSERT INTO parts_transaction (part_id, type, quantity, note, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+    `INSERT INTO parts_transaction (part_id, type, quantity, note, related_table, related_id, created_by, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
   )
-    .bind(id, type, delta, note ?? null, userEmail, now)
+    .bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now)
     .run();
 
   await writeAuditLog(DB, {

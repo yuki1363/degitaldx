@@ -625,3 +625,10 @@ UPDATE repair_request
 -- 設備台帳（06）: 製造番号・製造年月を追加
 ALTER TABLE equipment_ledger ADD COLUMN serial_no TEXT;        -- 製造番号
 ALTER TABLE equipment_ledger ADD COLUMN manufactured_on TEXT;  -- 製造年月（YYYY-MM）
+
+-- 部品在庫（05）: 入出庫を業務依頼・トラブル対応に紐づける
+--   使用部品を業務依頼から記録 → 在庫自動減算 ＋ どの依頼で使ったかを残す
+ALTER TABLE parts_transaction ADD COLUMN related_table TEXT;   -- 'repair_request' / 'trouble_record'
+ALTER TABLE parts_transaction ADD COLUMN related_id INTEGER;   -- 紐づく依頼・トラブルのID
+CREATE INDEX IF NOT EXISTS idx_parts_transaction_related
+  ON parts_transaction (related_table, related_id);

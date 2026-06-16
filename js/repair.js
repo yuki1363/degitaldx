@@ -111,9 +111,74 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { repair, files, history } = await api.get(`/api/repairs/${id}`);
+  const { repair, files, history, used_parts = [] } = await api.get(`/api/repairs/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const s = STATUS[repair.status] || STATUS.open;
+
+  // 使用部品の登録に使う在庫一覧（入力可のときだけ取得）
+  let parts = [];
+  if (canEdit) {
+    try { ({ parts } = await api.get('/api/parts')); } catch { parts = []; }
+  }
+  const partLabel = (p) =>
+    `${p.model_no ? `${p.model_no} ` : ''}${p.name}（在庫${p.quantity}）`;
+
+  // 使用部品カード（出庫＝在庫自動減算 ＋ この依頼に紐づけ）
+  const usedPartsBox = el('div', { class: 'row-list' }, []);
+  const renderUsedParts = (list) => {
+    if (!list || list.length === 0) {
+      render(usedPartsBox, el('p', { class: 'empty' }, '使用部品の記録はありません。'));
+      return;
+    }
+    render(usedPartsBox, list.map((u) =>
+      el('div', { class: 'list-item' }, [
+        el('div', { class: 'list-item-main' }, [
+          el('div', { class: 'list-item-title' },
+            u.part_model_no ? `${u.part_model_no}（${u.part_name}）` : u.part_name),
+          el('div', { class: 'list-item-sub' }, `${formatDateTime(u.created_at)} ／ ${u.created_by}`),
+        ]),
+        el('span', { class: 'status-badge' }, `${Math.abs(u.quantity)} 個使用`),
+      ])
+    ));
+  };
+  renderUsedParts(used_parts);
+
+  const partSelect = el('select', { style: 'flex:1' },
+    [el('option', { value: '' }, '— 部品を選択'),
+     ...parts.map((p) => el('option', { value: p.id }, partLabel(p)))]
+  );
+  const partQty = el('input', { type: 'number', min: '1', value: '1', style: 'width:72px' });
+  const addPartBtn = el('button', { class: 'btn btn-sm btn-primary', onclick: async () => {
+    const partId = Number(partSelect.value);
+    const qty = Number(partQty.value);
+    if (!partId) { alert('部品を選択してください。'); return; }
+    if (!Number.isInteger(qty) || qty <= 0) { alert('数量は1以上で入力してください。'); return; }
+    addPartBtn.disabled = true;
+    try {
+      await api.post(`/api/parts/${partId}/transaction`, {
+        type: 'out',
+        quantity: qty,
+        related_table: 'repair_request',
+        related_id: Number(id),
+        note: `業務依頼「${repair.title}」で使用`,
+      });
+      const fresh = await api.get(`/api/repairs/${id}`);
+      renderUsedParts(fresh.used_parts);
+      // 在庫が減ったので選択肢の残数表示も更新
+      try {
+        const { parts: freshParts } = await api.get('/api/parts');
+        partSelect.replaceChildren(
+          el('option', { value: '' }, '— 部品を選択'),
+          ...freshParts.map((p) => el('option', { value: p.id }, partLabel(p)))
+        );
+      } catch { /* 残数表示の更新失敗は致命的でないため無視 */ }
+      partQty.value = '1';
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      addPartBtn.disabled = false;
+    }
+  } }, '記録');
 
   // ファイル一覧
   const filesBox = el('div', { class: 'row-list' }, []);
@@ -211,6 +276,13 @@ async function renderDetail(id) {
       ]),
       fileInput,
       filesBox,
+    ]),
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '使用部品'),
+      canEdit
+        ? el('div', { class: 'inline-form' }, [partSelect, partQty, addPartBtn])
+        : null,
+      usedPartsBox,
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '対応履歴'),

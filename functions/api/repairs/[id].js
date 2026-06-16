@@ -29,7 +29,7 @@ export async function onRequestGet({ params, env }) {
   const repair = await getRepair(db, id);
   if (!repair) return jsonError(404, '修理依頼が見つかりません');
 
-  const [filesResult, historyResult] = await Promise.all([
+  const [filesResult, historyResult, usedPartsResult] = await Promise.all([
     db
       .prepare(
         `SELECT id, file_name, content_type, size_bytes, created_by, created_at
@@ -48,12 +48,27 @@ export async function onRequestGet({ params, env }) {
       )
       .bind(id)
       .all(),
+    // 使用部品（この依頼に紐づく出庫履歴）。related_* 列が未追加の環境でも
+    // 詳細が開けるよう、失敗時は空配列にフォールバックする。
+    db
+      .prepare(
+        `SELECT pt.id, pt.part_id, pt.quantity, pt.created_by, pt.created_at,
+                p.name AS part_name, p.model_no AS part_model_no
+           FROM parts_transaction pt
+           JOIN parts_inventory p ON p.id = pt.part_id
+          WHERE pt.related_table = 'repair_request' AND pt.related_id = ?1 AND pt.type = 'out'
+          ORDER BY pt.created_at ASC`
+      )
+      .bind(id)
+      .all()
+      .catch(() => ({ results: [] })),
   ]);
 
   return json({
     repair,
     files: filesResult.results ?? [],
     history: historyResult.results ?? [],
+    used_parts: usedPartsResult.results ?? [],
   });
 }
 

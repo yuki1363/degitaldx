@@ -470,6 +470,14 @@ label {
   gap: 6px;
 }
 
+/* 使用部品など「選択＋数量＋ボタン」の横並び入力行 */
+.inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
 .field {
   margin-bottom: 12px;
 }
