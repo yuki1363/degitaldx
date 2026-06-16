@@ -103,16 +103,8 @@ export async function validateInspectionInput(env, body) {
     .first();
   if (!equipment) return { error: '対象の設備が見つかりません。' };
 
-  const assigneeId = Number(body.assignee_id);
-  if (!Number.isInteger(assigneeId) || assigneeId <= 0) {
-    return { error: '担当者（assignee_id）を指定してください。' };
-  }
-  const assignee = await env.DB.prepare(
-    'SELECT id FROM users WHERE id = ?1 AND deleted_at IS NULL'
-  )
-    .bind(assigneeId)
-    .first();
-  if (!assignee) return { error: '担当者が見つかりません。' };
+  // 担当者は自由入力（手入力の文字列）。未入力でも可（任意）。
+  const assigneeName = body.assignee_name ? String(body.assignee_name).trim().slice(0, 100) : null;
 
   const inspectedAt = String(body.inspected_at || '');
   if (!ISO_DATETIME.test(inspectedAt)) {
@@ -136,7 +128,7 @@ export async function validateInspectionInput(env, body) {
   return {
     value: {
       equipment_id: equipmentId,
-      assignee_id: assigneeId,
+      assignee_name: assigneeName,
       inspected_at: inspectedAt,
       note: body.note ? String(body.note).trim().slice(0, 1000) : null,
       items: snapshot.items,
@@ -168,11 +160,10 @@ export async function onRequestGet({ request, env }) {
 
   const { results } = await env.DB.prepare(
     `SELECT r.id, r.equipment_id, e.code AS equipment_code, e.name AS equipment_name,
-            r.assignee_id, u.name AS assignee_name,
+            r.assignee_name,
             r.inspected_at, r.has_abnormal, r.note
        FROM inspection_result r
        JOIN equipment_ledger e ON e.id = r.equipment_id
-       JOIN users u ON u.id = r.assignee_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY r.inspected_at DESC, r.id DESC
       LIMIT 200`
@@ -193,13 +184,15 @@ export async function onRequestPost({ request, env, data }) {
   const v = parsed.value;
 
   const now = nowIso();
+  // assignee_id は NOT NULL 制約が残るため、ログインユーザーのIDで埋める
+  // （担当者の表示・入力は自由入力の assignee_name に一本化）。
   const result = await env.DB.prepare(
     `INSERT INTO inspection_result
-       (equipment_id, assignee_id, inspected_at, items_json, has_abnormal, note, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+       (equipment_id, assignee_id, assignee_name, inspected_at, items_json, has_abnormal, note, created_by, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
   )
     .bind(
-      v.equipment_id, v.assignee_id, v.inspected_at,
+      v.equipment_id, data.user.id, v.assignee_name, v.inspected_at,
       JSON.stringify(v.items), v.has_abnormal, v.note, data.user.email, now
     )
     .run();
@@ -222,7 +215,7 @@ export async function onRequestPost({ request, env, data }) {
     changedBy: data.user.email,
     diff: {
       equipment_id: v.equipment_id,
-      assignee_id: v.assignee_id,
+      assignee_name: v.assignee_name,
       inspected_at: v.inspected_at,
       item_count: v.items.length,
       has_abnormal: v.has_abnormal === 1,

@@ -608,3 +608,16 @@ UPDATE maintenance_plan
 UPDATE maintenance_plan
    SET assignee_name = (SELECT name FROM users WHERE id = maintenance_plan.assignee_id)
  WHERE assignee_name IS NULL AND assignee_id IS NOT NULL;
+
+-- 点検実施（02）・業務依頼（03）: 担当者を自由入力（assignee_name）に変更。
+--   旧担当者FK(assignee_id)の列は残す（点検は NOT NULL のため登録者IDで埋める）。
+--   表示・入力は assignee_name（自由入力）に一本化する。
+ALTER TABLE inspection_result ADD COLUMN assignee_name TEXT;  -- 担当者名（自由入力）
+ALTER TABLE repair_request    ADD COLUMN assignee_name TEXT;  -- 担当者名（自由入力）
+-- 既存データの担当者名を旧FKから引き継ぐ（未設定の行のみ・冪等）
+UPDATE inspection_result
+   SET assignee_name = (SELECT name FROM users WHERE id = inspection_result.assignee_id)
+ WHERE assignee_name IS NULL AND assignee_id IS NOT NULL;
+UPDATE repair_request
+   SET assignee_name = (SELECT name FROM users WHERE id = repair_request.assignee_id)
+ WHERE assignee_name IS NULL AND assignee_id IS NOT NULL;

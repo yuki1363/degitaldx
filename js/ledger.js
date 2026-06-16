@@ -352,7 +352,7 @@ async function renderDetail(id) {
               el('a', { class: 'list-item', href: `/pages/inspection?id=${r.id}` }, [
                 el('div', { class: 'list-item-main' }, [
                   el('div', { class: 'list-item-title' }, formatDateTime(r.inspected_at)),
-                  el('div', { class: 'list-item-sub' }, `担当: ${r.assignee_name}`),
+                  el('div', { class: 'list-item-sub' }, `担当: ${r.assignee_name || '未設定'}`),
                 ]),
                 el('span', { class: r.has_abnormal ? 'abn-badge is-abn' : 'abn-badge' }, r.has_abnormal ? '異常あり' : '正常'),
               ])

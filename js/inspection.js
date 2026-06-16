@@ -65,7 +65,7 @@ async function renderList(presetEquipmentId) {
           el('div', { class: 'list-item-main' }, [
             el('div', { class: 'list-item-title' }, formatDateTime(r.inspected_at)),
             el('div', { class: 'list-item-sub' }, `${r.equipment_code} ${r.equipment_name}`),
-            el('div', { class: 'list-item-sub' }, `担当: ${r.assignee_name}`),
+            el('div', { class: 'list-item-sub' }, `担当: ${r.assignee_name || '未設定'}`),
           ]),
           abnBadge(r.has_abnormal === 1),
         ])
@@ -224,13 +224,15 @@ async function renderEntry({ equipmentId, existing }) {
   };
   equipmentSelect.addEventListener('change', () => loadChecklist().catch(showError));
 
-  const assigneeSelect = el('select', {},
-    users.map((u) =>
-      el('option', {
-        value: u.id,
-        selected: existing ? u.id === existing.assignee_id : u.id === currentUser.id,
-      }, u.group_name ? `${u.name}（${u.group_name}）` : u.name)
-    )
+  // 担当者は自由入力（既定はログインユーザー名）。登録済みユーザー名は候補として表示。
+  const assigneeInput = el('input', {
+    type: 'text',
+    value: existing ? (existing.assignee_name || '') : (currentUser.name || ''),
+    placeholder: '担当者名（自由入力）',
+    list: 'inspection-assignee-options',
+  });
+  const assigneeOptions = el('datalist', { id: 'inspection-assignee-options' },
+    users.map((u) => el('option', { value: u.name }))
   );
   const datetimeInput = el('input', {
     type: 'datetime-local',
@@ -299,7 +301,7 @@ async function renderEntry({ equipmentId, existing }) {
       saveBtn.textContent = '保存中…';
       const body = {
         equipment_id: Number(equipmentSelect.value),
-        assignee_id: Number(assigneeSelect.value),
+        assignee_name: assigneeInput.value.trim() || null,
         inspected_at: inspectedAt,
         note: noteInput.value.trim(),
         items,
@@ -323,7 +325,7 @@ async function renderEntry({ equipmentId, existing }) {
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '点検記録を編集' : '点検を記録'),
       el('div', { class: 'field' }, [el('label', {}, '設備'), equipmentSelect]),
-      el('div', { class: 'field' }, [el('label', {}, '担当者'), assigneeSelect]),
+      el('div', { class: 'field' }, [el('label', {}, '担当者'), assigneeInput, assigneeOptions]),
       el('div', { class: 'field' }, [el('label', {}, '実施日時'), datetimeInput]),
     ]),
     el('div', { class: 'card' }, [
@@ -370,7 +372,7 @@ async function renderDetail(id) {
         el('a', { href: `/pages/ledger?id=${inspection.equipment_id}` },
           `${inspection.equipment_code} ${inspection.equipment_name}`),
       ]),
-      el('div', { class: 'list-item-sub' }, `担当: ${inspection.assignee_name} ／ 記録者: ${inspection.created_by}`),
+      el('div', { class: 'list-item-sub' }, `担当: ${inspection.assignee_name || '未設定'} ／ 記録者: ${inspection.created_by}`),
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '点検結果'),

@@ -11,11 +11,9 @@ async function getRepair(db, id) {
     .prepare(
       `SELECT
          r.*,
-         u.name  AS assignee_name,
          e.name  AS equipment_name,
          e.code  AS equipment_code
        FROM repair_request r
-       LEFT JOIN users            u ON r.assignee_id  = u.id
        LEFT JOIN equipment_ledger e ON r.equipment_id = e.id
        WHERE r.id = ?1 AND r.deleted_at IS NULL`
     )
@@ -75,7 +73,7 @@ export async function onRequestPut({ request, params, env, data }) {
   const body = await readJson(request);
   if (!body) return jsonError(400, 'リクエストボディが不正です');
 
-  const UPDATABLE = ['title', 'equipment_id', 'description', 'assignee_id', 'status'];
+  const UPDATABLE = ['title', 'equipment_id', 'description', 'assignee_name', 'status'];
 
   const setClauses = [];
   const binds = [];

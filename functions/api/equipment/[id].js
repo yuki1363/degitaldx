@@ -54,9 +54,8 @@ export async function onRequestGet({ env, params }) {
     safe(() => listAttachedFiles(env, 'equipment_ledger', equipment.id)),
     safe(() =>
       env.DB.prepare(
-        `SELECT r.id, r.inspected_at, r.has_abnormal, u.name AS assignee_name
+        `SELECT r.id, r.inspected_at, r.has_abnormal, r.assignee_name
            FROM inspection_result r
-           JOIN users u ON u.id = r.assignee_id
           WHERE r.equipment_id = ?1 AND r.deleted_at IS NULL
           ORDER BY r.inspected_at DESC
           LIMIT 10`

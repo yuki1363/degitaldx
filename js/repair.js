@@ -239,20 +239,24 @@ async function renderForm(existing) {
         el('option', { value: e.id, selected: existing?.equipment_id === e.id }, `${e.code} ${e.name}`)
       )]
     ),
-    assignee_id: el('select', {},
-      [el('option', { value: '' }, '— 担当者を選択（任意）'),
-      ...users.map((u) =>
-        el('option', { value: u.id, selected: existing?.assignee_id === u.id }, u.name || u.email)
-      )]
-    ),
+    assignee_name: el('input', {
+      type: 'text',
+      value: existing?.assignee_name || '',
+      placeholder: '担当者名（自由入力・任意）',
+      list: 'repair-assignee-options',
+    }),
     description: el('textarea', { placeholder: '状況・症状の詳細' }, existing?.description || ''),
   };
+  // 登録済みユーザー名を候補として表示（自由入力は可）
+  const assigneeOptions = el('datalist', { id: 'repair-assignee-options' },
+    users.map((u) => el('option', { value: u.name || u.email }))
+  );
 
   const save = async () => {
     const body = {
       title: f.title.value.trim(),
       equipment_id: f.equipment_id.value ? Number(f.equipment_id.value) : null,
-      assignee_id: f.assignee_id.value ? Number(f.assignee_id.value) : null,
+      assignee_name: f.assignee_name.value.trim() || null,
       description: f.description.value.trim() || null,
     };
     if (!body.title) { alert('タイトルは必須です。'); return; }
@@ -272,7 +276,7 @@ async function renderForm(existing) {
       el('h2', { class: 'card-title' }, existing ? '業務依頼を編集' : '業務依頼を登録'),
       field('タイトル（必須）', f.title),
       field('設備', f.equipment_id),
-      field('担当者', f.assignee_id),
+      el('div', { class: 'field' }, [el('label', {}, '担当者'), f.assignee_name, assigneeOptions]),
       field('詳細・症状', f.description),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),

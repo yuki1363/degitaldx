@@ -15,12 +15,11 @@ async function findInspection(env, idParam) {
   if (!Number.isInteger(id) || id <= 0) return null;
   return env.DB.prepare(
     `SELECT r.id, r.equipment_id, e.code AS equipment_code, e.name AS equipment_name,
-            r.assignee_id, u.name AS assignee_name,
+            r.assignee_name,
             r.inspected_at, r.items_json, r.has_abnormal, r.note,
             r.created_by, r.created_at, r.updated_by, r.updated_at
        FROM inspection_result r
        JOIN equipment_ledger e ON e.id = r.equipment_id
-       JOIN users u ON u.id = r.assignee_id
       WHERE r.id = ?1 AND r.deleted_at IS NULL`
   )
     .bind(id)
@@ -66,14 +65,15 @@ export async function onRequestPut({ request, env, data, params }) {
   const v = parsed.value;
 
   const now = nowIso();
+  // 担当者は自由入力の assignee_name を更新（旧FK assignee_id はそのまま）。
   await env.DB.prepare(
     `UPDATE inspection_result
-        SET assignee_id = ?1, inspected_at = ?2, items_json = ?3, has_abnormal = ?4,
+        SET assignee_name = ?1, inspected_at = ?2, items_json = ?3, has_abnormal = ?4,
             note = ?5, updated_by = ?6, updated_at = ?7
       WHERE id = ?8 AND deleted_at IS NULL`
   )
     .bind(
-      v.assignee_id, v.inspected_at, JSON.stringify(v.items), v.has_abnormal,
+      v.assignee_name, v.inspected_at, JSON.stringify(v.items), v.has_abnormal,
       v.note, data.user.email, now, existing.id
     )
     .run();
@@ -93,13 +93,13 @@ export async function onRequestPut({ request, env, data, params }) {
     changedBy: data.user.email,
     diff: {
       before: {
-        assignee_id: existing.assignee_id,
+        assignee_name: existing.assignee_name,
         inspected_at: existing.inspected_at,
         has_abnormal: existing.has_abnormal === 1,
         note: existing.note,
       },
       after: {
-        assignee_id: v.assignee_id,
+        assignee_name: v.assignee_name,
         inspected_at: v.inspected_at,
         has_abnormal: v.has_abnormal === 1,
         note: v.note,

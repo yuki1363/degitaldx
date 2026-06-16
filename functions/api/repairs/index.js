@@ -13,14 +13,13 @@ export async function onRequestGet({ request, env }) {
   const status = sp.get('status');
   const equipmentId = sp.get('equipment_id');
 
+  // 担当者は自由入力の assignee_name 列を使う（r.* に含まれる）。users JOIN は廃止。
   let sql = `
     SELECT
       r.*,
-      u.name  AS assignee_name,
       e.name  AS equipment_name,
       e.code  AS equipment_code
     FROM repair_request r
-    LEFT JOIN users           u ON r.assignee_id  = u.id
     LEFT JOIN equipment_ledger e ON r.equipment_id = e.id
     WHERE r.deleted_at IS NULL
   `;
@@ -50,7 +49,7 @@ export async function onRequestPost({ request, env, data }) {
   const body = await readJson(request);
   if (!body) return jsonError(400, 'リクエストボディが不正です');
 
-  const { title, equipment_id, description, assignee_id, status = 'open' } = body;
+  const { title, equipment_id, description, assignee_name, status = 'open' } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
   if (!VALID_STATUSES.includes(status)) {
@@ -63,7 +62,7 @@ export async function onRequestPost({ request, env, data }) {
   const result = await db
     .prepare(
       `INSERT INTO repair_request
-         (title, equipment_id, description, assignee_id, status,
+         (title, equipment_id, description, assignee_name, status,
           created_by, created_at, updated_by, updated_at)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
     )
@@ -71,7 +70,7 @@ export async function onRequestPost({ request, env, data }) {
       title.trim(),
       equipment_id ?? null,
       description ?? null,
-      assignee_id ?? null,
+      assignee_name?.trim() || null,
       status,
       userEmail,
       now,
@@ -96,7 +95,7 @@ export async function onRequestPost({ request, env, data }) {
     recordId: String(id),
     action: 'create',
     changedBy: userEmail,
-    diff: { title: title.trim(), equipment_id, description, assignee_id, status },
+    diff: { title: title.trim(), equipment_id, description, assignee_name: assignee_name?.trim() || null, status },
   });
 
   return json({ id }, 201);
