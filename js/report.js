@@ -133,8 +133,10 @@ function infoRow(label, value) {
   ]);
 }
 
-const LINKED_TYPE_LABELS = { trouble: 'トラブル', inspection: '点検', repair: '業務依頼' };
-const LINKED_TYPE_URLS   = { trouble: '/pages/trouble?id=', inspection: '/pages/inspection?id=', repair: '/pages/repair?id=' };
+const LINKED_TYPE_LABELS = { trouble: 'トラブル', inspection: '点検', repair: '業務依頼', plan: '保全計画' };
+const LINKED_TYPE_URLS   = { trouble: '/pages/trouble?id=', inspection: '/pages/inspection?id=', repair: '/pages/repair?id=', plan: '/pages/plan?id=' };
+// 保全計画の種別ラベル（候補表示用）
+const PLAN_TYPE_LABELS = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
 
 async function renderDetail(id) {
   const { report } = await api.get(`/api/reports/${id}`);
@@ -281,10 +283,17 @@ async function renderForm(existing) {
 
   const loadCandidates = async (date) => {
     render(candidatesBox, el('p', { class: 'hint', style: 'font-size:12px' }, '候補を読み込み中…'));
-    const [{ troubles = [] }, { repairs = [] }, { inspections = [] }] = await Promise.all([
+    // その日の保全計画も候補に含める（to は排他なので翌日を指定）
+    const nextDay = (() => {
+      const d = new Date(date + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    const [{ troubles = [] }, { repairs = [] }, { inspections = [] }, { plans = [] }] = await Promise.all([
       api.get(`/api/troubles?from=${date}&to=${date}`).catch(() => ({ troubles: [] })),
       api.get('/api/repairs?status=open').catch(() => ({ repairs: [] })),
       api.get(`/api/inspections?from=${date}&to=${date}`).catch(() => ({ inspections: [] })),
+      api.get(`/api/plans?from=${date}&to=${nextDay}`).catch(() => ({ plans: [] })),
     ]);
 
     const troubleRows = troubles.map((t) =>
@@ -297,14 +306,17 @@ async function renderForm(existing) {
     const repairRows = repairs.map((r) =>
       makeCheckRow('repair', r.id, `[業務依頼] ${r.title.slice(0, 40)}`)
     );
+    const planRows = plans.map((p) =>
+      makeCheckRow('plan', p.id, `[計画:${PLAN_TYPE_LABELS[p.plan_type] || p.plan_type}] ${(p.title || '').slice(0, 40)}`)
+    );
 
-    const total = troubleRows.length + inspectionRows.length + repairRows.length;
+    const total = troubleRows.length + inspectionRows.length + repairRows.length + planRows.length;
     render(candidatesBox, total > 0
       ? [
           el('label', {}, `関連する記録を紐づける（任意）— ${date}`),
-          el('div', { class: 'link-check-list' }, [...troubleRows, ...inspectionRows, ...repairRows]),
+          el('div', { class: 'link-check-list' }, [...troubleRows, ...inspectionRows, ...repairRows, ...planRows]),
         ]
-      : el('p', { class: 'hint' }, `${date} の点検・トラブル記録・未完了業務依頼はありません。`)
+      : el('p', { class: 'hint' }, `${date} の点検・トラブル・業務依頼・保全計画はありません。`)
     );
   };
 
