@@ -58,7 +58,7 @@ export async function onRequestGet({ env, params }) {
     }
   };
 
-  const [files, inspections, history] = await Promise.all([
+  const [files, inspections, troubles, repairs, plans, history] = await Promise.all([
     safe(() => listAttachedFiles(env, 'equipment_ledger', equipment.id)),
     safe(() =>
       env.DB.prepare(
@@ -72,6 +72,50 @@ export async function onRequestGet({ env, params }) {
         .all()
         .then((r) => r.results)
     ),
+    // トラブル履歴（04）— equipment_id で確実に紐づく
+    safe(() =>
+      env.DB.prepare(
+        `SELECT t.id, t.occurred_at, t.phenomenon, tc.name AS category_name
+           FROM trouble_record t
+           LEFT JOIN trouble_category tc ON t.category_id = tc.id
+          WHERE t.equipment_id = ?1 AND t.deleted_at IS NULL
+          ORDER BY t.occurred_at DESC, t.id DESC
+          LIMIT 10`
+      )
+        .bind(equipment.id)
+        .all()
+        .then((r) => r.results)
+    ),
+    // 業務依頼履歴（03）— equipment_id で確実に紐づく
+    safe(() =>
+      env.DB.prepare(
+        `SELECT r.id, r.title, r.status, r.created_at
+           FROM repair_request r
+          WHERE r.equipment_id = ?1 AND r.deleted_at IS NULL
+          ORDER BY r.created_at DESC, r.id DESC
+          LIMIT 10`
+      )
+        .bind(equipment.id)
+        .all()
+        .then((r) => r.results)
+    ),
+    // 今後の保全計画（01）— 計画は自由入力の設備名・機器名で保存されるため、
+    // 設備台帳の line_name / equipment_name と一致する未完了の予定を予定日順で拾う。
+    safe(() => {
+      if (!equipment.line_name && !equipment.equipment_name) return [];
+      return env.DB.prepare(
+        `SELECT id, title, plan_type, planned_date, planned_end_date, status
+           FROM maintenance_plan
+          WHERE deleted_at IS NULL AND status != 'done'
+            AND COALESCE(line_name, '') = COALESCE(?1, '')
+            AND COALESCE(equipment_name, '') = COALESCE(?2, '')
+          ORDER BY planned_date ASC, id ASC
+          LIMIT 10`
+      )
+        .bind(equipment.line_name || '', equipment.equipment_name || '')
+        .all()
+        .then((r) => r.results);
+    }),
     safe(() =>
       env.DB.prepare(
         `SELECT action, changed_by, changed_at, diff_json
@@ -86,7 +130,7 @@ export async function onRequestGet({ env, params }) {
     ),
   ]);
 
-  return json({ equipment, files, inspections, history });
+  return json({ equipment, files, inspections, troubles, repairs, plans, history });
 }
 
 export async function onRequestPut({ request, env, data, params }) {

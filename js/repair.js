@@ -31,19 +31,27 @@ function showError(err) {
 
 // ---------------- 一覧 ----------------
 
-async function renderList() {
+async function renderList(equipmentId) {
   const [{ equipment }, { users }] = await Promise.all([
     api.get('/api/equipment'),
     api.get('/api/users'),
   ]);
+
+  // 設備台帳の「すべて見る」から来た場合はその設備で絞り込む
+  const filterEquipment = equipmentId ? String(equipmentId) : '';
+  const filterEquipName = filterEquipment
+    ? (() => { const e = equipment.find((x) => String(x.id) === filterEquipment); return e ? `${e.code} ${e.name}` : null; })()
+    : null;
 
   let filterStatus = '';
   const listBox = el('div', { class: 'row-list' }, []);
 
   const load = async () => {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
-    const params = filterStatus ? `?status=${filterStatus}` : '';
-    const { repairs } = await api.get(`/api/repairs${params}`);
+    const sp = new URLSearchParams();
+    if (filterStatus) sp.set('status', filterStatus);
+    if (filterEquipment) sp.set('equipment_id', filterEquipment);
+    const { repairs } = await api.get(`/api/repairs${sp.toString() ? '?' + sp : ''}`);
     if (repairs.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '業務依頼はありません。'));
       return;
@@ -76,6 +84,12 @@ async function renderList() {
   ]);
 
   render(app, [
+    filterEquipName
+      ? el('div', { class: 'notice' }, [
+          `設備「${filterEquipName}」で絞り込み中　`,
+          el('a', { href: '/pages/repair' }, 'すべて表示'),
+        ])
+      : null,
     el('div', { class: 'toolbar' }, [
       statusSel,
       hasRole(currentUser, 'editor')
@@ -302,7 +316,7 @@ async function renderForm(existing) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
       await renderForm(null);
     } else {
-      await renderList();
+      await renderList(Number(params.get('equipment_id')) || undefined);
     }
   } catch (err) {
     showError(err);

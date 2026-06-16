@@ -24,16 +24,16 @@ function showError(err) {
 
 // ---------------- 一覧 ----------------
 
-async function renderList() {
+async function renderList(equipmentId) {
   const [{ categories: cats }, { equipment }] = await Promise.all([
     api.get('/api/troubles/categories'),
     api.get('/api/equipment'),
   ]);
   categories = cats;
 
-  // フィルタ状態
+  // フィルタ状態（設備台帳の「すべて見る」から来た場合は設備で初期絞り込み）
   let filterCategory = '';
-  let filterEquipment = '';
+  let filterEquipment = equipmentId ? String(equipmentId) : '';
   let filterFrom = '';
   let filterTo = '';
 
@@ -75,7 +75,7 @@ async function renderList() {
   ]);
   const eqSel = el('select', { onchange: (e) => { filterEquipment = e.target.value; load().catch(showError); } }, [
     el('option', { value: '' }, '全設備'),
-    ...equipment.map((e) => el('option', { value: e.id }, `${e.code} ${e.name}`)),
+    ...equipment.map((e) => el('option', { value: e.id, selected: String(e.id) === filterEquipment }, `${e.code} ${e.name}`)),
   ]);
   const fromInput = el('input', {
     type: 'date',
@@ -355,7 +355,7 @@ async function renderForm(existing) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
       await renderForm(null);
     } else {
-      await renderList();
+      await renderList(Number(params.get('equipment_id')) || undefined);
     }
   } catch (err) {
     showError(err);

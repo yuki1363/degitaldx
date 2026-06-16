@@ -15,6 +15,11 @@ import qrcode from '/js/vendor/qrcode.mjs';
 
 const STATUS_LABELS = { active: '稼働中', stopped: '停止中', retired: '廃棄' };
 
+// 関連レコード表示用ラベル（各機能の表記に合わせる）
+const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
+const PLAN_TYPE_LABELS = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
+const PLAN_STATUS_LABELS = { pending: '未実施', done: '完了', overdue: '期限超過' };
+
 // 一覧の設備名→機器名フィルタの内部値
 const ALL_LINES = '__ALL__';
 const ALL_EQUIPS = '__ALL__';
@@ -211,7 +216,8 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { equipment: eq, files, inspections, history } = await api.get(`/api/equipment/${id}`);
+  const { equipment: eq, files, inspections, troubles = [], repairs = [], plans = [], history } =
+    await api.get(`/api/equipment/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const isAdmin = hasRole(currentUser, 'admin');
 
@@ -379,6 +385,68 @@ async function renderDetail(id) {
                   el('div', { class: 'list-item-sub' }, `担当: ${r.assignee_name || '未設定'}`),
                 ]),
                 el('span', { class: r.has_abnormal ? 'abn-badge is-abn' : 'abn-badge' }, r.has_abnormal ? '異常あり' : '正常'),
+              ])
+            )
+          ),
+    ]),
+    el('div', { class: 'card' }, [
+      el('div', { class: 'card-title-row' }, [
+        el('h3', { class: 'card-title' }, 'トラブル履歴（直近10件）'),
+        el('a', { class: 'btn btn-sm', href: `/pages/trouble?equipment_id=${eq.id}` }, 'すべて見る'),
+      ]),
+      troubles.length === 0
+        ? el('p', { class: 'empty' }, 'トラブル記録はまだありません。')
+        : el('div', { class: 'row-list' },
+            troubles.map((t) =>
+              el('a', { class: 'list-item', href: `/pages/trouble?id=${t.id}` }, [
+                el('div', { class: 'list-item-main' }, [
+                  el('div', { class: 'list-item-title' }, t.phenomenon || '（現象の記載なし）'),
+                  el('div', { class: 'list-item-sub' },
+                    [t.category_name, formatDateTime(t.occurred_at)].filter(Boolean).join(' / ')),
+                ]),
+                el('span', { class: 'chevron' }, '›'),
+              ])
+            )
+          ),
+    ]),
+    el('div', { class: 'card' }, [
+      el('div', { class: 'card-title-row' }, [
+        el('h3', { class: 'card-title' }, '業務依頼（直近10件）'),
+        el('a', { class: 'btn btn-sm', href: `/pages/repair?equipment_id=${eq.id}` }, 'すべて見る'),
+      ]),
+      repairs.length === 0
+        ? el('p', { class: 'empty' }, '業務依頼はまだありません。')
+        : el('div', { class: 'row-list' },
+            repairs.map((r) =>
+              el('a', { class: 'list-item', href: `/pages/repair?id=${r.id}` }, [
+                el('div', { class: 'list-item-main' }, [
+                  el('div', { class: 'list-item-title' }, r.title),
+                  el('div', { class: 'list-item-sub' }, formatDateTime(r.created_at)),
+                ]),
+                el('span', { class: `status-badge is-${r.status}` }, REPAIR_STATUS_LABELS[r.status] || r.status),
+              ])
+            )
+          ),
+    ]),
+    el('div', { class: 'card' }, [
+      el('div', { class: 'card-title-row' }, [
+        el('h3', { class: 'card-title' }, '今後の保全計画'),
+        el('a', { class: 'btn btn-sm', href: '/pages/plan' }, 'カレンダー'),
+      ]),
+      plans.length === 0
+        ? el('p', { class: 'empty' }, '予定されている保全計画はありません。')
+        : el('div', { class: 'row-list' },
+            plans.map((p) =>
+              el('a', { class: 'list-item', href: `/pages/plan?id=${p.id}` }, [
+                el('div', { class: 'list-item-main' }, [
+                  el('div', { class: 'list-item-title' }, p.title),
+                  el('div', { class: 'list-item-sub' },
+                    [PLAN_TYPE_LABELS[p.plan_type] || p.plan_type,
+                     p.planned_end_date && p.planned_end_date !== p.planned_date
+                       ? `${formatDate(p.planned_date)} 〜 ${formatDate(p.planned_end_date)}`
+                       : formatDate(p.planned_date)].filter(Boolean).join(' / ')),
+                ]),
+                el('span', { class: 'status-badge' }, PLAN_STATUS_LABELS[p.status] || p.status),
               ])
             )
           ),
