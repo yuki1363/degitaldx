@@ -173,25 +173,39 @@ function field(label, input, hint) {
 }
 
 async function renderForm(existing) {
-  const [{ categories }, { troubles }, { repairs }, { inspections }, usersRes] = await Promise.all([
+  // 点検・トラブル詳細からのプリフィルリンク
+  const urlParams   = new URLSearchParams(window.location.search);
+  const prefillType = urlParams.get('link_type');              // 'inspection' | 'trouble' | 'repair'
+  const prefillId   = prefillType ? Number(urlParams.get('link_id')) : null;
+  const prefillDate = urlParams.get('date');
+
+  const initDate = existing?.report_date || prefillDate || todayStr();
+
+  const [{ categories }, usersRes] = await Promise.all([
     api.get('/api/reports/categories'),
-    api.get(`/api/troubles?from=${todayStr()}&to=${todayStr()}`).catch(() => ({ troubles: [] })),
-    api.get('/api/repairs?status=open').catch(() => ({ repairs: [] })),
-    api.get(`/api/inspections?from=${todayStr()}&to=${todayStr()}`).catch(() => ({ inspections: [] })),
     api.get('/api/users').catch(() => ({ users: [] })),
   ]);
   const users = usersRes.users || [];
 
-  // 既存のリンク済み記録を取得
   const existingLinks = (() => {
     if (!existing?.linked_records_json) return [];
     try { return JSON.parse(existing.linked_records_json) || []; }
     catch { return []; }
   })();
 
+  // チェック済みリンクを Map<"type:id", {type, id, title}> で管理
+  // （日付変更で候補リストを再描画しても状態を維持できる）
+  const checkedLinks = new Map();
+  existingLinks.forEach((l) => checkedLinks.set(`${l.type}:${l.id}`, l));
+  if (prefillType && prefillId) {
+    const key = `${prefillType}:${prefillId}`;
+    if (!checkedLinks.has(key)) {
+      checkedLinks.set(key, { type: prefillType, id: prefillId, title: `#${prefillId}` });
+    }
+  }
+
   const f = {
-    date:     el('input', { type: 'date', value: existing?.report_date || todayStr() }),
-    // 入力者は自由入力（新規は自分の名前を初期値。登録ユーザー名を候補表示）
+    date: el('input', { type: 'date', value: initDate }),
     reporter: el('input', {
       type: 'text',
       value: existing ? (existing.reporter_name || '') : (currentUser.name || ''),
@@ -202,51 +216,80 @@ async function renderForm(existing) {
       [el('option', { value: '' }, '— カテゴリを選択（任意）'),
       ...categories.map((c) => el('option', { value: c.id, selected: existing?.category_id === c.id }, c.name))]
     ),
-    body: el('textarea', { placeholder: '今日の作業内容・申し送り事項・気づきを記録してください', style: 'min-height:140px' }, existing?.body || ''),
+    body: el('textarea', {
+      placeholder: '今日の作業内容・申し送り事項・気づきを記録してください',
+      style: 'min-height:140px',
+    }, existing?.body || ''),
   };
+
   const reporterOptions = el('datalist', { id: 'report-reporter-options' },
     users.map((u) => el('option', { value: u.name || u.email }))
   );
 
-  // 関連記録チェックボックス
-  const isLinked = (type, id) => existingLinks.some((l) => l.type === type && l.id === id);
+  // 候補リスト（日付変更で再描画）
+  const candidatesBox = el('div', {});
 
-  const troubleChecks = troubles.map((t) => {
-    const cb = el('input', { type: 'checkbox', checked: isLinked('trouble', t.id), 'data-type': 'trouble', 'data-id': t.id, 'data-title': t.phenomenon.slice(0, 40) });
-    return el('label', { class: 'link-check-row' }, [cb, ` [トラブル] ${t.phenomenon.slice(0, 40)}`]);
-  });
-  const repairChecks = repairs.map((r) => {
-    const cb = el('input', { type: 'checkbox', checked: isLinked('repair', r.id), 'data-type': 'repair', 'data-id': r.id, 'data-title': r.title.slice(0, 40) });
-    return el('label', { class: 'link-check-row' }, [cb, ` [業務依頼] ${r.title.slice(0, 40)}`]);
-  });
-  const inspectionChecks = inspections.map((i) => {
-    const title = `${i.equipment_name || '設備未指定'}${i.has_abnormal ? '（異常あり）' : ''}`;
-    const cb = el('input', { type: 'checkbox', checked: isLinked('inspection', i.id), 'data-type': 'inspection', 'data-id': i.id, 'data-title': title.slice(0, 40) });
-    return el('label', { class: 'link-check-row' }, [cb, ` [点検] ${title.slice(0, 40)}`]);
+  const makeCheckRow = (type, id, label) => {
+    const key = `${type}:${id}`;
+    // プリフィルリンクのタイトルを実データで上書き
+    if (checkedLinks.has(key)) {
+      checkedLinks.get(key).title = label.slice(0, 40);
+    }
+    const cb = el('input', {
+      type: 'checkbox',
+      checked: checkedLinks.has(key),
+      onchange: (e) => {
+        if (e.target.checked) checkedLinks.set(key, { type, id, title: label.slice(0, 40) });
+        else checkedLinks.delete(key);
+      },
+    });
+    return el('label', { class: 'link-check-row' }, [cb, ` ${label}`]);
+  };
+
+  const loadCandidates = async (date) => {
+    render(candidatesBox, el('p', { class: 'hint', style: 'font-size:12px' }, '候補を読み込み中…'));
+    const [{ troubles = [] }, { repairs = [] }, { inspections = [] }] = await Promise.all([
+      api.get(`/api/troubles?from=${date}&to=${date}`).catch(() => ({ troubles: [] })),
+      api.get('/api/repairs?status=open').catch(() => ({ repairs: [] })),
+      api.get(`/api/inspections?from=${date}&to=${date}`).catch(() => ({ inspections: [] })),
+    ]);
+
+    const troubleRows = troubles.map((t) =>
+      makeCheckRow('trouble', t.id, `[トラブル] ${(t.phenomenon || '').slice(0, 40)}`)
+    );
+    const inspectionRows = inspections.map((i) => {
+      const label = `${i.equipment_name || '設備未指定'}${i.has_abnormal ? '（異常あり）' : ''}`;
+      return makeCheckRow('inspection', i.id, `[点検] ${label.slice(0, 40)}`);
+    });
+    const repairRows = repairs.map((r) =>
+      makeCheckRow('repair', r.id, `[業務依頼] ${r.title.slice(0, 40)}`)
+    );
+
+    const total = troubleRows.length + inspectionRows.length + repairRows.length;
+    render(candidatesBox, total > 0
+      ? [
+          el('label', {}, `関連する記録を紐づける（任意）— ${date}`),
+          el('div', { class: 'link-check-list' }, [...troubleRows, ...inspectionRows, ...repairRows]),
+        ]
+      : el('p', { class: 'hint' }, `${date} の点検・トラブル記録・未完了業務依頼はありません。`)
+    );
+  };
+
+  f.date.addEventListener('change', () => {
+    if (f.date.value) loadCandidates(f.date.value).catch(console.error);
   });
 
-  const linkedSection = (troubleChecks.length + repairChecks.length + inspectionChecks.length > 0)
-    ? el('div', { class: 'field' }, [
-        el('label', {}, '関連する記録を紐づける（任意）'),
-        el('div', { class: 'link-check-list' }, [...troubleChecks, ...inspectionChecks, ...repairChecks]),
-      ])
-    : null;
+  // 初回ロード
+  await loadCandidates(initDate);
 
   const save = async () => {
     const report_date   = f.date.value;
-    const bodyText      = f.body.value.trim();      // 本文は任意（空でも保存可）
+    const bodyText      = f.body.value.trim();
     const reporter_name = f.reporter.value.trim() || null;
     const category_id   = f.category.value ? Number(f.category.value) : null;
     if (!report_date) { alert('日付は必須です。'); return; }
 
-    // チェック済みの関連記録を収集
-    const linked_records_json = [];
-    const allChecks = [...troubleChecks, ...inspectionChecks, ...repairChecks].map((row) => row.querySelector('input[type=checkbox]'));
-    for (const cb of allChecks) {
-      if (cb.checked) {
-        linked_records_json.push({ type: cb.dataset.type, id: Number(cb.dataset.id), title: cb.dataset.title });
-      }
-    }
+    const linked_records_json = [...checkedLinks.values()];
 
     try {
       if (existing) {
@@ -254,7 +297,7 @@ async function renderForm(existing) {
         go(`?id=${existing.id}`);
       } else {
         const { id } = await api.post('/api/reports', { report_date, body: bodyText, reporter_name, category_id, linked_records_json });
-        renderSaved(id);  // 保存後の確認画面（続けて入力できる）
+        renderSaved(id);
       }
     } catch (err) { alert(err.message); }
   };
@@ -267,7 +310,7 @@ async function renderForm(existing) {
       reporterOptions,
       field('カテゴリ', f.category),
       field('内容', f.body, '今日の作業・引き継ぎ・気づき等を記録してください（任意）。'),
-      linkedSection,
+      el('div', { class: 'field' }, [candidatesBox]),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', { class: 'btn', onclick: () => (existing ? go(`?id=${existing.id}`) : go('')) }, 'キャンセル'),

@@ -237,6 +237,14 @@ async function renderDetail(id) {
             ].filter(Boolean).join('\n'));
             return el('a', { class: 'btn btn-primary', href: `/pages/repair?${q}` }, '🔧 業務依頼を作成');
           })(),
+          // このトラブルを日報に記録（発生日を初期日付に設定してプリチェック済みで開く）
+          (() => {
+            const date = trouble.occurred_at
+              ? new Date(trouble.occurred_at).toLocaleDateString('sv-SE')
+              : new Date().toLocaleDateString('sv-SE');
+            const q = new URLSearchParams({ new: '1', link_type: 'trouble', link_id: String(trouble.id), date });
+            return el('a', { class: 'btn', href: `/pages/report?${q}` }, '📝 日報に記録');
+          })(),
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
           el('button', {
             class: 'btn btn-danger',

@@ -442,6 +442,15 @@ async function renderDetail(id) {
         ])
       : null,
     el('div', { class: 'action-row' }, [
+      canEdit
+        ? (() => {
+            const date = inspection.inspected_at
+              ? new Date(inspection.inspected_at).toLocaleDateString('sv-SE')
+              : new Date().toLocaleDateString('sv-SE');
+            const q = new URLSearchParams({ new: '1', link_type: 'inspection', link_id: String(inspection.id), date });
+            return el('a', { class: 'btn', href: `/pages/report?${q}` }, '📝 日報に記録');
+          })()
+        : null,
       canEdit ? el('button', { class: 'btn', onclick: () => go(`?edit=${inspection.id}`) }, '編集') : null,
       canEdit
         ? el('button', {
