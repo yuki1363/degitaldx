@@ -239,52 +239,68 @@ async function renderDetail(id) {
     window.print();
   };
 
-  // 関連資料
+  // 写真・関連資料（画像はサムネイル表示、PDF等はファイル名で表示）
   const filesBox = el('div', { class: 'row-list' }, []);
+
+  const deleteFile = async (f) => {
+    if (!confirm(`「${f.file_name}」を削除しますか？`)) return;
+    await api.del(`/api/files/${f.id}`);
+    const fresh = await api.get(`/api/equipment/${id}`);
+    renderFiles(fresh.files);
+  };
+
   const renderFiles = (list) => {
-    render(
-      filesBox,
-      list.length === 0
-        ? el('p', { class: 'empty' }, '資料はまだありません。')
-        : list.map((f) =>
-            el('div', { class: 'file-row' }, [
-              el('a', { class: 'file-name', href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' }, f.file_name),
-              el('span', { class: 'file-meta' }, formatBytes(f.size_bytes)),
-              canEdit
-                ? el('button', {
-                    class: 'btn btn-sm',
-                    onclick: async () => {
-                      if (!confirm(`「${f.file_name}」を削除しますか？`)) return;
-                      await api.del(`/api/files/${f.id}`);
-                      const fresh = await api.get(`/api/equipment/${id}`);
-                      renderFiles(fresh.files);
-                    },
-                  }, '削除')
-                : null,
-            ])
+    if (list.length === 0) {
+      render(filesBox, el('p', { class: 'empty' }, '写真・資料はまだありません。'));
+      return;
+    }
+    const imgs = list.filter((f) => (f.content_type || '').startsWith('image/'));
+    const others = list.filter((f) => !(f.content_type || '').startsWith('image/'));
+    render(filesBox, [
+      imgs.length > 0
+        ? el('div', { class: 'thumb-grid' },
+            imgs.map((f) =>
+              el('div', { class: 'thumb-cell' }, [
+                el('a', { href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' },
+                  el('img', { class: 'thumb', src: `/api/files/${f.id}`, alt: f.file_name, loading: 'lazy' })),
+                canEdit ? el('button', { class: 'thumb-del', title: '削除', onclick: () => deleteFile(f) }, '×') : null,
+              ])
+            )
           )
-    );
+        : null,
+      ...others.map((f) =>
+        el('div', { class: 'file-row' }, [
+          el('a', { class: 'file-name', href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' }, f.file_name),
+          el('span', { class: 'file-meta' }, formatBytes(f.size_bytes)),
+          canEdit ? el('button', { class: 'btn btn-sm', onclick: () => deleteFile(f) }, '削除') : null,
+        ])
+      ),
+    ]);
   };
   renderFiles(files);
 
+  // 画像・PDFのアップロード共通処理（画像はリサイズで EXIF=位置情報 を自動除去）
+  const uploadAndRefresh = async (file) => {
+    if (!file) return;
+    try {
+      const prepared = await resizeImageFile(file);
+      await uploadFile(prepared, { relatedTable: 'equipment_ledger', relatedId: eq.id });
+      const fresh = await api.get(`/api/equipment/${id}`);
+      renderFiles(fresh.files);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // 📷 撮影: モバイルでは端末のカメラを直接起動して撮影 → そのまま添付
+  const cameraInput = el('input', {
+    type: 'file', accept: 'image/*', capture: 'environment', hidden: true,
+    onchange: async (e) => { await uploadAndRefresh(e.target.files[0]); e.target.value = ''; },
+  });
+  // ＋ ファイル: 写真ライブラリ / PDF（マニュアル・図面）から選んで添付
   const fileInput = el('input', {
-    type: 'file',
-    accept: 'application/pdf,image/*',
-    hidden: true,
-    onchange: async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      try {
-        const prepared = await resizeImageFile(file);
-        await uploadFile(prepared, { relatedTable: 'equipment_ledger', relatedId: eq.id });
-        const fresh = await api.get(`/api/equipment/${id}`);
-        renderFiles(fresh.files);
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        e.target.value = '';
-      }
-    },
+    type: 'file', accept: 'application/pdf,image/*', hidden: true,
+    onchange: async (e) => { await uploadAndRefresh(e.target.files[0]); e.target.value = ''; },
   });
 
   render(app, [
@@ -334,9 +350,15 @@ async function renderDetail(id) {
     ]),
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('h3', { class: 'card-title' }, '関連資料（マニュアル・図面）'),
-        canEdit ? el('button', { class: 'btn btn-sm', onclick: () => fileInput.click() }, '＋ アップロード') : null,
+        el('h3', { class: 'card-title' }, '写真・関連資料'),
+        canEdit
+          ? el('div', { class: 'btn-group' }, [
+              el('button', { class: 'btn btn-sm btn-primary', onclick: () => cameraInput.click() }, '📷 撮影'),
+              el('button', { class: 'btn btn-sm', onclick: () => fileInput.click() }, '＋ ファイル'),
+            ])
+          : null,
       ]),
+      cameraInput,
       fileInput,
       filesBox,
     ]),
