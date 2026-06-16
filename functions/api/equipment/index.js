@@ -39,6 +39,10 @@ export function parseEquipmentInput(body) {
   if (installedOn && !/^\d{4}-\d{2}-\d{2}$/.test(installedOn)) {
     return { error: '設置日（installed_on）は YYYY-MM-DD 形式で入力してください。' };
   }
+  const manufacturedOn = body.manufactured_on ? String(body.manufactured_on).trim() : null;
+  if (manufacturedOn && !/^\d{4}-\d{2}$/.test(manufacturedOn)) {
+    return { error: '製造年月（manufactured_on）は YYYY-MM 形式で入力してください。' };
+  }
   return {
     value: {
       code,
@@ -48,6 +52,8 @@ export function parseEquipmentInput(body) {
       location: optional(body.location, 100),
       manufacturer: optional(body.manufacturer, 100),
       model: optional(body.model, 100),
+      serial_no: optional(body.serial_no, 100),
+      manufactured_on: manufacturedOn,
       installed_on: installedOn,
       status,
       note: optional(body.note, 1000),
@@ -100,12 +106,12 @@ export async function onRequestPost({ request, env, data }) {
 
   const result = await env.DB.prepare(
     `INSERT INTO equipment_ledger
-       (code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
+       (code, name, line_name, equipment_name, location, manufacturer, model, serial_no, manufactured_on, installed_on, status, note, created_by, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`
   )
     .bind(
       v.code, v.name, v.line_name, v.equipment_name, v.location, v.manufacturer, v.model,
-      v.installed_on, v.status, v.note, data.user.email, nowIso()
+      v.serial_no, v.manufactured_on, v.installed_on, v.status, v.note, data.user.email, nowIso()
     )
     .run();
 

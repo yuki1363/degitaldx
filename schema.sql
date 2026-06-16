@@ -621,3 +621,7 @@ UPDATE inspection_result
 UPDATE repair_request
    SET assignee_name = (SELECT name FROM users WHERE id = repair_request.assignee_id)
  WHERE assignee_name IS NULL AND assignee_id IS NOT NULL;
+
+-- 設備台帳（06）: 製造番号・製造年月を追加
+ALTER TABLE equipment_ledger ADD COLUMN serial_no TEXT;        -- 製造番号
+ALTER TABLE equipment_ledger ADD COLUMN manufactured_on TEXT;  -- 製造年月（YYYY-MM）

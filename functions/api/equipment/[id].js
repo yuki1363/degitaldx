@@ -19,17 +19,25 @@ async function findEquipment(env, idParam) {
     )
       .bind(id)
       .first();
+  // 列の追加（マイグレーション）が部分的にしか適用されていない環境でも詳細が
+  // 開けるよう、列の多い順に段階的にフォールバックする。
+  const colsFull =
+    `id, code, name, line_name, equipment_name, location, manufacturer, model, serial_no, manufactured_on, installed_on, status, note,
+     created_by, created_at, updated_by, updated_at`;
+  const colsNoMfg =
+    `id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note,
+     created_by, created_at, updated_by, updated_at`;
+  const colsBase =
+    `id, code, name, location, manufacturer, model, installed_on, status, note,
+     created_by, created_at, updated_by, updated_at`;
   try {
-    return await run(
-      `id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status, note,
-       created_by, created_at, updated_by, updated_at`
-    );
+    return await run(colsFull);
   } catch {
-    // line_name / equipment_name 列が未追加の環境でも詳細が開くようにフォールバック
-    return run(
-      `id, code, name, location, manufacturer, model, installed_on, status, note,
-       created_by, created_at, updated_by, updated_at`
-    );
+    try {
+      return await run(colsNoMfg);
+    } catch {
+      return run(colsBase);
+    }
   }
 }
 
@@ -110,12 +118,13 @@ export async function onRequestPut({ request, env, data, params }) {
   await env.DB.prepare(
     `UPDATE equipment_ledger
         SET code = ?1, name = ?2, line_name = ?3, equipment_name = ?4, location = ?5, manufacturer = ?6, model = ?7,
-            installed_on = ?8, status = ?9, note = ?10, updated_by = ?11, updated_at = ?12
-      WHERE id = ?13 AND deleted_at IS NULL`
+            serial_no = ?8, manufactured_on = ?9, installed_on = ?10, status = ?11, note = ?12,
+            updated_by = ?13, updated_at = ?14
+      WHERE id = ?15 AND deleted_at IS NULL`
   )
     .bind(
       v.code, v.name, v.line_name, v.equipment_name, v.location, v.manufacturer, v.model,
-      v.installed_on, v.status, v.note, data.user.email, nowIso(), existing.id
+      v.serial_no, v.manufactured_on, v.installed_on, v.status, v.note, data.user.email, nowIso(), existing.id
     )
     .run();
 
