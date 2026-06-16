@@ -27,22 +27,22 @@ function todayStr() {
 // ---------------- 一覧 ----------------
 
 async function renderList() {
-  const [{ categories }, { users }] = await Promise.all([
+  const [{ categories }] = await Promise.all([
     api.get('/api/reports/categories'),
-    api.get('/api/users'),
   ]);
 
   let filterCategory = '';
   let filterReporter = '';
   let filterFrom     = '';
   let filterTo       = '';
+  let reporterTimer  = null;
   const listBox = el('div', { class: 'row-list' }, []);
 
   const load = async () => {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
     const p = new URLSearchParams();
     if (filterCategory) p.set('category_id', filterCategory);
-    if (filterReporter) p.set('reporter_id', filterReporter);
+    if (filterReporter) p.set('reporter', filterReporter);
     if (filterFrom) p.set('from', filterFrom);
     if (filterTo)   p.set('to',   filterTo);
     const { reports } = await api.get(`/api/reports${p.size ? '?' + p : ''}`);
@@ -50,33 +50,40 @@ async function renderList() {
       render(listBox, el('p', { class: 'empty' }, '日報はありません。'));
       return;
     }
-    render(listBox, reports.map((r) =>
-      el('a', { class: 'list-item', href: `/pages/report?id=${r.id}` }, [
+    render(listBox, reports.map((r) => {
+      const body = r.body || '';
+      const title = body ? body.slice(0, 60) + (body.length > 60 ? '…' : '') : '（本文なし）';
+      return el('a', { class: 'list-item', href: `/pages/report?id=${r.id}` }, [
         el('div', { class: 'list-item-main' }, [
           el('div', { class: 'list-item-sub' }, [
             r.category_name ? el('span', { class: 'cat-badge' }, r.category_name) : null,
             ` ${r.report_date}  ${r.reporter_name || r.created_by}`,
           ]),
-          el('div', { class: 'list-item-title' }, r.body.slice(0, 60) + (r.body.length > 60 ? '…' : '')),
+          el('div', { class: 'list-item-title' }, title),
         ]),
         el('span', { class: 'chevron' }, '›'),
-      ])
-    ));
+      ]);
+    }));
   };
 
   const catSel = el('select', { onchange: (e) => { filterCategory = e.target.value; load().catch(showError); } }, [
     el('option', { value: '' }, '全カテゴリ'),
     ...categories.map((c) => el('option', { value: c.id }, c.name)),
   ]);
-  const userSel = el('select', { onchange: (e) => { filterReporter = e.target.value; load().catch(showError); } }, [
-    el('option', { value: '' }, '全記録者'),
-    ...users.map((u) => el('option', { value: u.id }, u.name || u.email)),
-  ]);
+  const reporterIn = el('input', {
+    type: 'search',
+    placeholder: '入力者で検索',
+    oninput: (e) => {
+      clearTimeout(reporterTimer);
+      const v = e.target.value.trim();
+      reporterTimer = setTimeout(() => { filterReporter = v; load().catch(showError); }, 300);
+    },
+  });
   const fromIn = el('input', { type: 'date', onchange: (e) => { filterFrom = e.target.value; load().catch(showError); } });
   const toIn   = el('input', { type: 'date', onchange: (e) => { filterTo   = e.target.value; load().catch(showError); } });
 
   render(app, [
-    el('div', { class: 'filter-bar' }, [catSel, userSel]),
+    el('div', { class: 'filter-bar' }, [catSel, reporterIn]),
     el('div', { class: 'filter-bar' }, [
       el('label', { class: 'filter-label' }, ['FROM ', fromIn]),
       el('label', { class: 'filter-label' }, ['TO ', toIn]),
@@ -105,7 +112,8 @@ const LINKED_TYPE_URLS   = { trouble: '/pages/trouble?id=', inspection: '/pages/
 
 async function renderDetail(id) {
   const { report } = await api.get(`/api/reports/${id}`);
-  const canEdit = hasRole(currentUser, 'admin') || report.created_by === currentUser.email;
+  // 日報は共有記録のため、入力可（editor）なら誰でも編集・削除できる（作成者/管理者の区別なし）
+  const canEdit = hasRole(currentUser, 'editor');
 
   const linkedItems = (() => {
     try { return JSON.parse(report.linked_records_json) || []; }
@@ -118,7 +126,7 @@ async function renderDetail(id) {
         el('h2', { class: 'card-title' }, report.report_date),
         report.category_name ? el('span', { class: 'cat-badge' }, report.category_name) : null,
       ]),
-      infoRow('記録者', report.reporter_name || report.created_by),
+      infoRow('入力者', report.reporter_name || report.created_by),
       infoRow('記録日時', formatDateTime(report.created_at)),
       el('div', { class: 'note-box', style: 'white-space:pre-wrap' }, report.body),
     ]),
@@ -138,7 +146,7 @@ async function renderDetail(id) {
           ),
         ])
       : null,
-    hasRole(currentUser, 'editor') && canEdit
+    canEdit
       ? el('div', { class: 'action-row' }, [
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
           el('button', {
@@ -165,12 +173,14 @@ function field(label, input, hint) {
 }
 
 async function renderForm(existing) {
-  const [{ categories }, { troubles }, { repairs }, { inspections }] = await Promise.all([
+  const [{ categories }, { troubles }, { repairs }, { inspections }, usersRes] = await Promise.all([
     api.get('/api/reports/categories'),
     api.get(`/api/troubles?from=${todayStr()}&to=${todayStr()}`).catch(() => ({ troubles: [] })),
     api.get('/api/repairs?status=open').catch(() => ({ repairs: [] })),
     api.get(`/api/inspections?from=${todayStr()}&to=${todayStr()}`).catch(() => ({ inspections: [] })),
+    api.get('/api/users').catch(() => ({ users: [] })),
   ]);
+  const users = usersRes.users || [];
 
   // 既存のリンク済み記録を取得
   const existingLinks = (() => {
@@ -181,12 +191,22 @@ async function renderForm(existing) {
 
   const f = {
     date:     el('input', { type: 'date', value: existing?.report_date || todayStr() }),
+    // 入力者は自由入力（新規は自分の名前を初期値。登録ユーザー名を候補表示）
+    reporter: el('input', {
+      type: 'text',
+      value: existing ? (existing.reporter_name || '') : (currentUser.name || ''),
+      placeholder: '入力者名（自由入力）',
+      list: 'report-reporter-options',
+    }),
     category: el('select', {},
       [el('option', { value: '' }, '— カテゴリを選択（任意）'),
       ...categories.map((c) => el('option', { value: c.id, selected: existing?.category_id === c.id }, c.name))]
     ),
     body: el('textarea', { placeholder: '今日の作業内容・申し送り事項・気づきを記録してください', style: 'min-height:140px' }, existing?.body || ''),
   };
+  const reporterOptions = el('datalist', { id: 'report-reporter-options' },
+    users.map((u) => el('option', { value: u.name || u.email }))
+  );
 
   // 関連記録チェックボックス
   const isLinked = (type, id) => existingLinks.some((l) => l.type === type && l.id === id);
@@ -213,11 +233,11 @@ async function renderForm(existing) {
     : null;
 
   const save = async () => {
-    const report_date = f.date.value;
-    const bodyText    = f.body.value.trim();
-    const category_id = f.category.value ? Number(f.category.value) : null;
+    const report_date   = f.date.value;
+    const bodyText      = f.body.value.trim();      // 本文は任意（空でも保存可）
+    const reporter_name = f.reporter.value.trim() || null;
+    const category_id   = f.category.value ? Number(f.category.value) : null;
     if (!report_date) { alert('日付は必須です。'); return; }
-    if (!bodyText)    { alert('本文は必須です。'); return; }
 
     // チェック済みの関連記録を収集
     const linked_records_json = [];
@@ -230,11 +250,11 @@ async function renderForm(existing) {
 
     try {
       if (existing) {
-        await api.put(`/api/reports/${existing.id}`, { report_date, body: bodyText, category_id, linked_records_json });
+        await api.put(`/api/reports/${existing.id}`, { report_date, body: bodyText, reporter_name, category_id, linked_records_json });
         go(`?id=${existing.id}`);
       } else {
-        const { id } = await api.post('/api/reports', { report_date, body: bodyText, category_id, linked_records_json });
-        go(`?id=${id}`);
+        const { id } = await api.post('/api/reports', { report_date, body: bodyText, reporter_name, category_id, linked_records_json });
+        renderSaved(id);  // 保存後の確認画面（続けて入力できる）
       }
     } catch (err) { alert(err.message); }
   };
@@ -243,12 +263,29 @@ async function renderForm(existing) {
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '日報を編集' : '日報を書く'),
       field('日付（必須）', f.date),
+      field('入力者', f.reporter),
+      reporterOptions,
       field('カテゴリ', f.category),
-      field('内容（必須）', f.body, '今日の作業・引き継ぎ・気づき等を記録してください。'),
+      field('内容', f.body, '今日の作業・引き継ぎ・気づき等を記録してください（任意）。'),
       linkedSection,
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', { class: 'btn', onclick: () => (existing ? go(`?id=${existing.id}`) : go('')) }, 'キャンセル'),
+      ]),
+    ]),
+  ]);
+}
+
+// 保存後の確認画面（続けて次の日報を入力できる）
+function renderSaved(id) {
+  render(app, [
+    el('div', { class: 'card' }, [
+      el('h2', { class: 'card-title' }, '✓ 日報を保存しました'),
+      el('p', { class: 'hint' }, '続けて入力できます。'),
+      el('div', { class: 'action-row' }, [
+        el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 次の日報を作成する'),
+        el('a', { class: 'btn', href: `/pages/report?id=${id}` }, 'この日報を見る'),
+        el('a', { class: 'btn', href: '/pages/report' }, '一覧へ戻る'),
       ]),
     ]),
   ]);

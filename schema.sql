@@ -632,3 +632,10 @@ ALTER TABLE parts_transaction ADD COLUMN related_table TEXT;   -- 'repair_reques
 ALTER TABLE parts_transaction ADD COLUMN related_id INTEGER;   -- 紐づく依頼・トラブルのID
 CREATE INDEX IF NOT EXISTS idx_parts_transaction_related
   ON parts_transaction (related_table, related_id);
+
+-- 日報（07）: 入力者を自由入力にする（reporter_id は NOT NULL 制約のため
+--   ログインユーザーIDで埋め続け、表示・入力・検索は reporter_name に一本化）
+ALTER TABLE daily_report ADD COLUMN reporter_name TEXT;        -- 入力者名（自由入力）
+UPDATE daily_report
+   SET reporter_name = (SELECT name FROM users WHERE id = daily_report.reporter_id)
+ WHERE reporter_name IS NULL AND reporter_id IS NOT NULL;
