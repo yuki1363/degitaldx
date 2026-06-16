@@ -195,12 +195,15 @@ async function renderList() {
       el('div', { class: 'field' }, [el('label', {}, '機器名で絞り込み'), equipSelect]),
     ]),
     el('div', { class: 'toolbar' }, [searchInput]),
-    hasRole(currentUser, 'editor')
-      ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
-          el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 設備を追加'),
-          el('button', { class: 'btn', onclick: (e) => importFromParts(e.currentTarget) }, '📥 在庫から一括登録'),
-        ])
-      : null,
+    el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 設備を追加')
+        : null,
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn', onclick: (e) => importFromParts(e.currentTarget) }, '📥 在庫から一括登録')
+        : null,
+      el('a', { class: 'btn', href: '/pages/labels' }, '🖨 ラベル一括印刷'),
+    ]),
     listBox,
   ]);
   await load();

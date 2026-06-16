@@ -753,6 +753,61 @@ input.is-abnormal {
   display: none;
 }
 
+/* ---- 設備ラベル一括印刷 ---- */
+.label-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.label-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+}
+
+.label-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.label-cell {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  background: #fff;
+  break-inside: avoid;
+}
+
+.label-cell img {
+  width: 120px;
+  height: 120px;
+}
+
+.label-cell .label-code {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.label-cell .label-name {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  word-break: break-word;
+}
+
 /* ---- 部品在庫（05） ---- */
 .parts-qty {
   display: flex;
@@ -1387,6 +1442,47 @@ input.is-abnormal {
   .extract-table th,
   .extract-table td {
     padding: 4px 6px;
+  }
+
+  /* 設備ラベル一括印刷: 操作UIを隠し、ラベルだけを用紙幅いっぱいに並べる */
+  body.labels-page .app-header,
+  body.labels-page .labels-controls {
+    display: none !important;
+  }
+
+  body.labels-page .container {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  body.labels-page .label-sheet {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4mm;
+    margin: 0;
+  }
+
+  body.labels-page .label-cell {
+    border: 1px solid #000;
+    border-radius: 0;
+    padding: 5mm;
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.labels-page .label-cell img {
+    width: 40mm;
+    height: 40mm;
+  }
+
+  body.labels-page .label-cell .label-code {
+    font-size: 15pt;
+  }
+
+  body.labels-page .label-cell .label-name {
+    font-size: 10pt;
+    color: #000;
   }
 }
 
