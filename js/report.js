@@ -7,6 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
+import { buildCommentsCard } from '/js/comments.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -184,6 +185,7 @@ async function renderDetail(id) {
           }, '削除'),
         ])
       : null,
+    buildCommentsCard('daily_report', id, currentUser),
   ]);
 }
 

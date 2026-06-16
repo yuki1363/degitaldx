@@ -11,6 +11,7 @@ import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import {
   el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS,
 } from '/js/util.js';
+import { buildCommentsCard } from '/js/comments.js';
 import qrcode from '/js/vendor/qrcode.mjs';
 
 const STATUS_LABELS = { active: '稼働中', stopped: '停止中', retired: '廃棄' };
@@ -545,6 +546,7 @@ async function renderDetail(id) {
             )
           ),
     ]),
+    buildCommentsCard('equipment_ledger', eq.id, currentUser),
   ]);
 }
 

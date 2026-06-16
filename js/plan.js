@@ -8,6 +8,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue } from '/js/util.js';
+import { buildCommentsCard } from '/js/comments.js';
 
 const PLAN_TYPES = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -297,7 +298,8 @@ async function renderDetail(id) {
                     );
                     if (match) equipmentId = match.id;
                   } catch { /* 設備解決失敗時は未指定で開く */ }
-                  const q = new URLSearchParams({ new: '1' });
+                  // plan_id を渡し、点検保存時にこの計画を自動で完了にする
+                  const q = new URLSearchParams({ new: '1', plan_id: String(plan.id) });
                   if (equipmentId) q.set('equipment_id', String(equipmentId));
                   window.location.href = `/pages/inspection?${q}`;
                 },
@@ -323,6 +325,7 @@ async function renderDetail(id) {
           }, '削除'),
         ])
       : null,
+    buildCommentsCard('maintenance_plan', id, currentUser),
   ]);
 }
 

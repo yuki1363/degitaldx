@@ -3,7 +3,7 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
-const ALLOWED_TABLES = ['trouble_record', 'inspection_result', 'repair_request', 'daily_report'];
+const ALLOWED_TABLES = ['trouble_record', 'inspection_result', 'repair_request', 'daily_report', 'equipment_ledger', 'maintenance_plan'];
 
 export async function onRequestGet({ request, env }) {
   const db = env.DB;

@@ -178,7 +178,7 @@ function buildItemInput(master, existingValue) {
   return { box, getValue, master };
 }
 
-async function renderEntry({ equipmentId, existing }) {
+async function renderEntry({ equipmentId, existing, planId }) {
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
   const [{ equipment }, { users }] = await Promise.all([
@@ -310,6 +310,11 @@ async function renderEntry({ equipmentId, existing }) {
       const result = existing
         ? await api.put(`/api/inspections/${existing.id}`, body)
         : await api.post('/api/inspections', body);
+      // 保全計画から開始した点検なら、保存成功時にその計画を自動で完了にする
+      if (!existing && planId) {
+        try { await api.put(`/api/plans/${planId}`, { status: 'done' }); }
+        catch { /* 計画の完了化に失敗しても点検記録は保存済みなので継続 */ }
+      }
       if (result.has_abnormal) {
         alert('⚠ 異常値を含む記録として保存しました。必要に応じて修理依頼・トラブル記録を起票してください。');
       }
@@ -626,7 +631,10 @@ async function renderMasters(equipmentId) {
       const { inspection } = await api.get(`/api/inspections/${Number(params.get('edit'))}`);
       await renderEntry({ existing: inspection });
     } else if (params.get('new')) {
-      await renderEntry({ equipmentId: Number(params.get('equipment_id')) || undefined });
+      await renderEntry({
+        equipmentId: Number(params.get('equipment_id')) || undefined,
+        planId: Number(params.get('plan_id')) || undefined,
+      });
     } else if (params.get('masters')) {
       await renderMasters(Number(params.get('masters')));
     } else {
