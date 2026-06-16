@@ -3,42 +3,9 @@
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
+import { buildCsvText, downloadCsv } from '/js/csv.js';
 
 const app = document.getElementById('app');
-
-// ---------------- CSVエクスポート ----------------
-
-function escCsv(v) {
-  const s = v == null ? '' : String(v);
-  return s.includes(',') || s.includes('"') || s.includes('\n')
-    ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function buildCsvText(rows, columns) {
-  const header = columns.map((c) => escCsv(c.label)).join(',');
-  const body   = rows.map((r) => columns.map((c) => escCsv(c.value(r))).join(',')).join('\n');
-  return header + '\n' + body;
-}
-
-function downloadCsv(filename, text, encoding) {
-  let blob;
-  if (encoding === 'sjis' && typeof Encoding !== 'undefined') {
-    const sjisArray = Encoding.convert(
-      Encoding.stringToCode(text),
-      { to: 'SJIS', from: 'UNICODE' }
-    );
-    blob = new Blob([new Uint8Array(sjisArray)], { type: 'text/csv' });
-  } else {
-    // UTF-8 with BOM（Excel で文字化けしない）
-    blob = new Blob(['﻿' + text], { type: 'text/csv; charset=utf-8' });
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 // ---------------- グラフ描画 ----------------
 

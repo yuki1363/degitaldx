@@ -9,6 +9,20 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
+import { buildCsvText, downloadCsv } from '/js/csv.js';
+
+// CSV出力の列定義（トラブル履歴）
+const CSV_COLUMNS = [
+  { label: '発生日時', value: (t) => formatDateTime(t.occurred_at) },
+  { label: '設備番号', value: (t) => t.equipment_code || '' },
+  { label: '設備',     value: (t) => t.equipment_name || '' },
+  { label: 'ジャンル', value: (t) => t.category_name || '' },
+  { label: '現象',     value: (t) => t.phenomenon || '' },
+  { label: '原因',     value: (t) => t.cause || '' },
+  { label: '対策',     value: (t) => t.countermeasure || '' },
+  { label: '記録者',   value: (t) => t.reporter_name || t.created_by || '' },
+  { label: '登録日時', value: (t) => formatDateTime(t.created_at) },
+];
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -36,8 +50,16 @@ async function renderList(equipmentId) {
   let filterEquipment = equipmentId ? String(equipmentId) : '';
   let filterFrom = '';
   let filterTo = '';
+  let currentTroubles = []; // 現在表示中の絞り込み結果（CSV出力用）
 
   const listBox = el('div', { class: 'row-list' }, []);
+
+  const updateCsvButtons = () => {
+    const disabled = currentTroubles.length === 0;
+    csvUtf8Btn.disabled = disabled;
+    csvSjisBtn.disabled = disabled;
+    csvCount.textContent = `${currentTroubles.length}件`;
+  };
 
   const load = async () => {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
@@ -47,6 +69,8 @@ async function renderList(equipmentId) {
     if (filterFrom) params.set('from', filterFrom);
     if (filterTo) params.set('to', filterTo);
     const { troubles } = await api.get(`/api/troubles${params.toString() ? '?' + params : ''}`);
+    currentTroubles = troubles;
+    updateCsvButtons();
     if (troubles.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '該当するトラブル記録がありません。'));
       return;
@@ -86,6 +110,17 @@ async function renderList(equipmentId) {
     onchange: (e) => { filterTo = e.target.value; load().catch(showError); },
   });
 
+  // CSV出力（現在の絞り込み結果をそのまま出力。Shift_JIS は Excel 文字化け対策）
+  const exportCsv = (enc) => {
+    if (currentTroubles.length === 0) return;
+    const text = buildCsvText(currentTroubles, CSV_COLUMNS);
+    const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
+    downloadCsv(`trouble_${dateStr}.csv`, text, enc);
+  };
+  const csvUtf8Btn = el('button', { class: 'btn btn-sm', onclick: () => exportCsv('utf8') }, '📥 CSV（UTF-8/BOM）');
+  const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportCsv('sjis') }, '📥 CSV（Shift_JIS）');
+  const csvCount = el('span', { class: 'hint' }, '');
+
   render(app, [
     el('div', { class: 'card' }, [
       el('div', { class: 'field-pair' }, [
@@ -97,11 +132,14 @@ async function renderList(equipmentId) {
         el('div', { class: 'field' }, [el('label', {}, '〜（まで）'), toInput]),
       ]),
     ]),
-    hasRole(currentUser, 'editor')
-      ? el('div', { style: 'margin-bottom:12px' }, [
-          el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ トラブルを記録'),
-        ])
-      : null,
+    el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ トラブルを記録')
+        : null,
+      csvUtf8Btn,
+      csvSjisBtn,
+      csvCount,
+    ]),
     listBox,
   ]);
   await load();
