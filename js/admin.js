@@ -552,6 +552,10 @@ async function renderMasters() {
 
     tabContent = el('div', { id: 'tab-content' }, []);
 
+    // 他画面から ?tab=manage 等でディープリンクできるようにする
+    const wantedTab = new URLSearchParams(window.location.search).get('tab');
+    if (wantedTab && TABS.some((t) => t.id === wantedTab)) activeTab = wantedTab;
+
     render(app, [
       el('div', { class: 'tab-bar' },
         TABS.map(({ id, label }) =>

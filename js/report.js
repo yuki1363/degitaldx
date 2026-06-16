@@ -66,7 +66,27 @@ async function renderList() {
     }));
   };
 
-  const catSel = el('select', { onchange: (e) => { filterCategory = e.target.value; load().catch(showError); } }, [
+  // 「＋ 日報を書く」は選択中のカテゴリを引き継ぐ（該当カテゴリで日報を作成できる）
+  const writeBtn = hasRole(currentUser, 'editor')
+    ? el('button', {
+        class: 'btn btn-primary',
+        onclick: () => {
+          const q = new URLSearchParams({ new: '1' });
+          if (filterCategory) q.set('category', filterCategory);
+          go(`?${q}`);
+        },
+      }, '＋ 日報を書く')
+    : null;
+
+  const updateWriteLabel = () => {
+    if (!writeBtn) return;
+    const cat = categories.find((c) => String(c.id) === String(filterCategory));
+    writeBtn.textContent = cat ? `＋ 「${cat.name}」で日報を書く` : '＋ 日報を書く';
+  };
+
+  const catSel = el('select', {
+    onchange: (e) => { filterCategory = e.target.value; updateWriteLabel(); load().catch(showError); },
+  }, [
     el('option', { value: '' }, '全カテゴリ'),
     ...categories.map((c) => el('option', { value: c.id }, c.name)),
   ]);
@@ -88,13 +108,18 @@ async function renderList() {
       el('label', { class: 'filter-label' }, ['FROM ', fromIn]),
       el('label', { class: 'filter-label' }, ['TO ', toIn]),
     ]),
-    hasRole(currentUser, 'editor')
+    (writeBtn || hasRole(currentUser, 'admin'))
       ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
-          el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 日報を書く'),
+          writeBtn,
+          // カテゴリの追加・削除は管理画面（マスタ管理）で行う
+          hasRole(currentUser, 'admin')
+            ? el('a', { class: 'btn', href: '/pages/admin?tab=manage' }, '⚙ カテゴリを管理')
+            : null,
         ])
       : null,
     listBox,
   ]);
+  updateWriteLabel();
   await load();
 }
 
@@ -178,6 +203,7 @@ async function renderForm(existing) {
   const prefillType = urlParams.get('link_type');              // 'inspection' | 'trouble' | 'repair'
   const prefillId   = prefillType ? Number(urlParams.get('link_id')) : null;
   const prefillDate = urlParams.get('date');
+  const prefillCategory = urlParams.get('category'); // 一覧で選んだカテゴリで新規作成
 
   const initDate = existing?.report_date || prefillDate || todayStr();
 
@@ -214,7 +240,12 @@ async function renderForm(existing) {
     }),
     category: el('select', {},
       [el('option', { value: '' }, '— カテゴリを選択（任意）'),
-      ...categories.map((c) => el('option', { value: c.id, selected: existing?.category_id === c.id }, c.name))]
+      ...categories.map((c) => {
+        const selected = existing
+          ? existing.category_id === c.id
+          : (prefillCategory != null && String(prefillCategory) === String(c.id));
+        return el('option', { value: c.id, selected }, c.name);
+      })]
     ),
     body: el('textarea', {
       placeholder: '今日の作業内容・申し送り事項・気づきを記録してください',
@@ -302,13 +333,25 @@ async function renderForm(existing) {
     } catch (err) { alert(err.message); }
   };
 
+  // カテゴリが未登録のときは入力欄の下に案内を出す（管理者は管理画面へのリンク付き）
+  const categoryField = el('div', { class: 'field' }, [
+    el('label', {}, 'カテゴリ'),
+    f.category,
+    categories.length === 0
+      ? el('p', { class: 'hint' },
+          hasRole(currentUser, 'admin')
+            ? ['カテゴリがまだありません。', el('a', { href: '/pages/admin?tab=manage' }, '管理画面（マスタ管理）'), 'から追加できます。']
+            : 'カテゴリがまだありません。管理者が管理画面から追加できます。')
+      : null,
+  ]);
+
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '日報を編集' : '日報を書く'),
       field('日付（必須）', f.date),
       field('入力者', f.reporter),
       reporterOptions,
-      field('カテゴリ', f.category),
+      categoryField,
       field('内容', f.body, '今日の作業・引き継ぎ・気づき等を記録してください（任意）。'),
       el('div', { class: 'field' }, [candidatesBox]),
       el('div', { class: 'action-row' }, [
