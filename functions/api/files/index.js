@@ -59,6 +59,11 @@ export async function onRequestPost({ request, env, data }) {
   const meta = validateFileMeta({ fileName, contentType, sizeBytes: contentLength });
   if (meta.error) return jsonError(meta.error.status, meta.error.message);
 
+  // R2 バインディング未設定の場合は明示的なエラーを返す（バケット未作成・未接続の場合）
+  if (!env.FILES) {
+    return jsonError(503, 'ファイル保存が設定されていません（R2バインディング未設定）。Cloudflare Pages の設定を確認してください。');
+  }
+
   // 容量上限ガード（無料枠10GBを超えない）
   const usage = await getStorageUsage(env);
   if (usage.used_bytes + contentLength > usage.hard_limit_bytes) {
