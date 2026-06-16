@@ -639,3 +639,11 @@ ALTER TABLE daily_report ADD COLUMN reporter_name TEXT;        -- 入力者名�
 UPDATE daily_report
    SET reporter_name = (SELECT name FROM users WHERE id = daily_report.reporter_id)
  WHERE reporter_name IS NULL AND reporter_id IS NOT NULL;
+
+-- 業務依頼（03）: 起票元レコード（トラブル/点検）への相互リンク
+--   トラブル・点検異常から業務依頼を作成したとき、どの記録から作られたかを残す。
+--   これにより 依頼→元記録 / 元記録→依頼 の双方向に辿れる。
+ALTER TABLE repair_request ADD COLUMN source_table TEXT;   -- 'trouble_record' / 'inspection_result'
+ALTER TABLE repair_request ADD COLUMN source_id INTEGER;   -- 起票元レコードのID
+CREATE INDEX IF NOT EXISTS idx_repair_request_source
+  ON repair_request (source_table, source_id);

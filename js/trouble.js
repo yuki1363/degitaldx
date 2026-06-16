@@ -24,6 +24,9 @@ const CSV_COLUMNS = [
   { label: '登録日時', value: (t) => formatDateTime(t.created_at) },
 ];
 
+// 業務依頼ステータスの表示ラベル（このトラブルから作成された依頼の状況表示に使う）
+const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
+
 const app = document.getElementById('app');
 let currentUser = null;
 let categories = [];
@@ -156,6 +159,9 @@ function infoRow(label, value) {
 
 async function renderDetail(id) {
   const { trouble, files, history } = await api.get(`/api/troubles/${id}`);
+  // このトラブルから作成された業務依頼（相互リンクの逆引き）。列未追加の環境でも落ちないよう握りつぶす。
+  const { repairs: linkedRepairs = [] } =
+    await api.get(`/api/repairs?source_table=trouble_record&source_id=${id}`).catch(() => ({ repairs: [] }));
   const canEdit = hasRole(currentUser, 'editor');
 
   // ファイル一覧
@@ -225,9 +231,9 @@ async function renderDetail(id) {
     ]),
     canEdit
       ? el('div', { class: 'action-row' }, [
-          // このトラブルを業務依頼へエスカレーション（設備・現象・原因・対策をプリフィル）
+          // このトラブルを業務依頼へエスカレーション（設備・現象・原因・対策をプリフィル＋起票元リンク）
           (() => {
-            const q = new URLSearchParams({ new: '1' });
+            const q = new URLSearchParams({ new: '1', source_table: 'trouble_record', source_id: String(id) });
             if (trouble.equipment_id) q.set('equipment_id', String(trouble.equipment_id));
             q.set('title', `【トラブル対応】${trouble.equipment_name || trouble.phenomenon || ''}`.slice(0, 80));
             q.set('description', [
@@ -254,6 +260,23 @@ async function renderDetail(id) {
               go('');
             },
           }, '削除'),
+        ])
+      : null,
+    // このトラブルから作成された業務依頼（あれば対応状況まで辿れる）
+    linkedRepairs.length > 0
+      ? el('div', { class: 'card' }, [
+          el('h3', { class: 'card-title' }, 'このトラブルから作成された業務依頼'),
+          el('div', { class: 'row-list' },
+            linkedRepairs.map((r) =>
+              el('a', { class: 'list-item', href: `/pages/repair?id=${r.id}` }, [
+                el('div', { class: 'list-item-main' }, [
+                  el('div', { class: 'list-item-title' }, r.title),
+                  el('div', { class: 'list-item-sub' }, formatDateTime(r.created_at)),
+                ]),
+                el('span', { class: `status-badge is-${r.status}` }, REPAIR_STATUS_LABELS[r.status] || r.status),
+              ])
+            )
+          ),
         ])
       : null,
     el('div', { class: 'card' }, [

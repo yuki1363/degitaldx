@@ -360,8 +360,13 @@ function formatItemValue(item) {
   return String(item.value || '—');
 }
 
+const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
+
 async function renderDetail(id) {
   const { inspection, files, history } = await api.get(`/api/inspections/${id}`);
+  // この点検から作成された業務依頼（相互リンクの逆引き）。列未追加環境でも落ちないよう握りつぶす。
+  const { repairs: linkedRepairs = [] } =
+    await api.get(`/api/repairs?source_table=inspection_result&source_id=${id}`).catch(() => ({ repairs: [] }));
   const canEdit = hasRole(currentUser, 'editor');
 
   const images = files.filter((f) => f.content_type.startsWith('image/'));
@@ -404,6 +409,8 @@ async function renderDetail(id) {
           const when = formatDateTime(inspection.inspected_at);
           const repairQuery = new URLSearchParams({
             new: '1',
+            source_table: 'inspection_result',
+            source_id: String(inspection.id),
             equipment_id: String(inspection.equipment_id),
             title: `【点検異常】${inspection.equipment_name}`,
             description: `${when} の点検で異常を検知しました。\n異常項目: ${summary}`,
@@ -444,6 +451,23 @@ async function renderDetail(id) {
                 )
               )
             : null,
+        ])
+      : null,
+    // この点検から作成された業務依頼（あれば対応状況まで辿れる）
+    linkedRepairs.length > 0
+      ? el('div', { class: 'card' }, [
+          el('h3', { class: 'card-title' }, 'この点検から作成された業務依頼'),
+          el('div', { class: 'row-list' },
+            linkedRepairs.map((r) =>
+              el('a', { class: 'list-item', href: `/pages/repair?id=${r.id}` }, [
+                el('div', { class: 'list-item-main' }, [
+                  el('div', { class: 'list-item-title' }, r.title),
+                  el('div', { class: 'list-item-sub' }, formatDateTime(r.created_at)),
+                ]),
+                el('span', { class: `status-badge is-${r.status}` }, REPAIR_STATUS_LABELS[r.status] || r.status),
+              ])
+            )
+          ),
         ])
       : null,
     el('div', { class: 'action-row' }, [

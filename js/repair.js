@@ -18,6 +18,10 @@ const STATUS = {
   done:          { label: '完了',    color: '#15803d', bg: '#dcfce7' },
 };
 
+// 起票元（トラブル/点検）の表示ラベルと遷移先
+const SOURCE_LABELS = { trouble_record: 'トラブル記録', inspection_result: '点検記録' };
+const SOURCE_URLS   = { trouble_record: '/pages/trouble?id=', inspection_result: '/pages/inspection?id=' };
+
 const app = document.getElementById('app');
 let currentUser = null;
 
@@ -253,6 +257,11 @@ async function renderDetail(id) {
       infoRow('設備', repair.equipment_name ? `${repair.equipment_code} ${repair.equipment_name}` : null),
       infoRow('担当者', repair.assignee_name),
       infoRow('登録日時', formatDateTime(repair.created_at)),
+      // 起票元（トラブル/点検から作成された依頼なら、その記録へ戻れる）
+      repair.source_table && repair.source_id
+        ? infoRow('起票元', el('a', { href: `${SOURCE_URLS[repair.source_table] || '#'}${repair.source_id}` },
+            `${SOURCE_LABELS[repair.source_table] || repair.source_table} #${repair.source_id}`))
+        : null,
       repair.description ? el('div', { class: 'note-box' }, repair.description) : null,
     ]),
     canEdit
@@ -347,6 +356,11 @@ async function renderForm(existing, prefill = null) {
       assignee_name: f.assignee_name.value.trim() || null,
       description: f.description.value.trim() || null,
     };
+    // 新規かつ起票元（トラブル/点検）が指定されていれば相互リンクとして保存
+    if (!existing && prefill?.source_table && prefill?.source_id) {
+      body.source_table = prefill.source_table;
+      body.source_id = prefill.source_id;
+    }
     if (!body.title) { alert('タイトルは必須です。'); return; }
     try {
       if (existing) {
@@ -388,11 +402,13 @@ async function renderForm(existing, prefill = null) {
       await renderForm(repair);
     } else if (params.get('new')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
-      // 点検異常などからのプリフィル（設備・タイトル・詳細）を受け取る
+      // 点検異常・トラブルなどからのプリフィル（設備・タイトル・詳細・起票元）を受け取る
       const prefill = {
         equipment_id: Number(params.get('equipment_id')) || null,
         title: params.get('title') || '',
         description: params.get('description') || '',
+        source_table: params.get('source_table') || null,
+        source_id: Number(params.get('source_id')) || null,
       };
       await renderForm(null, prefill);
     } else {
