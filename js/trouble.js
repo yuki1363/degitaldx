@@ -187,6 +187,18 @@ async function renderDetail(id) {
     ]),
     canEdit
       ? el('div', { class: 'action-row' }, [
+          // このトラブルを業務依頼へエスカレーション（設備・現象・原因・対策をプリフィル）
+          (() => {
+            const q = new URLSearchParams({ new: '1' });
+            if (trouble.equipment_id) q.set('equipment_id', String(trouble.equipment_id));
+            q.set('title', `【トラブル対応】${trouble.equipment_name || trouble.phenomenon || ''}`.slice(0, 80));
+            q.set('description', [
+              `現象: ${trouble.phenomenon || ''}`,
+              trouble.cause ? `原因: ${trouble.cause}` : null,
+              trouble.countermeasure ? `対策: ${trouble.countermeasure}` : null,
+            ].filter(Boolean).join('\n'));
+            return el('a', { class: 'btn btn-primary', href: `/pages/repair?${q}` }, '🔧 業務依頼を作成');
+          })(),
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
           el('button', {
             class: 'btn btn-danger',
