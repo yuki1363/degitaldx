@@ -10,6 +10,7 @@ import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
+import { openQrScanner } from '/js/qr-scan.js';
 
 // CSV出力の列定義（トラブル履歴）
 const CSV_COLUMNS = [
@@ -406,7 +407,16 @@ async function renderForm(existing, prefill = null) {
       el('h2', { class: 'card-title' }, existing ? 'トラブル記録を編集' : 'トラブルを記録'),
       field('発生日時（必須）', f.occurred_at),
       field('ジャンル', f.category_id),
-      field('設備', f.equipment_id),
+      el('div', { class: 'field' }, [
+        el('label', {}, '設備'),
+        el('div', { class: 'inline-form' }, [
+          f.equipment_id,
+          el('button', {
+            type: 'button', class: 'btn btn-sm',
+            onclick: () => openQrScanner((eqId) => { f.equipment_id.value = String(eqId); }),
+          }, '📷 QR'),
+        ]),
+      ]),
       field('現象（必須）', f.phenomenon),
       field('原因', f.cause),
       field('対策', f.countermeasure),

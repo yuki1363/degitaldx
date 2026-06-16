@@ -10,6 +10,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDateTime, formatBytes, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
+import { openQrScanner } from '/js/qr-scan.js';
 
 const STATUS = {
   open:          { label: '受付',    color: '#1e40af', bg: '#dbeafe' },
@@ -384,7 +385,16 @@ async function renderForm(existing, prefill = null) {
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '業務依頼を編集' : '業務依頼を登録'),
       field('タイトル（必須）', f.title),
-      field('設備', f.equipment_id),
+      el('div', { class: 'field' }, [
+        el('label', {}, '設備'),
+        el('div', { class: 'inline-form' }, [
+          f.equipment_id,
+          el('button', {
+            type: 'button', class: 'btn btn-sm',
+            onclick: () => openQrScanner((eqId) => { f.equipment_id.value = String(eqId); }),
+          }, '📷 QR'),
+        ]),
+      ]),
       el('div', { class: 'field' }, [el('label', {}, '担当者'), f.assignee_name, assigneeOptions]),
       field('詳細・症状', f.description),
       el('div', { class: 'action-row' }, [

@@ -14,6 +14,7 @@ import {
   ACTION_LABELS,
 } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
+import { openQrScanner } from '/js/qr-scan.js';
 
 const INPUT_TYPE_LABELS = { ok_ng: 'OK / NG', number: '数値', select: '選択式', text: '自由記述' };
 
@@ -329,7 +330,16 @@ async function renderEntry({ equipmentId, existing, planId }) {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '点検記録を編集' : '点検を記録'),
-      el('div', { class: 'field' }, [el('label', {}, '設備'), equipmentSelect]),
+      el('div', { class: 'field' }, [
+        el('label', {}, '設備'),
+        el('div', { class: 'inline-form' }, [
+          equipmentSelect,
+          el('button', {
+            type: 'button', class: 'btn btn-sm',
+            onclick: () => openQrScanner((eqId) => { equipmentSelect.value = String(eqId); }),
+          }, '📷 QR'),
+        ]),
+      ]),
       el('div', { class: 'field' }, [el('label', {}, '担当者'), assigneeInput, assigneeOptions]),
       el('div', { class: 'field' }, [el('label', {}, '実施日時'), datetimeInput]),
     ]),
