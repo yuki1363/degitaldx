@@ -223,8 +223,16 @@ export async function onRequestGet({ request, env }) {
     }
   }
 
-  // 日付降順でソート（null は末尾）
-  results.sort((a, b) => (b.date || '') < (a.date || '') ? -1 : 1);
+  // 日付降順でソート（date が null/空のもの＝設備等は末尾へ）。
+  // 0 を返さない比較関数は非推移的になり順序が不安定になるため、3値で比較する。
+  results.sort((a, b) => {
+    const da = a.date || '';
+    const db = b.date || '';
+    if (da === db) return 0;
+    if (!da) return 1;   // a が日付なし → 後ろ
+    if (!db) return -1;  // b が日付なし → 後ろ
+    return da < db ? 1 : -1; // 新しい日付を先頭に
+  });
 
   return json({ results, count: results.length, keywords });
 }

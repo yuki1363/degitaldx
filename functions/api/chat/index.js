@@ -1,4 +1,5 @@
 import { requireRole } from '../_lib/auth.js';
+import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
@@ -44,5 +45,14 @@ export async function onRequestPost({ request, env, data }) {
     VALUES (?, ?, ?, ?, ?, ?)
   `).bind(channel, msgBody.trim(), userEmail, now, userEmail, now).run();
 
-  return json({ id: result.meta?.last_row_id }, 201);
+  const id = result.meta?.last_row_id;
+  await writeAuditLog(db, {
+    tableName: 'chat_messages',
+    recordId: id,
+    action: 'create',
+    changedBy: userEmail,
+    diff: { channel, body: msgBody.trim() },
+  });
+
+  return json({ id }, 201);
 }

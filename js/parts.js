@@ -553,6 +553,21 @@ async function renderImport() {
   const resultBox  = el('div', {}, []);
   const importBtn  = el('button', { class: 'btn btn-primary', disabled: true }, '取込実行');
 
+  // CSVのバイト列を文字コード自動判定で文字列化する（Excel/SharePoint由来の
+  // Shift_JIS と UTF-8 の両方に対応）。encoding-japanese 未読込時は UTF-8 とみなす。
+  const decodeCsvBuffer = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let text;
+    if (typeof Encoding !== 'undefined') {
+      const detected = Encoding.detect(bytes) || 'AUTO';
+      const unicode = Encoding.convert(bytes, { to: 'UNICODE', from: detected });
+      text = Encoding.codeToString(unicode);
+    } else {
+      text = new TextDecoder('utf-8').decode(bytes);
+    }
+    return text.replace(/^﻿/, ''); // 先頭のBOMを除去
+  };
+
   const parseCSV = (text) => {
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
     return lines.map((line) => {
@@ -715,14 +730,15 @@ async function renderImport() {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const parsed = parseCSV(ev.target.result);
+        const parsed = parseCSV(decodeCsvBuffer(ev.target.result));
         if (parsed.length < 2) { alert('CSVの行数が不足しています。'); return; }
         csvHeaders = parsed[0];
         csvRows = parsed.slice(1);
         mapping = {};
         buildMapping();
       };
-      reader.readAsText(file, 'UTF-8');
+      // バイト列で読み、文字コード（UTF-8 / Shift_JIS）を自動判定して文字列化する
+      reader.readAsArrayBuffer(file);
     },
   });
 

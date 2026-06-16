@@ -11,10 +11,10 @@ let currentUser = null;
 
 // トピック（type）とラベル
 const TOPICS = [
-  { key: '',                   label: '全部' },
-  { key: 'parts_zero',         label: '📦 部品' },
-  { key: 'inspection_abnormal', label: '✅ 点検' },
-  { key: 'trouble',            label: '⚠️ トラブル' },
+  { key: '',                      label: '全部' },
+  { key: 'parts_zero,parts_low',  label: '📦 部品' }, // 在庫切れ・発注アラートの両方
+  { key: 'inspection_abnormal',   label: '✅ 点検' },
+  { key: 'trouble',               label: '⚠️ トラブル' },
 ];
 
 // レベルごとの色とラベル

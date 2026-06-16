@@ -15,9 +15,9 @@ export async function onRequestPost({ env, data, params, request }) {
   const { DB } = env;
   const userEmail = data.user.email;
 
-  // 部品の存在確認（在庫0通知の見出しに使うため名称・型番も取得）
+  // 部品の存在確認（在庫0・安全在庫割れ通知の見出し・しきい値に使う）
   const part = await DB.prepare(
-    `SELECT id, name, model_no, quantity FROM parts_inventory WHERE id = ?1 AND deleted_at IS NULL`
+    `SELECT id, name, model_no, quantity, safety_stock FROM parts_inventory WHERE id = ?1 AND deleted_at IS NULL`
   )
     .bind(id)
     .first();
@@ -34,9 +34,13 @@ export async function onRequestPost({ env, data, params, request }) {
     return jsonError(400, 'type は in / out / adjust のいずれかを指定してください。');
   }
 
-  // バリデーション: quantity（正の整数）
-  if (!Number.isInteger(bodyQty) || bodyQty <= 0) {
-    return jsonError(400, 'quantity は1以上の整数を指定してください。');
+  // バリデーション: quantity（整数）。入庫・出庫は1以上、棚卸調整(adjust)のみ0も許可
+  // （棚卸で在庫ゼロを記録できるようにするため）
+  if (!Number.isInteger(bodyQty) || bodyQty < 0) {
+    return jsonError(400, 'quantity は0以上の整数を指定してください。');
+  }
+  if (bodyQty === 0 && type !== 'adjust') {
+    return jsonError(400, '入庫・出庫の数量は1以上を指定してください。');
   }
 
   // 任意: 入出庫を業務依頼・トラブル対応に紐づける（使用部品の記録）
@@ -97,14 +101,28 @@ export async function onRequestPost({ env, data, params, request }) {
     diff: { old_qty: oldQty, new_qty: newQty, type, delta },
   });
 
-  // 在庫が0になったらアラート通知（0から0へは変化なしなので oldQty>0 のときのみ）
+  // 在庫アラート通知。多重通知を避けるため「しきい値をまたいだ瞬間」だけ発火する。
+  //   ・在庫切れ（0）  : alert（0→0は変化なしなので oldQty>0 のときのみ）
+  //   ・安全在庫割れ    : warning（必要数を下回った瞬間。0は上の在庫切れで通知済みなので除外）
+  const label = part.model_no ? `${part.model_no}（${part.name}）` : part.name;
+  const safetyStock = part.safety_stock || 0;
   if (newQty === 0 && oldQty > 0) {
-    const label = part.model_no ? `${part.model_no}（${part.name}）` : part.name;
     await createNotification(DB, {
       type: 'parts_zero',
       level: 'alert',
       title: `在庫切れ: ${part.name}`,
       body: `${label}の在庫が0になりました。発注をご検討ください。`,
+      relatedTable: 'parts_inventory',
+      relatedId: id,
+      linkUrl: `/pages/parts?id=${id}`,
+      createdBy: userEmail,
+    });
+  } else if (safetyStock > 0 && newQty > 0 && newQty < safetyStock && oldQty >= safetyStock) {
+    await createNotification(DB, {
+      type: 'parts_low',
+      level: 'warning',
+      title: `発注アラート: ${part.name}`,
+      body: `${label}の在庫が必要数（${safetyStock}）を下回りました（現在 ${newQty}）。発注をご検討ください。`,
       relatedTable: 'parts_inventory',
       relatedId: id,
       linkUrl: `/pages/parts?id=${id}`,

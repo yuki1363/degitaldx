@@ -44,8 +44,13 @@ export async function onRequestGet({ env, params }) {
       .then((r) => r.results),
   ]);
 
+  // items_json は通常 NOT NULL の正しいJSONだが、万一壊れていても詳細表示が
+  // 500 で落ちないよう防御的に parse する（他のJSON.parse箇所と同様）。
+  let items = [];
+  try { items = JSON.parse(inspection.items_json) || []; } catch { items = []; }
+
   return json({
-    inspection: { ...inspection, items: JSON.parse(inspection.items_json), items_json: undefined },
+    inspection: { ...inspection, items, items_json: undefined },
     files,
     history,
   });

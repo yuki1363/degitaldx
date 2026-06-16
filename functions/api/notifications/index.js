@@ -17,7 +17,17 @@ export async function onRequestGet({ request, env }) {
   let sql = `SELECT * FROM notifications WHERE deleted_at IS NULL`;
   const binds = [];
   if (status === 'unread') sql += ` AND acknowledged_at IS NULL`;
-  if (type) { sql += ` AND type = ?`; binds.push(type); }
+  // type はカンマ区切りで複数指定可（例 parts_zero,parts_low）。プレースホルダで安全に IN 展開。
+  if (type) {
+    const types = type.split(',').map((t) => t.trim()).filter(Boolean);
+    if (types.length === 1) {
+      sql += ` AND type = ?`;
+      binds.push(types[0]);
+    } else if (types.length > 1) {
+      sql += ` AND type IN (${types.map(() => '?').join(',')})`;
+      binds.push(...types);
+    }
+  }
   sql += ` ORDER BY created_at DESC, id DESC LIMIT ?`;
   binds.push(limit);
 
