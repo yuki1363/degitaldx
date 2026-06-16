@@ -65,7 +65,13 @@ export async function onRequestPost({ request, env, data }) {
   }
 
   // 容量上限ガード（無料枠10GBを超えない）
-  const usage = await getStorageUsage(env);
+  let usage;
+  try {
+    usage = await getStorageUsage(env);
+  } catch (err) {
+    console.error('files upload: getStorageUsage failed:', err && err.stack ? err.stack : err);
+    return jsonError(500, '保存容量の集計に失敗しました（D1 の files テーブルが未作成の可能性があります。schema.sql の適用を確認してください）。');
+  }
   if (usage.used_bytes + contentLength > usage.hard_limit_bytes) {
     return jsonError(
       507,
@@ -78,29 +84,51 @@ export async function onRequestPost({ request, env, data }) {
   const now = new Date();
   const ym = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   const r2Key = `uploads/${ym}/${crypto.randomUUID()}${meta.ext}`;
-  const object = await env.FILES.put(r2Key, request.body, {
-    httpMetadata: { contentType },
-  });
+  let object;
+  try {
+    object = await env.FILES.put(r2Key, request.body, {
+      httpMetadata: { contentType },
+    });
+  } catch (err) {
+    console.error('files upload: R2 put failed:', err && err.stack ? err.stack : err);
+    return jsonError(502, 'ファイルの保存に失敗しました（R2バケットの設定・バインディング FILES を確認してください）。');
+  }
+  if (!object) {
+    return jsonError(502, 'ファイルの保存に失敗しました（R2が応答しませんでした）。');
+  }
 
   // メタデータを D1 に記録（実サイズは R2 が受け取った object.size を正とする）
-  const result = await env.DB.prepare(
-    `INSERT INTO files
-       (r2_key, file_name, content_type, size_bytes, related_table, related_id, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
-  )
-    .bind(r2Key, fileName, contentType, object.size, relatedTable, relatedId, data.user.email, nowIso())
-    .run();
+  let fileId;
+  try {
+    const result = await env.DB.prepare(
+      `INSERT INTO files
+         (r2_key, file_name, content_type, size_bytes, related_table, related_id, created_by, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+    )
+      .bind(r2Key, fileName, contentType, object.size, relatedTable, relatedId, data.user.email, nowIso())
+      .run();
+    fileId = result.meta.last_row_id;
 
-  const fileId = result.meta.last_row_id;
-  await writeAuditLog(env.DB, {
-    tableName: 'files',
-    recordId: fileId,
-    action: 'create',
-    changedBy: data.user.email,
-    diff: { file_name: fileName, content_type: contentType, size_bytes: object.size, related_table: relatedTable, related_id: relatedId },
-  });
+    await writeAuditLog(env.DB, {
+      tableName: 'files',
+      recordId: fileId,
+      action: 'create',
+      changedBy: data.user.email,
+      diff: { file_name: fileName, content_type: contentType, size_bytes: object.size, related_table: relatedTable, related_id: relatedId },
+    });
+  } catch (err) {
+    console.error('files upload: D1 insert failed:', err && err.stack ? err.stack : err);
+    // R2 には保存済みだが D1 記録に失敗 → 不整合を避けるため R2 を消す（ベストエフォート）
+    try { await env.FILES.delete(r2Key); } catch { /* 消せなくても致命的ではない */ }
+    return jsonError(500, 'ファイル情報の記録に失敗しました（D1 の files テーブルを確認してください）。');
+  }
 
-  const usageAfter = await getStorageUsage(env);
+  let usageAfter;
+  try {
+    usageAfter = await getStorageUsage(env);
+  } catch {
+    usageAfter = usage; // 取得失敗してもアップロード自体は成功しているため直前の値で代用
+  }
   return json(
     {
       file: {
