@@ -165,10 +165,11 @@ function field(label, input, hint) {
 }
 
 async function renderForm(existing) {
-  const [{ categories }, { troubles }, { repairs }] = await Promise.all([
+  const [{ categories }, { troubles }, { repairs }, { inspections }] = await Promise.all([
     api.get('/api/reports/categories'),
     api.get(`/api/troubles?from=${todayStr()}&to=${todayStr()}`).catch(() => ({ troubles: [] })),
     api.get('/api/repairs?status=open').catch(() => ({ repairs: [] })),
+    api.get(`/api/inspections?from=${todayStr()}&to=${todayStr()}`).catch(() => ({ inspections: [] })),
   ]);
 
   // 既存のリンク済み記録を取得
@@ -198,11 +199,16 @@ async function renderForm(existing) {
     const cb = el('input', { type: 'checkbox', checked: isLinked('repair', r.id), 'data-type': 'repair', 'data-id': r.id, 'data-title': r.title.slice(0, 40) });
     return el('label', { class: 'link-check-row' }, [cb, ` [業務依頼] ${r.title.slice(0, 40)}`]);
   });
+  const inspectionChecks = inspections.map((i) => {
+    const title = `${i.equipment_name || '設備未指定'}${i.has_abnormal ? '（異常あり）' : ''}`;
+    const cb = el('input', { type: 'checkbox', checked: isLinked('inspection', i.id), 'data-type': 'inspection', 'data-id': i.id, 'data-title': title.slice(0, 40) });
+    return el('label', { class: 'link-check-row' }, [cb, ` [点検] ${title.slice(0, 40)}`]);
+  });
 
-  const linkedSection = (troubleChecks.length + repairChecks.length > 0)
+  const linkedSection = (troubleChecks.length + repairChecks.length + inspectionChecks.length > 0)
     ? el('div', { class: 'field' }, [
         el('label', {}, '関連する記録を紐づける（任意）'),
-        el('div', { class: 'link-check-list' }, [...troubleChecks, ...repairChecks]),
+        el('div', { class: 'link-check-list' }, [...troubleChecks, ...inspectionChecks, ...repairChecks]),
       ])
     : null;
 
@@ -215,7 +221,7 @@ async function renderForm(existing) {
 
     // チェック済みの関連記録を収集
     const linked_records_json = [];
-    const allChecks = [...troubleChecks, ...repairChecks].map((row) => row.querySelector('input[type=checkbox]'));
+    const allChecks = [...troubleChecks, ...inspectionChecks, ...repairChecks].map((row) => row.querySelector('input[type=checkbox]'));
     for (const cb of allChecks) {
       if (cb.checked) {
         linked_records_json.push({ type: cb.dataset.type, id: Number(cb.dataset.id), title: cb.dataset.title });
