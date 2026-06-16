@@ -53,7 +53,8 @@ export async function onRequestGet({ params, env }) {
     db
       .prepare(
         `SELECT pt.id, pt.part_id, pt.quantity, pt.created_by, pt.created_at,
-                p.name AS part_name, p.model_no AS part_model_no
+                p.name AS part_name, p.model_no AS part_model_no,
+                p.quantity AS part_stock, p.safety_stock AS part_safety_stock
            FROM parts_transaction pt
            JOIN parts_inventory p ON p.id = pt.part_id
           WHERE pt.related_table = 'repair_request' AND pt.related_id = ?1 AND pt.type = 'out'

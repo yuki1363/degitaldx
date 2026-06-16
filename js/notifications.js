@@ -12,7 +12,7 @@ let currentUser = null;
 // トピック（type）とラベル
 const TOPICS = [
   { key: '',                      label: '全部' },
-  { key: 'parts_zero,parts_low',  label: '📦 部品' }, // 在庫切れ・発注アラートの両方
+  { key: 'parts_zero,parts_low,parts_restock', label: '📦 部品' }, // 在庫切れ・発注アラート・入庫
   { key: 'inspection_abnormal',   label: '✅ 点検' },
   { key: 'trouble',               label: '⚠️ トラブル' },
 ];

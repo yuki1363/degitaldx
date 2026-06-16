@@ -134,16 +134,23 @@ async function renderDetail(id) {
       render(usedPartsBox, el('p', { class: 'empty' }, '使用部品の記録はありません。'));
       return;
     }
-    render(usedPartsBox, list.map((u) =>
-      el('div', { class: 'list-item' }, [
+    render(usedPartsBox, list.map((u) => {
+      // 現在庫を表示（部品待ちの判断に使う）。必要数を下回っていれば要発注を強調。
+      const hasStock = u.part_stock != null;
+      const isLow = hasStock && u.part_safety_stock != null && u.part_stock < u.part_safety_stock;
+      return el('div', { class: 'list-item' }, [
         el('div', { class: 'list-item-main' }, [
           el('div', { class: 'list-item-title' },
             u.part_model_no ? `${u.part_model_no}（${u.part_name}）` : u.part_name),
-          el('div', { class: 'list-item-sub' }, `${formatDateTime(u.created_at)} ／ ${u.created_by}`),
+          el('div', { class: 'list-item-sub' }, [
+            `${formatDateTime(u.created_at)} ／ ${u.created_by}`,
+            hasStock ? `　現在庫: ${u.part_stock}` : null,
+            isLow ? el('span', { class: 'abn-badge is-abn', style: 'margin-left:6px;font-size:10px;padding:1px 6px' }, '要発注') : null,
+          ].filter((x) => x !== null)),
         ]),
         el('span', { class: 'status-badge' }, `${Math.abs(u.quantity)} 個使用`),
-      ])
-    ));
+      ]);
+    }));
   };
   renderUsedParts(used_parts);
 

@@ -130,5 +130,32 @@ export async function onRequestPost({ env, data, params, request }) {
     });
   }
 
+  // 入庫したら、この部品を使う「部品待ち」の業務依頼に入庫を通知する
+  //   （部品待ちで止まりがちな依頼を、部品到着で自動的に促す）
+  if (type === 'in' && delta > 0) {
+    const waiting = await DB.prepare(
+      `SELECT DISTINCT r.id, r.title
+         FROM parts_transaction pt
+         JOIN repair_request r ON r.id = pt.related_id
+        WHERE pt.part_id = ?1 AND pt.related_table = 'repair_request'
+          AND r.status = 'waiting_parts' AND r.deleted_at IS NULL`
+    )
+      .bind(id)
+      .all()
+      .catch(() => ({ results: [] }));
+    for (const r of waiting.results ?? []) {
+      await createNotification(DB, {
+        type: 'parts_restock',
+        level: 'info',
+        title: `部品が入庫しました: ${part.name}`,
+        body: `部品待ちの業務依頼「${r.title}」で使用する${label}が入庫しました（現在 ${newQty}）。`,
+        relatedTable: 'repair_request',
+        relatedId: r.id,
+        linkUrl: `/pages/repair?id=${r.id}`,
+        createdBy: userEmail,
+      });
+    }
+  }
+
   return json({ quantity: newQty });
 }
