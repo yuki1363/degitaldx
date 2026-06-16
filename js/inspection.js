@@ -83,6 +83,7 @@ async function renderList(presetEquipmentId) {
       hasRole(currentUser, 'editor')
         ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 点検を記録')
         : null,
+      el('a', { class: 'btn', href: '/pages/inspection-report' }, '📊 レポート出力'),
     ]),
     el('div', { class: 'card filter-bar' }, [
       el('div', { class: 'field' }, [el('label', {}, '設備'), equipmentSelect]),

@@ -1498,6 +1498,33 @@ input.is-abnormal {
   line-height: 1.5;
 }
 
+/* =====================================================================
+ * 点検レポート出力（CSV/PDF）
+ * ===================================================================== */
+.print-only { display: none; }
+
+.report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.report-count { font-size: 13px; color: #64748b; margin: 4px 0 8px; }
+.report-table-wrap { overflow-x: auto; }
+
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-table th, .report-table td {
+  border: 1px solid #e2e8f0; padding: 6px 8px; text-align: left; white-space: nowrap;
+}
+.report-table thead th { background: #f1f5f9; }
+.report-table .report-date-row td {
+  background: #eff6ff; font-weight: 700; color: #1e40af;
+}
+.report-table .is-abn-row { background: #fef2f2; }
+.report-table .is-abn-cell { color: #dc2626; font-weight: 600; }
+
+.report-item-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
+.report-item-check { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; }
+.report-pick-actions { display: flex; gap: 8px; margin-bottom: 6px; }
+.report-print-header { margin-bottom: 10px; }
+.report-print-header h2 { margin: 0 0 4px; font-size: 16pt; }
+.report-print-header p { margin: 0; font-size: 10pt; color: #334155; }
+
 /* 印刷用（抽出レポートのPDF出力） */
 @media print {
   body.printing-label > :not(.print-label) {
@@ -1580,6 +1607,22 @@ input.is-abnormal {
     font-size: 10pt;
     color: #000;
   }
+
+  /* 点検レポート: 操作UIを隠し、見出しと表だけを用紙幅で出力 */
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+
+  body.inspection-report-page .container { max-width: none; margin: 0; padding: 0; }
+  body.inspection-report-page .report-table { font-size: 9pt; width: 100%; }
+  body.inspection-report-page .report-table th,
+  body.inspection-report-page .report-table td {
+    padding: 3px 5px;
+    white-space: normal;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.inspection-report-page .report-table .report-date-row td { background: #e5edff; }
+  body.inspection-report-page .report-table .is-abn-row { background: #fde8e8; }
 }
 
 /* =====================================================================
