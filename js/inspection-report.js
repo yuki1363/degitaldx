@@ -17,6 +17,8 @@ let itemNames = [];            // 全点検に出現する項目名（出現順�
 const selectedItems = new Set(); // 出力対象に選んだ項目名
 let layout = 'detail';         // 'detail'（明細）| 'list'（一覧）
 let groupByDate = false;       // 日付ごとに区切る
+let sortKey = 'inspected_at'; // ソート列キー
+let sortDir = 'asc';          // 'asc' | 'desc'
 let reportTitle = '点検レポート';
 let metaFrom = '';
 let metaTo = '';
@@ -64,6 +66,7 @@ function buildDetailRows() {
     for (const it of insp.items || []) {
       if (!selectedItems.has(it.name)) continue;
       rows.push({
+        raw: insp.inspected_at || '',
         date: dateOf(insp),
         datetime: formatDateTime(insp.inspected_at),
         equipment_code: insp.equipment_code || '',
@@ -89,6 +92,59 @@ function inspItemMap(insp) {
   return m;
 }
 
+// ---- ソート ----
+function cmpVal(a, b) {
+  if (a === b) return 0;
+  if (a == null || a === '') return 1;
+  if (b == null || b === '') return -1;
+  return typeof a === 'number' && typeof b === 'number'
+    ? a - b
+    : String(a).localeCompare(String(b), 'ja');
+}
+function applySort(arr, keyFn) {
+  return [...arr].sort((a, b) => {
+    const d = cmpVal(keyFn(a), keyFn(b));
+    return sortDir === 'asc' ? d : -d;
+  });
+}
+function getSortedDetailRows() {
+  const rows = buildDetailRows();
+  const keyFns = {
+    inspected_at: (r) => r.raw,
+    equipment:    (r) => r.equipment_name,
+    assignee:     (r) => r.assignee,
+    item:         (r) => r.item,
+    value:        (r) => r.value,
+    judge:        (r) => r.judge,
+    note:         (r) => r.note,
+  };
+  const fn = keyFns[sortKey];
+  return fn ? applySort(rows, fn) : rows;
+}
+function getSortedInspections() {
+  const keyFns = {
+    inspected_at: (i) => i.inspected_at,
+    equipment:    (i) => i.equipment_name,
+    assignee:     (i) => i.assignee_name,
+    abnormal:     (i) => (i.has_abnormal ? 1 : 0),
+    note:         (i) => i.note,
+  };
+  const fn = keyFns[sortKey];
+  return fn ? applySort(inspections, fn) : inspections;
+}
+function thSort(label, key) {
+  const active = sortKey === key;
+  const indicator = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  return el('th', {
+    class: 'sortable' + (active ? ' is-sorted' : ''),
+    onclick: () => {
+      if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      else { sortKey = key; sortDir = 'asc'; }
+      renderPreview();
+    },
+  }, label + indicator);
+}
+
 // ---- CSV 出力 ----
 function exportCsv(enc) {
   const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
@@ -105,7 +161,7 @@ function exportCsv(enc) {
       { label: '判定',     value: (r) => r.judge },
       { label: '備考',     value: (r) => r.note },
     ];
-    const rows = buildDetailRows();
+    const rows = getSortedDetailRows();
     if (rows.length === 0) { alert('出力対象がありません。'); return; }
     text = buildCsvText(rows, columns);
   } else {
@@ -127,8 +183,9 @@ function exportCsv(enc) {
       { label: '全体判定', value: (insp) => (insp.has_abnormal ? '異常あり' : '正常') },
       { label: '備考',     value: (insp) => insp.note || '' },
     ];
-    if (inspections.length === 0) { alert('出力対象がありません。'); return; }
-    text = buildCsvText(inspections, columns);
+    const sorted = getSortedInspections();
+    if (sorted.length === 0) { alert('出力対象がありません。'); return; }
+    text = buildCsvText(sorted, columns);
   }
 
   downloadCsv(`inspection_report_${dateStr}.csv`, text, enc);
@@ -172,8 +229,16 @@ function renderPreview() {
 
 // 明細テーブル（必要なら日付ごとに見出し行を挿入）
 function buildDetailTable() {
-  const rows = buildDetailRows();
-  const head = el('tr', {}, ['点検日時', '設備', '担当者', '点検項目', '値', '判定', '備考'].map((h) => el('th', {}, h)));
+  const rows = getSortedDetailRows();
+  const head = el('tr', {}, [
+    thSort('点検日時', 'inspected_at'),
+    thSort('設備',     'equipment'),
+    thSort('担当者',   'assignee'),
+    thSort('点検項目', 'item'),
+    thSort('値',       'value'),
+    thSort('判定',     'judge'),
+    thSort('備考',     'note'),
+  ]);
   const body = [];
   let lastDate = null;
   for (const r of rows) {
@@ -197,12 +262,19 @@ function buildDetailTable() {
 // 一覧テーブル（点検ごと1行・選択項目を列）
 function buildWideTable() {
   const items = selectedItemList();
-  const headCells = ['点検日時', '設備', '担当者', ...items, '全体判定', '備考'];
-  const head = el('tr', {}, headCells.map((h) => el('th', {}, h)));
+  const headCells = [
+    thSort('点検日時', 'inspected_at'),
+    thSort('設備',     'equipment'),
+    thSort('担当者',   'assignee'),
+    ...items.map((h) => el('th', {}, h)),
+    thSort('全体判定', 'abnormal'),
+    thSort('備考',     'note'),
+  ];
+  const head = el('tr', {}, headCells);
   const colCount = headCells.length;
   const body = [];
   let lastDate = null;
-  for (const insp of inspections) {
+  for (const insp of getSortedInspections()) {
     if (groupByDate) {
       const d = dateOf(insp);
       if (d !== lastDate) {

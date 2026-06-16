@@ -1517,6 +1517,9 @@ input.is-abnormal {
 }
 .report-table .is-abn-row { background: #fef2f2; }
 .report-table .is-abn-cell { color: #dc2626; font-weight: 600; }
+.report-table th.sortable { cursor: pointer; user-select: none; }
+.report-table th.sortable:hover { background: #dbeafe; }
+.report-table th.is-sorted { background: #bfdbfe; }
 
 .report-item-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
 .report-item-check { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; }
