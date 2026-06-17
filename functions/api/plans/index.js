@@ -70,7 +70,13 @@ export async function onRequestGet({ request, env }) {
       WHERE p.deleted_at IS NULL
       ORDER BY p.planned_date ASC, p.id ASC
     `).all();
-    const plans = (rows ?? []).filter((p) => p.annual_only);
+    // annual_only=1 に加え、フラグ導入前に年間計画表から登録した「旧データ」も拾う。
+    // 一括登録は「各月1日・繰り返しなし・終了日なし」で作られるため、その特徴で判定する
+    // （annual_only 列が未マイグレーションでも undefined となり、旧データ判定で救済される）。
+    const plans = (rows ?? []).filter((p) =>
+      p.annual_only ||
+      (!p.recurrence_rule && !p.planned_end_date && /-01$/.test(String(p.planned_date || '').slice(0, 10)))
+    );
     return json({ plans });
   }
 

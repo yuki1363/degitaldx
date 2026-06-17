@@ -669,6 +669,19 @@ ALTER TABLE maintenance_plan ADD COLUMN inspector_name TEXT;  -- 点検者名（
 --   カレンダーは手動で日程を登録する運用とし、年間計画と分離する。
 ALTER TABLE maintenance_plan ADD COLUMN annual_only INTEGER;  -- 1=年間計画表専用（カレンダーに表示しない）
 
+-- 旧データ救済（任意）: annual_only 導入前に年間計画表から登録した予定を
+-- 年間計画表専用に移行する。一括登録は「各月1日・繰り返しなし・終了日なし」で
+-- 作成されるため、その特徴を持つ予定を annual_only=1 にする。
+-- ※ 実行するとこれらはカレンダーから消え、年間計画表のみに表示される。
+--   1日付の手動カレンダー予定も対象になりうる点に注意（不要なら個別に外す）。
+UPDATE maintenance_plan
+   SET annual_only = 1
+ WHERE annual_only IS NULL
+   AND deleted_at IS NULL
+   AND recurrence_rule IS NULL
+   AND planned_end_date IS NULL
+   AND substr(planned_date, 9, 2) = '01';
+
 -- 通知（notifications）: 古いスキーマで作成されたDBに acknowledged カラムが
 -- 存在しない場合のマイグレーション。SQLite 3.37+ の IF NOT EXISTS を使用。
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by TEXT;
