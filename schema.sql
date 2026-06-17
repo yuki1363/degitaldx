@@ -653,3 +653,9 @@ CREATE INDEX IF NOT EXISTS idx_repair_request_source
 --   実際に対応・記録した人を自由入力できるようにする。
 --   表示は reporter_name（自由入力）を優先し、未設定の旧データは users.name で補う。
 ALTER TABLE trouble_record ADD COLUMN reporter_name TEXT;  -- 記録者名（自由入力）
+
+-- 保全計画（01）: 年間計画表の「実施月未定」枠
+--   実施月を決めずに登録したタスク用のフラグ。1=未定（年間計画表の「未定」列に表示）。
+--   未定の予定はプレースホルダとして planned_date に当年1/1を入れるが、カレンダー／
+--   月クエリでは除外する（include_unscheduled=1 のときだけ返す）。月へ割り当てると 0 に戻す。
+ALTER TABLE maintenance_plan ADD COLUMN unscheduled INTEGER;  -- 1=実施月未定

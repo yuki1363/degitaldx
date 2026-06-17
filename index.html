@@ -39,6 +39,7 @@
   <main class="container">
     <p class="notice is-error" id="auth-notice" hidden></p>
     <p class="notice is-warning" id="storage-alert" hidden></p>
+    <p class="notice is-warning" id="planend-alert" hidden></p>
 
     <section class="home-activity" id="home-activity" hidden>
       <div class="home-activity-head">
@@ -147,6 +148,7 @@
       document.getElementById('user-role').textContent = ROLE_LABELS[user.role] || user.role;
       document.getElementById('user-chip').hidden = false;
       showStorageAlertForAdmin(user);
+      showMonthEndPlanAlert();
       loadHomeActivity();
       // 管理者のみ管理タイルを有効化
       if (user.role === 'admin') {
@@ -194,6 +196,28 @@
         document.getElementById('home-activity').hidden = false;
       } catch {
         // 通知の取得失敗はホーム表示を妨げない
+      }
+    }
+
+    // 月末が近いとき、今月の未完了の保全予定（年間計画表）を知らせて完了チェックを促す
+    async function showMonthEndPlanAlert() {
+      try {
+        const today = new Date();
+        const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+        const daysLeft = daysInMonth - today.getDate();
+        if (daysLeft > 7) return; // 月末1週間以内のみ
+        const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+        const { plans } = await api.get(`/api/plans?month=${monthStr}`);
+        const pending = (plans || []).filter((p) => p.status !== 'done');
+        if (pending.length === 0) return;
+        const alert = document.getElementById('planend-alert');
+        render(alert, [
+          el('span', {}, `⚠ 今月の保全予定で未完了が ${pending.length} 件あります（月末まであと${daysLeft}日）。`),
+          el('a', { href: '/pages/plan-annual', style: 'margin-left:6px;font-weight:600' }, '年間計画表で確認 ›'),
+        ]);
+        alert.hidden = false;
+      } catch {
+        // 予定の取得失敗はホーム表示を妨げない
       }
     }
 

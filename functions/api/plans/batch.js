@@ -42,9 +42,9 @@ export async function onRequestPost({ request, env, data }) {
     const result = await db.prepare(`
       INSERT INTO maintenance_plan
         (title, planned_date, planned_end_date, plan_type, line_name, equipment_name,
-         assignee_name, status, note, recurrence_rule,
+         assignee_name, status, note, recurrence_rule, unscheduled,
          created_by, created_at, updated_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       String(it.title).trim(),
       it.planned_date,
@@ -56,6 +56,7 @@ export async function onRequestPost({ request, env, data }) {
       resolvedStatus,
       it.note?.trim() || null,
       null, // 一括登録は各月の個別予定として作成する（繰り返しルールは付けない）
+      it.unscheduled ? 1 : null, // 実施月未定の予定は 1
       userEmail, now, userEmail, now
     ).run();
 

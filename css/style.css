@@ -1559,6 +1559,39 @@ input.is-abnormal {
 .annual-mark:hover { background: #eff6ff; }
 .annual-mark.is-done { color: #15803d !important; }
 .annual-mark.is-overdue { color: #dc2626 !important; }
+.annual-task-person { font-size: 11px; color: #475569; }
+.report-table.annual-grid .annual-unsched-col {
+  background: #fffbeb; border-right: 1px solid #fcd34d;
+}
+.report-table.annual-grid thead .annual-unsched-col { background: #fef3c7; }
+.annual-add {
+  border: 1px dashed #cbd5e1; background: #fff; color: #94a3b8;
+  width: 26px; height: 26px; line-height: 22px; border-radius: 6px; cursor: pointer;
+}
+.annual-add:hover { border-color: #1e40af; color: #1e40af; background: #eff6ff; }
+
+/* アクションシート（年間計画表のセル編集） */
+.sheet-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 1000;
+}
+.sheet {
+  background: #fff; width: 100%; max-width: 480px;
+  border-radius: 14px 14px 0 0; padding: 12px; max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+}
+.sheet-title {
+  font-weight: 700; font-size: 15px; padding: 6px 8px 10px; color: #1e293b;
+  border-bottom: 1px solid #e2e8f0; margin-bottom: 8px;
+}
+.sheet-btn {
+  display: block; width: 100%; text-align: left;
+  padding: 13px 12px; margin: 4px 0; border: 1px solid #e2e8f0; border-radius: 8px;
+  background: #f8fafc; font-size: 15px; cursor: pointer; color: #1e293b;
+}
+.sheet-btn:hover { background: #eff6ff; border-color: #bfdbfe; }
+.sheet-btn.is-danger { color: #dc2626; }
+.sheet-btn.sheet-cancel { text-align: center; background: #fff; color: #64748b; margin-top: 8px; }
 
 
 /* 印刷用（抽出レポートのPDF出力） */
@@ -1659,6 +1692,15 @@ input.is-abnormal {
   }
   body.inspection-report-page .report-table .report-date-row td { background: #e5edff; }
   body.inspection-report-page .report-table .is-abn-row { background: #fde8e8; }
+
+  /* 年間計画表の印刷: 全列を収め、固定列は通常配置に戻す */
+  .report-table.annual-grid { font-size: 8pt; width: 100%; }
+  .report-table.annual-grid th,
+  .report-table.annual-grid td {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .report-table.annual-grid .annual-task-col { position: static; }
 }
 
 /* =====================================================================
