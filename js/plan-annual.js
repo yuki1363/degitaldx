@@ -172,8 +172,8 @@ function buildBulkForm() {
   };
 
   return el('details', { class: 'card no-print annual-form' }, [
-    el('summary', { class: 'card-title' }, `＋ ${year}年の予定を一括登録`),
-    el('p', { class: 'hint' }, 'タイトル・設備・点検者を決め、実施する月をチェックして登録すると、その月ぶんの予定がまとめて作られます。月を選ばない場合は「未定」として登録できます（後から割り当て可）。'),
+    el('summary', { class: 'card-title' }, '＋ 予定を一括登録（毎年共通）'),
+    el('p', { class: 'hint' }, 'タイトル・設備・点検者を決め、実施する月をチェックして登録すると、その月ぶんの予定がまとめて作られます。年間計画表は毎年共通で表示されます。月を選ばない場合は「未定」として登録できます（後から割り当て可）。'),
     el('div', { class: 'field' }, [el('label', {}, 'タイトル（必須）'), titleInput]),
     el('div', { class: 'field' }, [el('label', {}, '種別'), typeSelect]),
     el('div', { class: 'field' }, [el('label', {}, '設備名'), cascade.lineInput]), cascade.lineDatalist,
@@ -316,8 +316,8 @@ function monthNav() {
 function buildYearGrid(rows) {
   if (rows.length === 0) {
     return el('p', { class: 'empty' },
-      typeFilter ? `${year}年の「${PLAN_TYPES[typeFilter].label}」の予定はありません。`
-                 : `${year}年の予定はまだありません。上の「一括登録」から登録してください。`);
+      typeFilter ? `「${PLAN_TYPES[typeFilter].label}」の予定はありません。`
+                 : '予定はまだありません。上の「一括登録」から登録してください。');
   }
   const canEdit = hasRole(currentUser, 'editor');
 
@@ -394,7 +394,7 @@ function exportCsv(rows, enc) {
 
 function monthEndAlert() {
   const today = new Date();
-  if (year !== today.getFullYear()) return null;
+  // 年間計画表は毎年共通。年に関係なく「今月」で判定する
   const curMonth = today.getMonth() + 1;
   const daysInMonth = new Date(today.getFullYear(), curMonth, 0).getDate();
   const daysLeft = daysInMonth - today.getDate();
@@ -444,12 +444,11 @@ function toolbar() {
   ]);
 }
 
+// 年間計画表は毎年共通のため年の切り替えは無し（カレンダーへ戻るリンクのみ）
 function yearNav() {
   return el('div', { class: 'cal-nav no-print', style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' }, [
     el('a', { class: 'btn btn-sm', href: '/pages/plan' }, '‹ カレンダー'),
-    el('button', { class: 'btn btn-sm', onclick: () => { year -= 1; renderYear().catch(showError); } }, '‹'),
-    el('span', { style: 'flex:1;text-align:center;font-weight:600' }, `${year}年`),
-    el('button', { class: 'btn btn-sm', onclick: () => { year += 1; renderYear().catch(showError); } }, '›'),
+    el('span', { style: 'flex:1;text-align:center;font-weight:600' }, '年間計画表（毎年共通）'),
   ]);
 }
 
@@ -464,7 +463,7 @@ function renderResults() {
 
 // 取得済みデータ（plansCache）から画面全体を描画（再取得なし）
 function renderView() {
-  const printTitle = viewMode === 'month' ? `${year}年 ${viewMonth}月 点検計画` : `${year}年 年間計画表`;
+  const printTitle = viewMode === 'month' ? `${viewMonth}月 点検計画（毎年共通）` : '年間計画表（毎年共通）';
   viewBox = el('div', {});
   renderResults();
 
@@ -490,12 +489,9 @@ function renderView() {
   ]);
 }
 
-// 当年の予定を取得して描画
+// 年間計画（annual_only）を年に関係なく全件取得して描画（毎年共通のテンプレート）
 async function renderYear() {
-  const from = `${year}-01-01`;
-  const to = `${year + 1}-01-01`; // to は排他
-  // include_unscheduled=1 で「実施月未定」の予定も取得（カレンダーには出ない）
-  const { plans } = await api.get(`/api/plans?from=${from}&to=${to}&include_unscheduled=1`);
+  const { plans } = await api.get('/api/plans?annual_only=1');
   plansCache = plans || [];
   renderView();
 }

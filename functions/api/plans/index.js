@@ -60,6 +60,19 @@ export async function onRequestGet({ request, env }) {
   // 実施月未定（年間計画表の「未定」枠）はカレンダー・月クエリでは除外し、
   // 年間計画表（include_unscheduled=1）でのみ返す
   const includeUnscheduled = sp.get('include_unscheduled') === '1';
+  // annual_only=1: 年間計画表専用予定を「年に関係なく」全件返す（毎年共通のテンプレート）
+  const annualOnly = sp.get('annual_only') === '1';
+
+  // 年間計画表は毎年共通。年で絞らず annual_only の全件を返す
+  if (annualOnly) {
+    const { results: rows } = await db.prepare(`
+      SELECT p.* FROM maintenance_plan p
+      WHERE p.deleted_at IS NULL
+      ORDER BY p.planned_date ASC, p.id ASC
+    `).all();
+    const plans = (rows ?? []).filter((p) => p.annual_only);
+    return json({ plans });
+  }
 
   let rangeStart, rangeEnd;
 
