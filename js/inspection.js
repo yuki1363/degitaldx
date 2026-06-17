@@ -226,10 +226,10 @@ async function renderEntry({ equipmentId, existing, planId }) {
   };
   equipmentSelect.addEventListener('change', () => loadChecklist().catch(showError));
 
-  // 担当者は自由入力（既定はログインユーザー名）。登録済みユーザー名は候補として表示。
+  // 担当者は自由入力（既定は空欄）。登録済みユーザー名は候補として表示。
   const assigneeInput = el('input', {
     type: 'text',
-    value: existing ? (existing.assignee_name || '') : (currentUser.name || ''),
+    value: existing ? (existing.assignee_name || '') : '',
     placeholder: '担当者名（自由入力）',
     list: 'inspection-assignee-options',
   });

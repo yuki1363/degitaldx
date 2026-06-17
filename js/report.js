@@ -239,7 +239,7 @@ async function renderForm(existing) {
     date: el('input', { type: 'date', value: initDate }),
     reporter: el('input', {
       type: 'text',
-      value: existing ? (existing.reporter_name || '') : (currentUser.name || ''),
+      value: existing ? (existing.reporter_name || '') : '',
       placeholder: '入力者名（自由入力）',
       list: 'report-reporter-options',
     }),

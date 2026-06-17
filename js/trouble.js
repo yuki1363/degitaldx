@@ -363,8 +363,8 @@ async function renderForm(existing, prefill = null) {
     countermeasure: el('textarea', { placeholder: '例: ベルト交換' }, existing?.countermeasure || ''),
     reporter_name: el('input', {
       type: 'text',
-      // 記録者は自由入力。編集時は保存済みの値（旧データは作成者名で補完）、新規はログインユーザー名を初期表示
-      value: existing ? (existing.reporter_name || existing.creator_name || '') : (currentUser?.name || ''),
+      // 記録者は自由入力。編集時は保存済みの値（旧データは作成者名で補完）、新規は空欄（候補から選択）
+      value: existing ? (existing.reporter_name || existing.creator_name || '') : '',
       placeholder: '記録者名（自由入力）',
       list: 'trouble-reporter-options',
     }),
