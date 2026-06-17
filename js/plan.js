@@ -258,7 +258,7 @@ function infoRow(label, value) {
   ]);
 }
 
-async function renderDetail(id) {
+async function renderDetail(id, fromAnnual = false) {
   const { plan } = await api.get(`/api/plans/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const type = PLAN_TYPES[plan.plan_type] || PLAN_TYPES.other;
@@ -273,7 +273,7 @@ async function renderDetail(id) {
         }, type.label),
       ]),
       infoRow('状態', STATUS_LABELS[plan.status] || plan.status),
-      infoRow(
+      fromAnnual ? null : infoRow(
         plan.planned_end_date && plan.planned_end_date !== plan.planned_date ? '期間' : '予定日',
         plan.planned_end_date && plan.planned_end_date !== plan.planned_date
           ? `${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)}`
@@ -317,7 +317,7 @@ async function renderDetail(id) {
                 },
               }, '✓ 完了にする')
             : null,
-          el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
+          el('button', { class: 'btn', onclick: () => go(`?edit=${id}${fromAnnual ? '&from=annual' : ''}`) }, '編集'),
           el('button', {
             class: 'btn btn-danger',
             onclick: async () => {
@@ -338,7 +338,7 @@ function field(label, input) {
   return el('div', { class: 'field' }, [el('label', {}, label), input]);
 }
 
-async function renderForm(existing) {
+async function renderForm(existing, fromAnnual = false) {
   const names = await fetchEquipNames();
   const existingRule = (() => {
     try { return existing?.recurrence_rule ? JSON.parse(existing.recurrence_rule) : null; } catch { return null; }
@@ -424,8 +424,8 @@ async function renderForm(existing) {
     const body = {
       title: titleInput.value.trim(),
       plan_type: typeSelect.value,
-      planned_date: startInput.value,
-      planned_end_date: endInput.value || null,
+      planned_date: fromAnnual ? (existing?.planned_date || '') : startInput.value,
+      planned_end_date: fromAnnual ? null : (endInput.value || null),
       line_name: cascade.lineInput.value.trim() || null,
       equipment_name: cascade.equipInput.value.trim() || null,
       inspector_name: inspectorInput.value.trim() || null,
@@ -435,8 +435,8 @@ async function renderForm(existing) {
       recurrence_rule: recRule,
     };
     if (!body.title) { alert('タイトルは必須です。'); return; }
-    if (!body.planned_date) { alert('開始日は必須です。'); return; }
-    if (body.planned_end_date && body.planned_end_date < body.planned_date) {
+    if (!fromAnnual && !body.planned_date) { alert('開始日は必須です。'); return; }
+    if (!fromAnnual && body.planned_end_date && body.planned_end_date < body.planned_date) {
       alert('終了日は開始日以降にしてください。'); return;
     }
     try {
@@ -457,8 +457,8 @@ async function renderForm(existing) {
       el('h2', { class: 'card-title' }, existing ? '予定を編集' : '予定を追加'),
       field('タイトル（必須）', titleInput),
       field('種別', typeSelect),
-      field('開始日（必須）', startInput),
-      field('終了日（空欄なら1日のみ）', endInput),
+      fromAnnual ? null : field('開始日（必須）', startInput),
+      fromAnnual ? null : field('終了日（空欄なら1日のみ）', endInput),
       field('設備名', cascade.lineInput),
       cascade.lineDatalist,
       field('機器名', cascade.equipInput),
@@ -490,15 +490,16 @@ async function renderForm(existing) {
   try {
     currentUser = await getCurrentUser();
     const params = new URLSearchParams(window.location.search);
+    const fromAnnual = params.get('from') === 'annual';
     if (params.get('id')) {
-      await renderDetail(Number(params.get('id')));
+      await renderDetail(Number(params.get('id')), fromAnnual);
     } else if (params.get('edit')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('編集する権限がありません。');
       const { plan } = await api.get(`/api/plans/${Number(params.get('edit'))}`);
-      await renderForm(plan);
+      await renderForm(plan, fromAnnual);
     } else if (params.get('new')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
-      await renderForm(null);
+      await renderForm(null, fromAnnual);
     } else {
       const now = new Date();
       await renderMonthCalendar(now.getFullYear(), now.getMonth() + 1);

@@ -62,7 +62,7 @@ function openPlanSheet(plan, monthLabel) {
   const recurring = !!plan.recurrence_rule;
   const isUnsched = !!plan.unscheduled;
   const actions = [
-    { label: '詳細を開く', onClick: () => { window.location.href = `/pages/plan?id=${plan.id}`; } },
+    { label: '詳細を開く', onClick: () => { window.location.href = `/pages/plan?id=${plan.id}&from=annual`; } },
   ];
   if (recurring) {
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
@@ -215,12 +215,13 @@ function buildRows(plans) {
       rowsMap.set(key, {
         plan_type: p.plan_type, line_name: p.line_name, equipment_name: p.equipment_name,
         title: p.title, inspector_name: p.inspector_name || '', assignee_name: p.assignee_name || '',
-        months: new Map(), unscheduledList: [],
+        hasNote: false, months: new Map(), unscheduledList: [],
       });
     }
     const row = rowsMap.get(key);
     if (!row.inspector_name && p.inspector_name) row.inspector_name = p.inspector_name;
     if (!row.assignee_name && p.assignee_name) row.assignee_name = p.assignee_name;
+    if (!row.hasNote && p.note) row.hasNote = true;
     if (p.unscheduled) { row.unscheduledList.push(p); continue; }
     const month = monthOf(p);
     if (!row.months.has(month)) row.months.set(month, []);
@@ -250,6 +251,7 @@ function planRow(p, monthLabel) {
         el('span', { class: 'mplan-person' }, `点検者: ${p.inspector_name || '未設定'}`),
         p.assignee_name ? el('span', { class: 'mplan-person' }, `担当者: ${p.assignee_name}`) : null,
       ]),
+      p.note ? el('div', { class: 'mplan-note' }, `📝 ${p.note}`) : null,
     ]),
     el('span', { class: `mplan-status${statusCls}` }, STATUS_LABELS[p.status] || p.status),
   ];
@@ -329,6 +331,7 @@ function buildYearGrid(rows) {
         eqLabel ? el('div', { class: 'annual-task-eq' }, eqLabel) : null,
         el('div', { class: 'annual-task-person' }, `点検者: ${row.inspector_name || '未設定'}`),
         row.assignee_name ? el('div', { class: 'annual-task-person' }, `担当者: ${row.assignee_name}`) : null,
+        row.hasNote ? el('div', { class: 'annual-task-note' }, '📝 備考あり') : null,
       ]),
       unschedCell,
       ...MONTHS.map((m) => {
@@ -339,7 +342,7 @@ function buildYearGrid(rows) {
             : '');
         }
         const cls = `annual-mark${s.done ? ' is-done' : ''}${s.overdue ? ' is-overdue' : ''}`;
-        const tip = `${row.title}（${STATUS_LABELS[s.plan.status] || s.plan.status}${row.inspector_name ? '・点検者: ' + row.inspector_name : ''}${row.assignee_name ? '・担当者: ' + row.assignee_name : ''}）`;
+        const tip = `${row.title}（${STATUS_LABELS[s.plan.status] || s.plan.status}${row.inspector_name ? '・点検者: ' + row.inspector_name : ''}${row.assignee_name ? '・担当者: ' + row.assignee_name : ''}${s.plan.note ? '・備考: ' + s.plan.note : ''}）`;
         return el('td', { class: 'annual-cell' },
           canEdit
             ? [el('button', { class: cls, style: `color:${type.color}`, title: tip, onclick: () => openPlanSheet(s.plan, `${m}月`) }, s.mark)]

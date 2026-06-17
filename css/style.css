@@ -1620,6 +1620,8 @@ input.is-abnormal {
 .mplan-status.is-overdue { background: #fee2e2; color: #dc2626; }
 .mplan-unsched { margin-top: 14px; }
 .mplan-unsched-title { font-size: 14px; color: #b45309; margin: 0 0 6px; }
+.mplan-note { font-size: 12px; color: #374151; background: #fef9c3; border-left: 3px solid #ca8a04; padding: 3px 6px; margin-top: 4px; border-radius: 2px; white-space: pre-wrap; word-break: break-all; }
+.annual-task-note { font-size: 11px; color: #92400e; background: #fef3c7; border-radius: 2px; padding: 1px 4px; margin-top: 2px; display: inline-block; }
 
 
 /* 印刷用（抽出レポートのPDF出力） */
