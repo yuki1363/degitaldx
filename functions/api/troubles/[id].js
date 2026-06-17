@@ -11,7 +11,7 @@ async function getTrouble(db, id) {
       tc.name AS category_name,
       e.name  AS equipment_name,
       e.code  AS equipment_code,
-      u.name  AS reporter_name
+      u.name  AS creator_name
     FROM trouble_record t
     LEFT JOIN trouble_category  tc ON t.category_id  = tc.id
     LEFT JOIN equipment_ledger   e ON t.equipment_id  = e.id
@@ -59,7 +59,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, 'トラブル記録が見つかりません');
 
   const body = await readJson(request);
-  const UPDATABLE = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json'];
+  const UPDATABLE = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json', 'reporter_name'];
 
   const setClauses = [];
   const binds = [];

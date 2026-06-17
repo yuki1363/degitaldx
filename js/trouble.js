@@ -21,7 +21,7 @@ const CSV_COLUMNS = [
   { label: '現象',     value: (t) => t.phenomenon || '' },
   { label: '原因',     value: (t) => t.cause || '' },
   { label: '対策',     value: (t) => t.countermeasure || '' },
-  { label: '記録者',   value: (t) => t.reporter_name || t.created_by || '' },
+  { label: '記録者',   value: (t) => t.reporter_name || t.creator_name || t.created_by || '' },
   { label: '登録日時', value: (t) => formatDateTime(t.created_at) },
 ];
 
@@ -228,7 +228,7 @@ async function renderDetail(id) {
       infoRow('原因', trouble.cause),
       infoRow('対策', trouble.countermeasure),
       ...parseCustomValues(trouble.custom_fields_json).map((v) => infoRow(v.name, v.value)),
-      infoRow('記録者', trouble.reporter_name || trouble.created_by),
+      infoRow('記録者', trouble.reporter_name || trouble.creator_name || trouble.created_by),
     ]),
     canEdit
       ? el('div', { class: 'action-row' }, [
@@ -332,12 +332,14 @@ function parseCustomValues(jsonStr) {
 async function renderForm(existing, prefill = null) {
   // existing = 本物の編集（PUT）。prefill = 点検異常などからの新規プリフィル（POST のまま）。
   const init = existing || prefill || {};
-  const [{ categories: cats }, { equipment }, { fields: customFields }] = await Promise.all([
+  const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes] = await Promise.all([
     api.get('/api/troubles/categories'),
     api.get('/api/equipment'),
     // カスタム項目テーブル未作成の環境でもフォーム自体は使えるようにする
     api.get('/api/troubles/fields').catch(() => ({ fields: [] })),
+    api.get('/api/users').catch(() => ({ users: [] })),
   ]);
+  const users = usersRes.users || [];
 
   const f = {
     occurred_at: el('input', {
@@ -359,7 +361,19 @@ async function renderForm(existing, prefill = null) {
     phenomenon: el('textarea', { placeholder: '例: 異音が発生した' }, init.phenomenon || ''),
     cause: el('textarea', { placeholder: '例: ベルトの摩耗' }, existing?.cause || ''),
     countermeasure: el('textarea', { placeholder: '例: ベルト交換' }, existing?.countermeasure || ''),
+    reporter_name: el('input', {
+      type: 'text',
+      // 記録者は自由入力。編集時は保存済みの値（旧データは作成者名で補完）、新規はログインユーザー名を初期表示
+      value: existing ? (existing.reporter_name || existing.creator_name || '') : (currentUser?.name || ''),
+      placeholder: '記録者名（自由入力）',
+      list: 'trouble-reporter-options',
+    }),
   };
+
+  // 記録者の入力候補（登録ユーザー名）
+  const reporterOptions = el('datalist', { id: 'trouble-reporter-options' },
+    users.map((u) => el('option', { value: u.name || u.email }))
+  );
 
   // カスタム項目（管理画面で定義した追加入力欄）
   const existingCustom = parseCustomValues(existing?.custom_fields_json);
@@ -392,6 +406,7 @@ async function renderForm(existing, prefill = null) {
       phenomenon: f.phenomenon.value.trim(),
       cause: f.cause.value.trim() || null,
       countermeasure: f.countermeasure.value.trim() || null,
+      reporter_name: f.reporter_name.value.trim() || null,
       custom_fields_json: customValues.length > 0 ? customValues : null,
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
@@ -427,6 +442,8 @@ async function renderForm(existing, prefill = null) {
       field('現象（必須）', f.phenomenon),
       field('原因', f.cause),
       field('対策', f.countermeasure),
+      field('記録者', f.reporter_name),
+      reporterOptions,
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),

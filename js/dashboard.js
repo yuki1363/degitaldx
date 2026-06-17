@@ -192,7 +192,7 @@ async function renderExtract(fromStr, toStr) {
         if (equipId)    p.set('equipment_id', equipId);
         if (categoryId) p.set('category_id', categoryId);
         fetches.push(api.get(`/api/troubles?${p}`).then(({ troubles }) =>
-          troubles.map((t) => ({ _type: 'trouble', _date: t.occurred_at?.slice(0, 10), _title: t.phenomenon, _equipment: t.equipment_name, _person: t.reporter_name, _status: null, _id: t.id, ...t }))
+          troubles.map((t) => ({ _type: 'trouble', _date: t.occurred_at?.slice(0, 10), _title: t.phenomenon, _equipment: t.equipment_name, _person: t.reporter_name || t.creator_name, _status: null, _id: t.id, ...t }))
         ));
       }
       if (types.includes('inspection')) {

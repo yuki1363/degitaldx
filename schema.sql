@@ -647,3 +647,9 @@ ALTER TABLE repair_request ADD COLUMN source_table TEXT;   -- 'trouble_record' /
 ALTER TABLE repair_request ADD COLUMN source_id INTEGER;   -- 起票元レコードのID
 CREATE INDEX IF NOT EXISTS idx_repair_request_source
   ON repair_request (source_table, source_id);
+
+-- トラブル記録（04）: 記録者を自由入力にする
+--   従来は created_by（メール）→ users.name 解決で「記録者」を表示していたが、
+--   実際に対応・記録した人を自由入力できるようにする。
+--   表示は reporter_name（自由入力）を優先し、未設定の旧データは users.name で補う。
+ALTER TABLE trouble_record ADD COLUMN reporter_name TEXT;  -- 記録者名（自由入力）

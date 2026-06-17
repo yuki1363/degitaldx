@@ -19,7 +19,7 @@ export async function onRequestGet({ request, env }) {
       tc.name AS category_name,
       e.name  AS equipment_name,
       e.code  AS equipment_code,
-      u.name  AS reporter_name
+      u.name  AS creator_name
     FROM trouble_record t
     LEFT JOIN trouble_category  tc ON t.category_id  = tc.id
     LEFT JOIN equipment_ledger   e ON t.equipment_id  = e.id
@@ -60,19 +60,20 @@ export async function onRequestPost({ request, env, data }) {
   const db = env.DB;
   const body = await readJson(request);
 
-  const { occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, file_ids } = body;
+  const { occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, file_ids, reporter_name } = body;
 
   if (!occurred_at) return jsonError(400, 'occurred_at は必須です');
   if (!phenomenon || !phenomenon.trim()) return jsonError(400, 'phenomenon（現象）は必須です');
 
   const now = nowIso();
   const userEmail = data.user.email;
+  const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;
 
   const result = await db.prepare(`
     INSERT INTO trouble_record
       (occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json,
-       created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       reporter_name, created_by, created_at, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     occurred_at,
     phenomenon.trim(),
@@ -81,6 +82,7 @@ export async function onRequestPost({ request, env, data }) {
     cause ?? null,
     countermeasure ?? null,
     custom_fields_json ? JSON.stringify(custom_fields_json) : null,
+    reporterName,
     userEmail,
     now,
     userEmail,
