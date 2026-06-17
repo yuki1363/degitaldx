@@ -14,7 +14,7 @@ export async function onRequestPost({ params, env, data }) {
   if (!id) return jsonError(400, 'id が不正です');
 
   const row = await db
-    .prepare(`SELECT id, acknowledged_at FROM notifications WHERE id = ?1 AND deleted_at IS NULL`)
+    .prepare(`SELECT * FROM notifications WHERE id = ?1 AND deleted_at IS NULL`)
     .bind(id)
     .first();
   if (!row) return jsonError(404, '通知が見つかりません');
@@ -25,8 +25,8 @@ export async function onRequestPost({ params, env, data }) {
     await db
       .prepare(
         `UPDATE notifications
-            SET acknowledged_by = ?1, acknowledged_at = ?2, updated_by = ?1, updated_at = ?2
-          WHERE id = ?3 AND acknowledged_at IS NULL`
+            SET acknowledged_by = ?1, acknowledged_at = ?2
+          WHERE id = ?3`
       )
       .bind(data.user.email, now, id)
       .run();

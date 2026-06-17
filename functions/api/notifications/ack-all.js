@@ -16,7 +16,7 @@ export async function onRequestPost({ request, env, data }) {
   const now = nowIso();
 
   let sql = `UPDATE notifications
-                SET acknowledged_by = ?1, acknowledged_at = ?2, updated_by = ?1, updated_at = ?2
+                SET acknowledged_by = ?1, acknowledged_at = ?2
               WHERE deleted_at IS NULL AND acknowledged_at IS NULL`;
   const binds = [data.user.email, now];
   if (type) { sql += ` AND type = ?3`; binds.push(type); }
