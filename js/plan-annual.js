@@ -115,6 +115,7 @@ function openAddSheet(row, m) {
       equipment_name: row.equipment_name || null,
       inspector_name: row.inspector_name || null,
       assignee_name: row.assignee_name || null,
+      annual_only: 1,
     })) },
   ]);
 }
@@ -157,9 +158,10 @@ function buildBulkForm() {
     };
     // 月を選ばない場合は「未定」枠に1件登録（後から月へ割り当て可）。
     // 月を選んだ場合は各月1日付で作成（実施日は使わない。月単位で管理）。
+    // annual_only=1 でカレンダーには表示しない（年間計画表専用）。
     const items = selectedMonths.length === 0
-      ? [{ ...common, planned_date: `${year}-01-01`, unscheduled: 1 }]
-      : selectedMonths.map((m) => ({ ...common, planned_date: `${year}-${mm(m)}-01` }));
+      ? [{ ...common, planned_date: `${year}-01-01`, unscheduled: 1, annual_only: 1 }]
+      : selectedMonths.map((m) => ({ ...common, planned_date: `${year}-${mm(m)}-01`, annual_only: 1 }));
 
     try {
       const { created } = await api.post('/api/plans/batch', { items });

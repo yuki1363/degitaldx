@@ -664,6 +664,11 @@ ALTER TABLE maintenance_plan ADD COLUMN unscheduled INTEGER;  -- 1=実施月未�
 --   assignee_name=担当者（責任者）, inspector_name=点検者（実施者）。年間計画表で別々に入力・表示する。
 ALTER TABLE maintenance_plan ADD COLUMN inspector_name TEXT;  -- 点検者名（自由入力。担当者とは別）
 
+-- 保全計画（01）: 年間計画表専用フラグ
+--   annual_only=1 の予定はカレンダーには表示せず、年間計画表のみに表示する。
+--   カレンダーは手動で日程を登録する運用とし、年間計画と分離する。
+ALTER TABLE maintenance_plan ADD COLUMN annual_only INTEGER;  -- 1=年間計画表専用（カレンダーに表示しない）
+
 -- 通知（notifications）: 古いスキーマで作成されたDBに acknowledged カラムが
 -- 存在しない場合のマイグレーション。SQLite 3.37+ の IF NOT EXISTS を使用。
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by TEXT;

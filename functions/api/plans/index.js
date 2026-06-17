@@ -113,8 +113,9 @@ export async function onRequestGet({ request, env }) {
 
   // 実施月未定（年間計画表の「未定」枠）はカレンダー・月クエリでは除外し、
   // include_unscheduled=1 のときだけ返す。
-  // ※ JS側で除外することで、unscheduled 列が未マイグレーションでもカレンダーは壊れない
-  if (!includeUnscheduled) results = results.filter((p) => !p.unscheduled);
+  // annual_only=1（年間計画表専用）も同様にカレンダーから除外する。
+  // ※ JS側で除外することで、各列が未マイグレーションでもカレンダーは壊れない
+  if (!includeUnscheduled) results = results.filter((p) => !p.unscheduled && !p.annual_only);
 
   return json({ plans: results });
 }
