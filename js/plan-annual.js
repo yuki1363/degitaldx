@@ -209,14 +209,12 @@ function summarizeMonth(list) {
   };
 }
 
+// 名称・設備・点検者・担当者(業者)・備考のどれかに含まれれば一致（複数語はスペース区切りでAND）
 function matchesName(p) {
   if (!nameFilter) return true;
-  const q = nameFilter.toLowerCase();
-  return (p.title || '').toLowerCase().includes(q)
-    || (p.line_name || '').toLowerCase().includes(q)
-    || (p.equipment_name || '').toLowerCase().includes(q)
-    || (p.inspector_name || '').toLowerCase().includes(q)
-    || (p.assignee_name || '').toLowerCase().includes(q);
+  const hay = [p.title, p.line_name, p.equipment_name, p.inspector_name, p.assignee_name, p.note]
+    .filter(Boolean).join(' ').toLowerCase();
+  return nameFilter.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
 }
 
 function buildRows(plans) {
@@ -413,7 +411,7 @@ function monthEndAlert() {
 
 // ---------------- ツールバー・年ナビ・描画 ----------------
 
-function toolbar(rows) {
+function toolbar() {
   const sel = el('select', {
     onchange: (e) => { typeFilter = e.target.value; renderView(); },
   }, [
@@ -422,9 +420,10 @@ function toolbar(rows) {
       el('option', { value: v, selected: typeFilter === v }, label)),
   ]);
   const nameInput = el('input', {
-    type: 'search', placeholder: '名称・設備で検索', value: nameFilter,
+    type: 'search', placeholder: '名称・設備・業者・点検者で検索', value: nameFilter,
     class: 'annual-name-search',
-    oninput: (e) => { nameFilter = e.target.value; renderView(); },
+    // 結果領域だけ再描画（入力欄を作り直さずフォーカスを保つ）。月別/全月の見出しも更新する
+    oninput: (e) => { nameFilter = e.target.value; renderResults(); },
   });
   const viewToggle = el('div', { class: 'annual-view-toggle' }, [
     el('button', { class: `btn btn-sm${viewMode === 'month' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'month'; renderView(); } }, '月別'),
@@ -438,8 +437,9 @@ function toolbar(rows) {
     viewToggle,
     el('div', { class: 'annual-output-btns' }, [
       el('button', { class: 'btn btn-sm', onclick: () => window.print() }, '🖨 印刷'),
-      el('button', { class: 'btn btn-sm', onclick: () => exportCsv(rows, 'UTF-8') }, '📥 CSV'),
-      el('button', { class: 'btn btn-sm', onclick: () => exportCsv(rows, 'sjis') }, '📥 CSV(Excel)'),
+      // クリック時点の絞り込み結果で出力（検索中に再描画しても最新を反映）
+      el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'UTF-8') }, '📥 CSV'),
+      el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'sjis') }, '📥 CSV(Excel)'),
     ]),
   ]);
 }
@@ -453,10 +453,20 @@ function yearNav() {
   ]);
 }
 
-// 取得済みデータ（plansCache）から描画（再取得なし）
-function renderView() {
+// 結果表示領域（月別/全月）。名称検索ではここだけ再描画して入力欄のフォーカスを保つ
+let viewBox = el('div', {});
+
+// 絞り込み結果のみ再描画（入力欄・ツールバーは作り直さない）
+function renderResults() {
   const rows = buildRows(plansCache);
+  render(viewBox, viewMode === 'month' ? buildMonthView() : buildYearGrid(rows));
+}
+
+// 取得済みデータ（plansCache）から画面全体を描画（再取得なし）
+function renderView() {
   const printTitle = viewMode === 'month' ? `${year}年 ${viewMonth}月 点検計画` : `${year}年 年間計画表`;
+  viewBox = el('div', {});
+  renderResults();
 
   render(app, [
     monthEndAlert(),
@@ -467,11 +477,11 @@ function renderView() {
         el('h2', {}, printTitle),
         el('p', {}, `種別: ${typeLabel()}　出力日: ${new Date().toLocaleDateString('sv-SE')}`),
       ]),
-      toolbar(rows),
+      toolbar(),
       el('div', { class: 'cal-legend no-print', style: 'margin-bottom:8px' },
         Object.values(PLAN_TYPES).map(({ label, color, bg }) =>
           el('span', { class: 'cal-legend-item', style: `background:${bg};color:${color}` }, label))),
-      viewMode === 'month' ? buildMonthView() : buildYearGrid(rows),
+      viewBox,
       el('p', { class: 'hint no-print', style: 'margin-top:8px' },
         hasRole(currentUser, 'editor')
           ? 'タップで 完了・点検者変更・移動・削除ができます。全月表示では空欄の＋でその月に追加できます。'
