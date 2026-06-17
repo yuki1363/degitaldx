@@ -282,6 +282,7 @@ async function renderDetail(id) {
       infoRow('繰り返し', formatRecurrence(plan.recurrence_rule)),
       infoRow('設備名', plan.line_name),
       infoRow('機器名', plan.equipment_name),
+      infoRow('点検者', plan.inspector_name),
       infoRow('担当者', plan.assignee_name),
       infoRow('備考', plan.note),
     ]),
@@ -359,6 +360,7 @@ async function renderForm(existing) {
   );
   const startInput   = el('input', { type: 'date', value: existing?.planned_date || today });
   const endInput     = el('input', { type: 'date', value: existing?.planned_end_date || '' });
+  const inspectorInput = el('input', { type: 'text', value: existing?.inspector_name || '', placeholder: '点検者名（任意）' });
   const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });
   const statusSelect = el('select', {},
     Object.entries(STATUS_LABELS).map(([value, label]) =>
@@ -426,6 +428,7 @@ async function renderForm(existing) {
       planned_end_date: endInput.value || null,
       line_name: cascade.lineInput.value.trim() || null,
       equipment_name: cascade.equipInput.value.trim() || null,
+      inspector_name: inspectorInput.value.trim() || null,
       assignee_name: assigneeInput.value.trim() || null,
       status: statusSelect.value,
       note: noteInput.value.trim() || null,
@@ -460,6 +463,7 @@ async function renderForm(existing) {
       cascade.lineDatalist,
       field('機器名', cascade.equipInput),
       cascade.equipDatalist,
+      field('点検者', inspectorInput),
       field('担当者', assigneeInput),
       field('状態', statusSelect),
       field('備考', noteInput),

@@ -1593,6 +1593,34 @@ input.is-abnormal {
 .sheet-btn.is-danger { color: #dc2626; }
 .sheet-btn.sheet-cancel { text-align: center; background: #fff; color: #64748b; margin-top: 8px; }
 
+/* 年間計画表ツールバー・月別表示 */
+.annual-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.annual-filter { font-size: 14px; display: inline-flex; align-items: center; gap: 4px; }
+.annual-view-toggle { display: inline-flex; gap: 4px; }
+.annual-output-btns { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.annual-form { padding: 12px; }
+.annual-form > summary { cursor: pointer; font-weight: 600; }
+
+.mplan-list { display: flex; flex-direction: column; gap: 6px; }
+.mplan-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;
+  cursor: pointer; color: inherit; text-decoration: none; font: inherit;
+}
+.mplan-row:hover { background: #f8fafc; border-color: #bfdbfe; }
+.mplan-body { flex: 1; min-width: 0; }
+.mplan-head { display: flex; align-items: center; gap: 6px; }
+.mplan-title { font-weight: 600; font-size: 15px; }
+.mplan-sub { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: 12px; color: #64748b; }
+.mplan-status {
+  flex-shrink: 0; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
+  background: #f1f5f9; color: #475569;
+}
+.mplan-status.is-done { background: #dcfce7; color: #15803d; }
+.mplan-status.is-overdue { background: #fee2e2; color: #dc2626; }
+.mplan-unsched { margin-top: 14px; }
+.mplan-unsched-title { font-size: 14px; color: #b45309; margin: 0 0 6px; }
+
 
 /* 印刷用（抽出レポートのPDF出力） */
 @media print {

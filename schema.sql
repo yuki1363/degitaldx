@@ -659,3 +659,7 @@ ALTER TABLE trouble_record ADD COLUMN reporter_name TEXT;  -- 記録者名（自
 --   未定の予定はプレースホルダとして planned_date に当年1/1を入れるが、カレンダー／
 --   月クエリでは除外する（include_unscheduled=1 のときだけ返す）。月へ割り当てると 0 に戻す。
 ALTER TABLE maintenance_plan ADD COLUMN unscheduled INTEGER;  -- 1=実施月未定
+
+-- 保全計画（01）: 点検者を担当者と分けて持つ
+--   assignee_name=担当者（責任者）, inspector_name=点検者（実施者）。年間計画表で別々に入力・表示する。
+ALTER TABLE maintenance_plan ADD COLUMN inspector_name TEXT;  -- 点検者名（自由入力。担当者とは別）

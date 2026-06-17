@@ -1,8 +1,9 @@
-// 01 保全計画 — 年間計画表（月ごと一括登録・種別フィルター・出力・月末アラート）
+// 01 保全計画 — 年間計画表（月別/全月表示・一括登録・種別フィルター・出力・編集・月末アラート）
 //   URL: /pages/plan-annual
-//   ・タスク（設備/担当/種別）を決め、実施月をチェックして一括登録（各月1日付）
-//   ・行=タスク／列=12ヶ月の年間グリッド。種別で絞り込み・印刷・CSV出力できる
-//   ・グリッドのセルから 完了切替／別の月へ移動／追加／削除 ができる（点検月の変更に対応）
+//   ・表示は「月別（既定・今月）」と「全月（12ヶ月グリッド）」を切り替え可能
+//   ・タスク（設備/点検者/種別）を決め、実施月をチェックして一括登録（各月1日付）
+//   ・各予定は 完了切替／点検者変更／別の月へ移動／追加／削除 ができる
+//   ・実施月を決めずに登録した予定は「未定」枠に入り、後から月へ割り当てられる
 //   ・月末が近いと、今月の未完了予定の完了チェックを促すアラートを表示
 
 import { api } from '/js/api.js';
@@ -15,7 +16,10 @@ const app = document.getElementById('app');
 let currentUser = null;
 let equipNames = null;
 let year = new Date().getFullYear();
-let typeFilter = ''; // '' = 全種別
+let typeFilter = '';                       // '' = 全種別
+let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
+let viewMonth = new Date().getMonth() + 1;  // 月別表示で見ている月
+let plansCache = [];                        // 取得済みの当年の予定（再取得を避ける）
 
 const PLAN_TYPES = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -33,6 +37,7 @@ function showError(err) {
 
 const mm = (m) => String(m).padStart(2, '0');
 const monthOf = (p) => Number((p.planned_date || '').slice(5, 7));
+const typeOf = (pt) => PLAN_TYPES[pt] || PLAN_TYPES.other;
 
 // ---------------- アクションシート（編集用の簡易モーダル） ----------------
 
@@ -52,7 +57,7 @@ function openSheet(titleText, actions) {
   document.body.appendChild(backdrop);
 }
 
-// 既存予定のセル操作（完了切替・移動・削除・詳細）
+// 既存予定の操作（完了切替・点検者変更・移動・削除・詳細）
 function openPlanSheet(plan, monthLabel) {
   const recurring = !!plan.recurrence_rule;
   const isUnsched = !!plan.unscheduled;
@@ -60,13 +65,22 @@ function openPlanSheet(plan, monthLabel) {
     { label: '詳細を開く', onClick: () => { window.location.href = `/pages/plan?id=${plan.id}`; } },
   ];
   if (recurring) {
-    // 繰り返し予定は1件移動・削除すると全体に影響するため、編集は詳細画面に誘導
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
     return;
   }
   actions.push(plan.status === 'done'
     ? { label: '未完了に戻す', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'pending' })) }
     : { label: '✓ 完了にする', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'done' })) });
+  actions.push({ label: '👤 点検者を変更', onClick: () => {
+    const name = prompt('点検者名を入力', plan.inspector_name || '');
+    if (name === null) return; // キャンセル
+    return mutate(() => api.put(`/api/plans/${plan.id}`, { inspector_name: name.trim() || null }));
+  } });
+  actions.push({ label: '👥 担当者を変更', onClick: () => {
+    const name = prompt('担当者名を入力', plan.assignee_name || '');
+    if (name === null) return; // キャンセル
+    return mutate(() => api.put(`/api/plans/${plan.id}`, { assignee_name: name.trim() || null }));
+  } });
   if (isUnsched) {
     actions.push({ label: '📅 実施月を割り当て', onClick: () => openMoveSheet(plan) });
   } else {
@@ -90,7 +104,7 @@ function openMoveSheet(plan) {
   openSheet(`「${plan.title}」を何月に？`, actions);
 }
 
-// 空セルから その月にタスクを追加（行の種別・設備・担当を引き継ぐ）
+// 空セルから その月にタスクを追加（行の種別・設備・点検者を引き継ぐ）
 function openAddSheet(row, m) {
   openSheet(`${m}月に予定を追加`, [
     { label: `「${row.title}」を ${m}月 に追加`, onClick: () => mutate(() => api.post('/api/plans', {
@@ -99,12 +113,13 @@ function openAddSheet(row, m) {
       planned_date: `${year}-${mm(m)}-01`,
       line_name: row.line_name || null,
       equipment_name: row.equipment_name || null,
+      inspector_name: row.inspector_name || null,
       assignee_name: row.assignee_name || null,
     })) },
   ]);
 }
 
-// 変更を保存して年間表を再描画（失敗時はアラート）
+// 変更を保存して再取得・再描画（失敗時はアラート）
 async function mutate(fn) {
   try { await fn(); await renderYear(); }
   catch (err) { alert(err.message || String(err)); }
@@ -117,7 +132,8 @@ function buildBulkForm() {
   const titleInput = el('input', { type: 'text', placeholder: '例: 月次点検' });
   const typeSelect = el('select', {},
     Object.entries(PLAN_TYPES).map(([v, { label }]) => el('option', { value: v }, label)));
-  const assigneeInput = el('input', { type: 'text', placeholder: '点検者・担当者名（任意）' });
+  const inspectorInput = el('input', { type: 'text', placeholder: '点検者名（任意）' });
+  const assigneeInput = el('input', { type: 'text', placeholder: '担当者名（任意）' });
   const noteInput = el('textarea', { placeholder: '備考（任意）' });
 
   const monthChecks = MONTHS.map((m) => {
@@ -135,6 +151,7 @@ function buildBulkForm() {
       plan_type: typeSelect.value,
       line_name: cascade.lineInput.value.trim() || null,
       equipment_name: cascade.equipInput.value.trim() || null,
+      inspector_name: inspectorInput.value.trim() || null,
       assignee_name: assigneeInput.value.trim() || null,
       note: noteInput.value.trim() || null,
     };
@@ -151,14 +168,15 @@ function buildBulkForm() {
     } catch (err) { alert(err.message); }
   };
 
-  return el('div', { class: 'card no-print' }, [
-    el('h3', { class: 'card-title' }, `${year}年の予定を一括登録`),
+  return el('details', { class: 'card no-print annual-form' }, [
+    el('summary', { class: 'card-title' }, `＋ ${year}年の予定を一括登録`),
     el('p', { class: 'hint' }, 'タイトル・設備・点検者を決め、実施する月をチェックして登録すると、その月ぶんの予定がまとめて作られます。月を選ばない場合は「未定」として登録できます（後から割り当て可）。'),
     el('div', { class: 'field' }, [el('label', {}, 'タイトル（必須）'), titleInput]),
     el('div', { class: 'field' }, [el('label', {}, '種別'), typeSelect]),
     el('div', { class: 'field' }, [el('label', {}, '設備名'), cascade.lineInput]), cascade.lineDatalist,
     el('div', { class: 'field' }, [el('label', {}, '機器名'), cascade.equipInput]), cascade.equipDatalist,
-    el('div', { class: 'field' }, [el('label', {}, '点検者・担当者'), assigneeInput]),
+    el('div', { class: 'field' }, [el('label', {}, '点検者'), inspectorInput]),
+    el('div', { class: 'field' }, [el('label', {}, '担当者'), assigneeInput]),
     el('div', { class: 'field' }, [
       el('label', {}, '実施する月（複数選択可）'),
       el('div', { class: 'annual-month-actions' }, [
@@ -174,9 +192,8 @@ function buildBulkForm() {
   ]);
 }
 
-// ---------------- グリッド構築 ----------------
+// ---------------- 集約（タスク単位） ----------------
 
-// 月ごとの予定をまとめて表示用の情報を返す
 function summarizeMonth(list) {
   if (!list || list.length === 0) return { empty: true, mark: '', text: '' };
   const done = list.every((x) => x.status === 'done');
@@ -189,7 +206,6 @@ function summarizeMonth(list) {
   };
 }
 
-// タスク単位（種別+設備+機器+タイトル）に集約し、月ごとに予定を割り当てた行配列を返す
 function buildRows(plans) {
   const rowsMap = new Map();
   for (const p of plans) {
@@ -198,10 +214,12 @@ function buildRows(plans) {
     if (!rowsMap.has(key)) {
       rowsMap.set(key, {
         plan_type: p.plan_type, line_name: p.line_name, equipment_name: p.equipment_name,
-        title: p.title, assignee_name: p.assignee_name || '', months: new Map(), unscheduledList: [],
+        title: p.title, inspector_name: p.inspector_name || '', assignee_name: p.assignee_name || '',
+        months: new Map(), unscheduledList: [],
       });
     }
     const row = rowsMap.get(key);
+    if (!row.inspector_name && p.inspector_name) row.inspector_name = p.inspector_name;
     if (!row.assignee_name && p.assignee_name) row.assignee_name = p.assignee_name;
     if (p.unscheduled) { row.unscheduledList.push(p); continue; }
     const month = monthOf(p);
@@ -213,22 +231,90 @@ function buildRows(plans) {
     (a.title || '').localeCompare(b.title || '', 'ja'));
 }
 
+// ---------------- 月別表示（既定） ----------------
+
+// 1予定を1行のカードで表示（点検者・状態つき。タップで編集シート／詳細）
+function planRow(p, monthLabel) {
+  const type = typeOf(p.plan_type);
+  const eqLabel = [p.line_name, p.equipment_name].filter(Boolean).join(' ');
+  const statusCls = p.status === 'done' ? ' is-done' : (p.status === 'overdue' ? ' is-overdue' : '');
+  const canEdit = hasRole(currentUser, 'editor');
+  const inner = [
+    el('div', { class: 'mplan-body' }, [
+      el('div', { class: 'mplan-head' }, [
+        el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
+        el('span', { class: 'mplan-title' }, p.title),
+      ]),
+      el('div', { class: 'mplan-sub' }, [
+        eqLabel ? el('span', { class: 'mplan-eq' }, eqLabel) : null,
+        el('span', { class: 'mplan-person' }, `点検者: ${p.inspector_name || '未設定'}`),
+        p.assignee_name ? el('span', { class: 'mplan-person' }, `担当者: ${p.assignee_name}`) : null,
+      ]),
+    ]),
+    el('span', { class: `mplan-status${statusCls}` }, STATUS_LABELS[p.status] || p.status),
+  ];
+  return canEdit
+    ? el('button', { class: 'mplan-row', onclick: () => openPlanSheet(p, monthLabel) }, inner)
+    : el('a', { class: 'mplan-row', href: `/pages/plan?id=${p.id}` }, inner);
+}
+
+function buildMonthView() {
+  const inMonth = plansCache.filter((p) =>
+    !p.unscheduled && monthOf(p) === viewMonth && (!typeFilter || p.plan_type === typeFilter));
+  inMonth.sort((a, b) =>
+    (a.line_name || '').localeCompare(b.line_name || '', 'ja') ||
+    (a.title || '').localeCompare(b.title || '', 'ja'));
+
+  const undecided = plansCache.filter((p) => p.unscheduled && (!typeFilter || p.plan_type === typeFilter));
+  const doneCount = inMonth.filter((p) => p.status === 'done').length;
+
+  const list = inMonth.length === 0
+    ? el('p', { class: 'empty' }, `${viewMonth}月の予定はありません。`)
+    : el('div', { class: 'mplan-list' }, inMonth.map((p) => planRow(p, `${viewMonth}月`)));
+
+  return el('div', {}, [
+    monthNav(),
+    inMonth.length > 0
+      ? el('p', { class: 'hint no-print' }, `${viewMonth}月: ${inMonth.length}件（完了 ${doneCount} / 未完了 ${inMonth.length - doneCount}）`)
+      : null,
+    list,
+    undecided.length > 0
+      ? el('div', { class: 'mplan-unsched no-print' }, [
+          el('h4', { class: 'mplan-unsched-title' }, `未定（実施月が未設定）${undecided.length}件`),
+          el('div', { class: 'mplan-list' }, undecided.map((p) => planRow(p, '未定'))),
+        ])
+      : null,
+  ]);
+}
+
+function monthNav() {
+  const stepTo = (m) => { viewMonth = m; renderView(); };
+  return el('div', { class: 'cal-nav no-print', style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' }, [
+    el('button', { class: 'btn btn-sm', onclick: () => stepTo(viewMonth > 1 ? viewMonth - 1 : 12) }, '‹'),
+    el('select', { onchange: (e) => stepTo(Number(e.target.value)) },
+      MONTHS.map((m) => el('option', { value: m, selected: m === viewMonth }, `${m}月`))),
+    el('button', { class: 'btn btn-sm', onclick: () => stepTo(viewMonth < 12 ? viewMonth + 1 : 1) }, '›'),
+  ]);
+}
+
+// ---------------- 全月グリッド表示 ----------------
+
 function buildYearGrid(rows) {
   if (rows.length === 0) {
     return el('p', { class: 'empty' },
       typeFilter ? `${year}年の「${PLAN_TYPES[typeFilter].label}」の予定はありません。`
-                 : `${year}年の予定はまだありません。上のフォームから登録してください。`);
+                 : `${year}年の予定はまだありません。上の「一括登録」から登録してください。`);
   }
   const canEdit = hasRole(currentUser, 'editor');
 
   const head = el('tr', {}, [
-    el('th', { class: 'annual-task-col' }, 'タスク / 設備 / 担当'),
+    el('th', { class: 'annual-task-col' }, 'タスク / 設備 / 点検者'),
     el('th', { class: 'annual-unsched-col' }, '未定'),
     ...MONTHS.map((m) => el('th', {}, `${m}月`)),
   ]);
 
   const body = rows.map((row) => {
-    const type = PLAN_TYPES[row.plan_type] || PLAN_TYPES.other;
+    const type = typeOf(row.plan_type);
     const eqLabel = [row.line_name, row.equipment_name].filter(Boolean).join(' ');
     const us = summarizeMonth(row.unscheduledList);
     const unschedCell = el('td', { class: 'annual-cell annual-unsched-col' }, us.empty
@@ -241,22 +327,22 @@ function buildYearGrid(rows) {
         el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
         el('div', { class: 'annual-task-title' }, row.title),
         eqLabel ? el('div', { class: 'annual-task-eq' }, eqLabel) : null,
-        row.assignee_name ? el('div', { class: 'annual-task-person' }, `担当: ${row.assignee_name}`) : null,
+        el('div', { class: 'annual-task-person' }, `点検者: ${row.inspector_name || '未設定'}`),
+        row.assignee_name ? el('div', { class: 'annual-task-person' }, `担当者: ${row.assignee_name}`) : null,
       ]),
       unschedCell,
       ...MONTHS.map((m) => {
         const s = summarizeMonth(row.months.get(m));
         if (s.empty) {
-          // 空セル: 編集権限があればその月に追加できる
           return el('td', { class: 'annual-cell' }, canEdit
             ? [el('button', { class: 'annual-add no-print', title: `${m}月に追加`, onclick: () => openAddSheet(row, m) }, '＋')]
             : '');
         }
         const cls = `annual-mark${s.done ? ' is-done' : ''}${s.overdue ? ' is-overdue' : ''}`;
-        const tip = `${row.title}（${STATUS_LABELS[s.plan.status] || s.plan.status}${row.assignee_name ? '・担当: ' + row.assignee_name : ''}）`;
+        const tip = `${row.title}（${STATUS_LABELS[s.plan.status] || s.plan.status}${row.inspector_name ? '・点検者: ' + row.inspector_name : ''}${row.assignee_name ? '・担当者: ' + row.assignee_name : ''}）`;
         return el('td', { class: 'annual-cell' },
           canEdit
-            ? [el('button', { class: cls, style: `color:${type.color}`, title: tip, onclick: () => openPlanSheet(s.plan, m) }, s.mark)]
+            ? [el('button', { class: cls, style: `color:${type.color}`, title: tip, onclick: () => openPlanSheet(s.plan, `${m}月`) }, s.mark)]
             : [el('a', { class: cls, style: `color:${type.color}`, title: tip, href: `/pages/plan?id=${s.plan.id}` }, s.mark)]);
       }),
     ]);
@@ -273,12 +359,14 @@ function typeLabel() {
   return typeFilter ? PLAN_TYPES[typeFilter].label : '全種別';
 }
 
+// CSVは年間表（行=タスク／列=12ヶ月）を出力。種別フィルターを反映
 function exportCsv(rows, enc) {
   if (rows.length === 0) { alert('出力対象がありません。'); return; }
   const columns = [
-    { label: '種別', value: (r) => PLAN_TYPES[r.plan_type]?.label || r.plan_type },
+    { label: '種別', value: (r) => typeOf(r.plan_type).label },
     { label: 'タスク', value: (r) => r.title },
     { label: '設備', value: (r) => [r.line_name, r.equipment_name].filter(Boolean).join(' ') },
+    { label: '点検者', value: (r) => r.inspector_name || '' },
     { label: '担当者', value: (r) => r.assignee_name || '' },
     { label: '未定', value: (r) => summarizeMonth(r.unscheduledList).text },
     ...MONTHS.map((m) => ({ label: `${m}月`, value: (r) => summarizeMonth(r.months.get(m)).text })),
@@ -289,15 +377,15 @@ function exportCsv(rows, enc) {
 
 // ---------------- 月末アラート ----------------
 
-function monthEndAlert(plans) {
+function monthEndAlert() {
   const today = new Date();
-  if (year !== today.getFullYear()) return null; // 表示中の年が当年でなければ出さない
+  if (year !== today.getFullYear()) return null;
   const curMonth = today.getMonth() + 1;
   const daysInMonth = new Date(today.getFullYear(), curMonth, 0).getDate();
   const daysLeft = daysInMonth - today.getDate();
   if (daysLeft > MONTH_END_WINDOW_DAYS) return null;
 
-  const pending = plans.filter((p) => !p.unscheduled && monthOf(p) === curMonth && p.status !== 'done');
+  const pending = plansCache.filter((p) => !p.unscheduled && monthOf(p) === curMonth && p.status !== 'done');
   if (pending.length === 0) return null;
 
   return el('div', { class: 'notice is-warning no-print' }, [
@@ -306,18 +394,23 @@ function monthEndAlert(plans) {
   ]);
 }
 
-// ---------------- 年ナビ・全体描画 ----------------
+// ---------------- ツールバー・年ナビ・描画 ----------------
 
 function toolbar(rows) {
   const sel = el('select', {
-    onchange: (e) => { typeFilter = e.target.value; renderYear().catch(showError); },
+    onchange: (e) => { typeFilter = e.target.value; renderView(); },
   }, [
     el('option', { value: '', selected: typeFilter === '' }, '全種別'),
     ...Object.entries(PLAN_TYPES).map(([v, { label }]) =>
       el('option', { value: v, selected: typeFilter === v }, label)),
   ]);
+  const viewToggle = el('div', { class: 'annual-view-toggle' }, [
+    el('button', { class: `btn btn-sm${viewMode === 'month' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'month'; renderView(); } }, '月別'),
+    el('button', { class: `btn btn-sm${viewMode === 'all' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'all'; renderView(); } }, '全月'),
+  ]);
   return el('div', { class: 'annual-toolbar no-print' }, [
     el('label', { class: 'annual-filter' }, ['種別: ', sel]),
+    viewToggle,
     el('div', { class: 'annual-output-btns' }, [
       el('button', { class: 'btn btn-sm', onclick: () => window.print() }, '🖨 印刷'),
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(rows, 'UTF-8') }, '📥 CSV'),
@@ -335,36 +428,41 @@ function yearNav() {
   ]);
 }
 
-async function renderYear() {
-  const from = `${year}-01-01`;
-  const to = `${year + 1}-01-01`; // to は排他
-  // include_unscheduled=1 で「実施月未定」の予定も取得（カレンダーには出ない）
-  const { plans } = await api.get(`/api/plans?from=${from}&to=${to}&include_unscheduled=1`);
-  const rows = buildRows(plans);
+// 取得済みデータ（plansCache）から描画（再取得なし）
+function renderView() {
+  const rows = buildRows(plansCache);
+  const printTitle = viewMode === 'month' ? `${year}年 ${viewMonth}月 点検計画` : `${year}年 年間計画表`;
 
   render(app, [
-    monthEndAlert(plans),
+    monthEndAlert(),
     yearNav(),
     hasRole(currentUser, 'editor') ? buildBulkForm() : null,
     el('div', { class: 'card' }, [
       el('div', { class: 'print-only report-print-header' }, [
-        el('h2', {}, `${year}年 年間計画表`),
+        el('h2', {}, printTitle),
         el('p', {}, `種別: ${typeLabel()}　出力日: ${new Date().toLocaleDateString('sv-SE')}`),
-      ]),
-      el('div', { class: 'card-title-row no-print' }, [
-        el('h3', { class: 'card-title' }, `${year}年 年間計画表`),
       ]),
       toolbar(rows),
       el('div', { class: 'cal-legend no-print', style: 'margin-bottom:8px' },
         Object.values(PLAN_TYPES).map(({ label, color, bg }) =>
           el('span', { class: 'cal-legend-item', style: `background:${bg};color:${color}` }, label))),
-      buildYearGrid(rows),
+      viewMode === 'month' ? buildMonthView() : buildYearGrid(rows),
       el('p', { class: 'hint no-print', style: 'margin-top:8px' },
         hasRole(currentUser, 'editor')
-          ? '● 予定／✓ 完了／! 期限超過／数字は同月複数件。セルをタップで 完了・移動・削除、空欄の＋でその月に追加できます。'
-          : '● 予定／✓ 完了／! 期限超過。タップで詳細へ。'),
+          ? 'タップで 完了・点検者変更・移動・削除ができます。全月表示では空欄の＋でその月に追加できます。'
+          : 'タップで詳細へ。'),
     ]),
   ]);
+}
+
+// 当年の予定を取得して描画
+async function renderYear() {
+  const from = `${year}-01-01`;
+  const to = `${year + 1}-01-01`; // to は排他
+  // include_unscheduled=1 で「実施月未定」の予定も取得（カレンダーには出ない）
+  const { plans } = await api.get(`/api/plans?from=${from}&to=${to}&include_unscheduled=1`);
+  plansCache = plans || [];
+  renderView();
 }
 
 (async () => {

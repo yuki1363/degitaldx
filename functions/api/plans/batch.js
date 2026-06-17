@@ -57,6 +57,8 @@ export async function onRequestPost({ request, env, data }) {
       null, // 一括登録は各月の個別予定として作成する（繰り返しルールは付けない）
     ];
     if (it.unscheduled) { cols.push('unscheduled'); vals.push(1); }
+    const inspector = it.inspector_name ? String(it.inspector_name).trim() : '';
+    if (inspector) { cols.push('inspector_name'); vals.push(inspector); }
     cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
     vals.push(userEmail, now, userEmail, now);
 

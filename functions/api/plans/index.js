@@ -127,8 +127,8 @@ export async function onRequestPost({ request, env, data }) {
 
   const {
     title, planned_date, planned_end_date, plan_type,
-    line_name, equipment_name, assignee_name, status, note,
-    recurrence_rule,
+    line_name, equipment_name, assignee_name, inspector_name, status, note,
+    recurrence_rule, unscheduled,
   } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
@@ -157,13 +157,11 @@ export async function onRequestPost({ request, env, data }) {
   const now = nowIso();
   const userEmail = data.user.email;
 
-  const result = await db.prepare(`
-    INSERT INTO maintenance_plan
-      (title, planned_date, planned_end_date, plan_type, line_name, equipment_name,
-       assignee_name, status, note, recurrence_rule,
-       created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
+  // 列名は固定の許可リストのみ。inspector_name / unscheduled は値があるときだけ列に含める
+  // （列を追加するマイグレーション前でも通常の登録が壊れないようにするため）。
+  const cols = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'line_name',
+    'equipment_name', 'assignee_name', 'status', 'note', 'recurrence_rule'];
+  const vals = [
     title.trim(),
     planned_date,
     planned_end_date ?? null,
@@ -174,8 +172,17 @@ export async function onRequestPost({ request, env, data }) {
     resolvedStatus,
     note ?? null,
     recRule,
-    userEmail, now, userEmail, now
-  ).run();
+  ];
+  const inspector = inspector_name ? String(inspector_name).trim() : '';
+  if (inspector) { cols.push('inspector_name'); vals.push(inspector); }
+  if (unscheduled) { cols.push('unscheduled'); vals.push(1); }
+  cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
+  vals.push(userEmail, now, userEmail, now);
+
+  const placeholders = cols.map(() => '?').join(', ');
+  const result = await db.prepare(
+    `INSERT INTO maintenance_plan (${cols.join(', ')}) VALUES (${placeholders})`
+  ).bind(...vals).run();
 
   const id = result.meta?.last_row_id;
 
