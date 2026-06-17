@@ -275,6 +275,20 @@ async function renderDetail(id) {
     canEdit
       ? el('div', { class: 'action-row' }, [
           ...statusBtns,
+          // この業務依頼を日報に記録（タイトル・設備・状況・内容を本文へプリフィル＋起票元リンク）
+          (() => {
+            const date = repair.created_at
+              ? new Date(repair.created_at).toLocaleDateString('sv-SE')
+              : new Date().toLocaleDateString('sv-SE');
+            const q = new URLSearchParams({ new: '1', link_type: 'repair', link_id: String(repair.id), date });
+            q.set('body', [
+              `【業務依頼】${repair.title}`,
+              repair.equipment_name ? `設備: ${`${repair.equipment_code || ''} ${repair.equipment_name}`.trim()}` : null,
+              `状況: ${STATUS[repair.status]?.label || repair.status}`,
+              repair.description ? `内容: ${repair.description}` : null,
+            ].filter(Boolean).join('\n'));
+            return el('a', { class: 'btn', href: `/pages/report?${q}` }, '📝 日報に記録');
+          })(),
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
           el('button', {
             class: 'btn btn-danger',

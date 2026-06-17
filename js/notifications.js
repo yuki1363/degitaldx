@@ -157,6 +157,13 @@ async function renderPage() {
     listBox,
   ]);
 
+  // 通知センターを開いたら未確認をまとめて確認済みにする（閲覧＝確認。
+  // チーム共有方式なので全員の未読バッジが消える）。viewer は確認権限が無いので対象外。
+  if (hasRole(currentUser, 'editor')) {
+    try { await api.post('/api/notifications/ack-all', {}); }
+    catch { /* 確認に失敗しても一覧表示は続行する */ }
+  }
+
   await load(ctx);
 }
 

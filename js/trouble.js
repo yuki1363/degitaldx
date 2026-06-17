@@ -395,6 +395,29 @@ async function renderForm(existing, prefill = null) {
     return { fld, input };
   });
 
+  // 写真・動画・PDF（保存時にまとめてアップロードして紐づける）
+  const pendingFiles = [];
+  const fileListBox = el('div', { class: 'row-list' }, []);
+  const renderPending = () => {
+    render(fileListBox, pendingFiles.map((file, idx) =>
+      el('div', { class: 'file-row' }, [
+        el('span', { class: 'file-name' }, file.name),
+        el('button', {
+          class: 'btn btn-sm', type: 'button',
+          onclick: () => { pendingFiles.splice(idx, 1); renderPending(); },
+        }, '外す'),
+      ])
+    ));
+  };
+  const fileInput = el('input', {
+    type: 'file', accept: 'image/*,video/*,application/pdf', multiple: true, hidden: true,
+    onchange: (e) => {
+      for (const file of e.target.files) pendingFiles.push(file);
+      renderPending();
+      e.target.value = '';
+    },
+  });
+
   const save = async () => {
     const customValues = customInputs
       .map(({ fld, input }) => ({ field_id: fld.id, name: fld.name, value: String(input.value).trim() }))
@@ -412,6 +435,14 @@ async function renderForm(existing, prefill = null) {
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }
     try {
+      // 添付（画像はリサイズしてEXIF除去、動画・PDFはそのまま）を先に送って file_ids を集める
+      const fileIds = [];
+      for (const file of pendingFiles) {
+        const prepared = await resizeImageFile(file);
+        const meta = await uploadFile(prepared, {});
+        fileIds.push(meta.id);
+      }
+      body.file_ids = fileIds;
       if (existing) {
         await api.put(`/api/troubles/${existing.id}`, body);
         go(`?id=${existing.id}`);
@@ -445,6 +476,12 @@ async function renderForm(existing, prefill = null) {
       field('記録者', f.reporter_name),
       reporterOptions,
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
+      el('div', { class: 'field' }, [
+        el('label', {}, '写真・動画・PDF'),
+        el('button', { type: 'button', class: 'btn btn-sm', onclick: () => fileInput.click() }, '📷 写真・動画・PDFを追加'),
+        fileInput,
+        fileListBox,
+      ]),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', {
