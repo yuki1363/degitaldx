@@ -914,11 +914,28 @@ input.is-abnormal {
   color: inherit;
 }
 
-.cal-more {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  padding-left: 4px;
+.cal-day-num.is-clickable {
+  background: none; border: none; padding: 0; margin: 0;
+  font-size: inherit; font-weight: inherit; color: var(--color-text-muted);
+  cursor: pointer; display: block; text-align: left; width: 100%;
 }
+.cal-day-num.is-clickable:hover { color: var(--color-primary); text-decoration: underline; }
+.cal-cell.is-today .cal-day-num.is-clickable { color: var(--color-primary); }
+
+.cal-more {
+  display: block; font-size: 10px; color: var(--color-primary);
+  padding: 1px 4px; background: none; border: none; cursor: pointer; text-align: left;
+}
+.cal-more:hover { text-decoration: underline; }
+
+.day-plan-list { display: flex; flex-direction: column; gap: 4px; max-height: 55vh; overflow-y: auto; margin: 4px 0; }
+.day-plan-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 4px;
+  border-bottom: 1px solid var(--color-border); text-decoration: none; color: inherit; border-radius: 4px;
+}
+.day-plan-item:hover { background: #f8fafc; }
+.day-plan-title { flex: 1; font-size: 14px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.day-plan-status { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
 
 .cal-legend {
   display: flex;
@@ -1595,7 +1612,9 @@ input.is-abnormal {
 
 /* 年間計画表ツールバー・月別表示 */
 .annual-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.annual-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; }
 .annual-filter { font-size: 14px; display: inline-flex; align-items: center; gap: 4px; }
+.annual-name-search { flex: 1; min-width: 140px; max-width: 240px; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 6px; font-size: 14px; }
 .annual-view-toggle { display: inline-flex; gap: 4px; }
 .annual-output-btns { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
 .annual-form { padding: 12px; }

@@ -89,6 +89,31 @@ function buildCalNavAndToggle({ label, onPrev, onNext, viewMode, onMonthView, on
   ]);
 }
 
+// ---------------- 日付クリック時のシート（その日の全予定） ----------------
+
+function showDaySheet(fullDate, dateLabel, dayPlans) {
+  const backdrop = el('div', { class: 'sheet-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  const sheet = el('div', { class: 'sheet' }, [
+    el('div', { class: 'sheet-title' }, `${dateLabel}（${dayPlans.length}件）`),
+    el('div', { class: 'day-plan-list' }, dayPlans.map((p) => {
+      const type = PLAN_TYPES[p.plan_type] || PLAN_TYPES.other;
+      return el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
+        el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
+        el('span', { class: 'day-plan-title' }, p.title),
+        el('span', { class: 'day-plan-status' }, STATUS_LABELS[p.status] || p.status),
+      ]);
+    })),
+    hasRole(currentUser, 'editor')
+      ? el('button', { class: 'sheet-btn', onclick: () => { close(); go(`?new=1&date=${fullDate}`); } }, '＋ この日に予定を追加')
+      : null,
+    el('button', { class: 'sheet-btn sheet-cancel', onclick: close }, '閉じる'),
+  ]);
+  backdrop.appendChild(sheet);
+  document.body.appendChild(backdrop);
+}
+
 // ---------------- 月表示 ----------------
 
 async function renderMonthCalendar(year, month) {
@@ -113,9 +138,14 @@ async function renderMonthCalendar(year, month) {
     const fullDate = `${year}-${String(month).padStart(2, '0')}-${dayStr}`;
     const dayPlans = plans.filter((p) => inRange(p, fullDate));
     const isToday = fullDate === todayStr;
+    const handleDayClick = dayPlans.length > 0
+      ? () => showDaySheet(fullDate, `${month}月${d}日`, dayPlans)
+      : null;
     cells.push(
       el('div', { class: `cal-cell${isToday ? ' is-today' : ''}` }, [
-        el('div', { class: 'cal-day-num' }, String(d)),
+        handleDayClick
+          ? el('button', { class: 'cal-day-num is-clickable', onclick: handleDayClick }, String(d))
+          : el('div', { class: 'cal-day-num' }, String(d)),
         ...dayPlans.slice(0, 3).map((p) =>
           el('a', {
             class: 'cal-event',
@@ -124,7 +154,7 @@ async function renderMonthCalendar(year, month) {
           }, p.title)
         ),
         dayPlans.length > 3
-          ? el('div', { class: 'cal-more' }, `+${dayPlans.length - 3}件`)
+          ? el('button', { class: 'cal-more', onclick: handleDayClick }, `他${dayPlans.length - 3}件`)
           : null,
       ])
     );
@@ -351,6 +381,7 @@ async function renderForm(existing, fromAnnual = false) {
   });
 
   const today = nowLocalInputValue().slice(0, 10);
+  const prefillDate = new URLSearchParams(window.location.search).get('date') || today;
 
   const titleInput   = el('input', { type: 'text', value: existing?.title || '', placeholder: '例: 1号機 月次点検' });
   const typeSelect   = el('select', {},
@@ -358,7 +389,7 @@ async function renderForm(existing, fromAnnual = false) {
       el('option', { value, selected: (existing?.plan_type || 'inspection') === value }, label)
     )
   );
-  const startInput   = el('input', { type: 'date', value: existing?.planned_date || today });
+  const startInput   = el('input', { type: 'date', value: existing?.planned_date || prefillDate });
   const endInput     = el('input', { type: 'date', value: existing?.planned_end_date || '' });
   const inspectorInput = el('input', { type: 'text', value: existing?.inspector_name || '', placeholder: '点検者名（任意）' });
   const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });

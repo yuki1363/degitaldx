@@ -17,6 +17,7 @@ let currentUser = null;
 let equipNames = null;
 let year = new Date().getFullYear();
 let typeFilter = '';                       // '' = 全種別
+let nameFilter = '';                        // 名称あいまい検索
 let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
 let viewMonth = new Date().getMonth() + 1;  // 月別表示で見ている月
 let plansCache = [];                        // 取得済みの当年の予定（再取得を避ける）
@@ -208,10 +209,21 @@ function summarizeMonth(list) {
   };
 }
 
+function matchesName(p) {
+  if (!nameFilter) return true;
+  const q = nameFilter.toLowerCase();
+  return (p.title || '').toLowerCase().includes(q)
+    || (p.line_name || '').toLowerCase().includes(q)
+    || (p.equipment_name || '').toLowerCase().includes(q)
+    || (p.inspector_name || '').toLowerCase().includes(q)
+    || (p.assignee_name || '').toLowerCase().includes(q);
+}
+
 function buildRows(plans) {
   const rowsMap = new Map();
   for (const p of plans) {
     if (typeFilter && p.plan_type !== typeFilter) continue;
+    if (!matchesName(p)) continue;
     const key = `${p.plan_type}|${p.line_name || ''}|${p.equipment_name || ''}|${p.title}`;
     if (!rowsMap.has(key)) {
       rowsMap.set(key, {
@@ -264,12 +276,12 @@ function planRow(p, monthLabel) {
 
 function buildMonthView() {
   const inMonth = plansCache.filter((p) =>
-    !p.unscheduled && monthOf(p) === viewMonth && (!typeFilter || p.plan_type === typeFilter));
+    !p.unscheduled && monthOf(p) === viewMonth && (!typeFilter || p.plan_type === typeFilter) && matchesName(p));
   inMonth.sort((a, b) =>
     (a.line_name || '').localeCompare(b.line_name || '', 'ja') ||
     (a.title || '').localeCompare(b.title || '', 'ja'));
 
-  const undecided = plansCache.filter((p) => p.unscheduled && (!typeFilter || p.plan_type === typeFilter));
+  const undecided = plansCache.filter((p) => p.unscheduled && (!typeFilter || p.plan_type === typeFilter) && matchesName(p));
   const doneCount = inMonth.filter((p) => p.status === 'done').length;
 
   const list = inMonth.length === 0
@@ -409,12 +421,20 @@ function toolbar(rows) {
     ...Object.entries(PLAN_TYPES).map(([v, { label }]) =>
       el('option', { value: v, selected: typeFilter === v }, label)),
   ]);
+  const nameInput = el('input', {
+    type: 'search', placeholder: '名称・設備で検索', value: nameFilter,
+    class: 'annual-name-search',
+    oninput: (e) => { nameFilter = e.target.value; renderView(); },
+  });
   const viewToggle = el('div', { class: 'annual-view-toggle' }, [
     el('button', { class: `btn btn-sm${viewMode === 'month' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'month'; renderView(); } }, '月別'),
     el('button', { class: `btn btn-sm${viewMode === 'all' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'all'; renderView(); } }, '全月'),
   ]);
   return el('div', { class: 'annual-toolbar no-print' }, [
-    el('label', { class: 'annual-filter' }, ['種別: ', sel]),
+    el('div', { class: 'annual-filter-row' }, [
+      el('label', { class: 'annual-filter' }, ['種別: ', sel]),
+      nameInput,
+    ]),
     viewToggle,
     el('div', { class: 'annual-output-btns' }, [
       el('button', { class: 'btn btn-sm', onclick: () => window.print() }, '🖨 印刷'),
