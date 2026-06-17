@@ -208,6 +208,7 @@ async function renderForm(existing) {
   const prefillId   = prefillType ? Number(urlParams.get('link_id')) : null;
   const prefillDate = urlParams.get('date');
   const prefillCategory = urlParams.get('category'); // 一覧で選んだカテゴリで新規作成
+  const prefillBody = urlParams.get('body');         // トラブル等から本文（現象・原因・対策）をプリフィル
 
   const initDate = existing?.report_date || prefillDate || todayStr();
 
@@ -254,7 +255,7 @@ async function renderForm(existing) {
     body: el('textarea', {
       placeholder: '今日の作業内容・申し送り事項・気づきを記録してください',
       style: 'min-height:140px',
-    }, existing?.body || ''),
+    }, existing?.body || prefillBody || ''),
   };
 
   const reporterOptions = el('datalist', { id: 'report-reporter-options' },

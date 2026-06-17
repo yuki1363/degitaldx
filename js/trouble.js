@@ -244,12 +244,19 @@ async function renderDetail(id) {
             ].filter(Boolean).join('\n'));
             return el('a', { class: 'btn btn-primary', href: `/pages/repair?${q}` }, '🔧 業務依頼を作成');
           })(),
-          // このトラブルを日報に記録（発生日を初期日付に設定してプリチェック済みで開く）
+          // このトラブルを日報に記録（発生日を初期日付に設定・現象/原因/対策を本文へプリフィル・プリチェック済みで開く）
           (() => {
             const date = trouble.occurred_at
               ? new Date(trouble.occurred_at).toLocaleDateString('sv-SE')
               : new Date().toLocaleDateString('sv-SE');
             const q = new URLSearchParams({ new: '1', link_type: 'trouble', link_id: String(trouble.id), date });
+            const eqLabel = trouble.equipment_name ? `${trouble.equipment_code} ${trouble.equipment_name}` : '';
+            q.set('body', [
+              `【トラブル対応】${eqLabel}`.trim(),
+              `現象: ${trouble.phenomenon || ''}`,
+              trouble.cause ? `原因: ${trouble.cause}` : null,
+              trouble.countermeasure ? `対策: ${trouble.countermeasure}` : null,
+            ].filter(Boolean).join('\n'));
             return el('a', { class: 'btn', href: `/pages/report?${q}` }, '📝 日報に記録');
           })(),
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
