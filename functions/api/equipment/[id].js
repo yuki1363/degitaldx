@@ -58,7 +58,7 @@ export async function onRequestGet({ env, params }) {
     }
   };
 
-  const [files, inspections, troubles, repairs, plans, history] = await Promise.all([
+  const [files, inspections, troubles, repairs, plans, history, parts] = await Promise.all([
     safe(() => listAttachedFiles(env, 'equipment_ledger', equipment.id)),
     safe(() =>
       env.DB.prepare(
@@ -128,9 +128,25 @@ export async function onRequestGet({ env, params }) {
         .all()
         .then((r) => r.results)
     ),
+    // 関連部品（05）— 設備名・機器名で照合（部品在庫↔設備台帳の紐づけ）
+    safe(() => {
+      if (!equipment.line_name) return [];
+      return env.DB.prepare(
+        `SELECT id, name, model_no, quantity, safety_stock, importance
+           FROM parts_inventory
+          WHERE deleted_at IS NULL
+            AND COALESCE(line_name, '') = COALESCE(?1, '')
+            AND COALESCE(equipment_name, '') = COALESCE(?2, '')
+          ORDER BY name ASC
+          LIMIT 20`
+      )
+        .bind(equipment.line_name || '', equipment.equipment_name || '')
+        .all()
+        .then((r) => r.results);
+    }),
   ]);
 
-  return json({ equipment, files, inspections, troubles, repairs, plans, history });
+  return json({ equipment, files, inspections, troubles, repairs, plans, history, parts });
 }
 
 export async function onRequestPut({ request, env, data, params }) {

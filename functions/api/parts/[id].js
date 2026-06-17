@@ -33,7 +33,23 @@ export async function onRequestGet({ env, params }) {
     .bind(id)
     .all();
 
-  return json({ part, transactions });
+  // 設備台帳との照合（line_name・equipment_name が一致する設備を1件返す）
+  let equipment = null;
+  if (part.line_name) {
+    try {
+      equipment = await DB.prepare(
+        `SELECT id, code, name FROM equipment_ledger
+          WHERE deleted_at IS NULL
+            AND COALESCE(line_name, '') = COALESCE(?1, '')
+            AND COALESCE(equipment_name, '') = COALESCE(?2, '')
+          LIMIT 1`
+      )
+        .bind(part.line_name || '', part.equipment_name || '')
+        .first();
+    } catch { /* 未マイグレーション環境でも落ちないよう */ }
+  }
+
+  return json({ part, transactions, equipment });
 }
 
 export async function onRequestPut({ env, data, params, request }) {

@@ -356,7 +356,7 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { part, transactions } = await api.get(`/api/parts/${id}`);
+  const { part, transactions, equipment: linkedEquipment } = await api.get(`/api/parts/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const isLow = part.quantity < part.safety_stock; // 在庫数 < 必要数 で要発注
 
@@ -401,6 +401,18 @@ async function renderDetail(id) {
       infoRow('仕入先メール', part.supplier_email),
       infoRow('備考', part.note),
     ]),
+    linkedEquipment
+      ? el('div', { class: 'card' }, [
+          el('h3', { class: 'card-title' }, '対象設備（設備台帳）'),
+          el('a', { class: 'list-item', href: `/pages/ledger?id=${linkedEquipment.id}` }, [
+            el('div', { class: 'list-item-main' }, [
+              el('div', { class: 'list-item-title' }, linkedEquipment.name),
+              el('div', { class: 'list-item-sub' }, linkedEquipment.code),
+            ]),
+            el('span', { class: 'chevron' }, '›'),
+          ]),
+        ])
+      : null,
     canEdit
       ? el('div', { class: 'action-row' }, [
           el('button', { class: isLow ? 'btn btn-primary' : 'btn', onclick: () => openOrderDialog(part) }, '📧 発注メールを作成'),

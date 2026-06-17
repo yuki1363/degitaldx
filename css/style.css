@@ -2077,3 +2077,27 @@ input.is-abnormal {
   font-weight: 600;
   border-left: 3px solid var(--color-primary);
 }
+
+/* ---- 年間計画グリッド: 点検実績バッジ ---- */
+.annual-insp-count {
+  display: block;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #15803d;
+  background: #dcfce7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-top: 3px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.annual-insp-count:hover {
+  background: #bbf7d0;
+  text-decoration: underline;
+}
+
+/* ---- 設備台帳: 関連部品の在庫数（要発注は赤強調） ---- */
+.parts-qty.is-low {
+  color: var(--color-danger);
+  font-weight: 700;
+}

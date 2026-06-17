@@ -21,6 +21,7 @@ let nameFilter = '';                        // 名称あいまい検索
 let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
 let viewMonth = new Date().getMonth() + 1;  // 月別表示で見ている月
 let plansCache = [];                        // 取得済みの当年の予定（再取得を避ける）
+let inspectionSummary = {};                 // 点検実績の突合用: { "line|equip": { "YYYY-MM": { count, equipment_id } } }
 
 const PLAN_TYPES = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -348,17 +349,39 @@ function buildYearGrid(rows) {
       unschedCell,
       ...MONTHS.map((m) => {
         const s = summarizeMonth(row.months.get(m));
+
+        // 点検種別かつ設備が設定されている場合、当年の実績件数を表示
+        const inspKey = `${row.line_name || ''}|${row.equipment_name || ''}`;
+        const inspMonthKey = `${year}-${mm(m)}`;
+        const inspData = (row.plan_type === 'inspection' && (row.line_name || row.equipment_name))
+          ? inspectionSummary[inspKey]?.[inspMonthKey]
+          : null;
+        const lastDay = new Date(year, m, 0).getDate();
+        const inspBadge = inspData
+          ? el('a', {
+              class: 'annual-insp-count',
+              href: `/pages/inspection?equipment_id=${inspData.equipment_id}&from=${year}-${mm(m)}-01&to=${year}-${mm(m)}-${String(lastDay).padStart(2, '0')}`,
+              title: `${year}年${m}月の点検実績: ${inspData.count}件`,
+              onclick: (e) => e.stopPropagation(),
+            }, `✓${inspData.count}件`)
+          : null;
+
         if (s.empty) {
-          return el('td', { class: 'annual-cell' }, canEdit
-            ? [el('button', { class: 'annual-add no-print', title: `${m}月に追加`, onclick: () => openAddSheet(row, m) }, '＋')]
-            : '');
+          return el('td', { class: 'annual-cell' }, [
+            canEdit
+              ? el('button', { class: 'annual-add no-print', title: `${m}月に追加`, onclick: () => openAddSheet(row, m) }, '＋')
+              : null,
+            inspBadge,
+          ]);
         }
         const cls = `annual-mark${s.done ? ' is-done' : ''}${s.overdue ? ' is-overdue' : ''}`;
         const tip = `${row.title}（${STATUS_LABELS[s.plan.status] || s.plan.status}${row.inspector_name ? '・点検者: ' + row.inspector_name : ''}${row.assignee_name ? '・担当者: ' + row.assignee_name : ''}${s.plan.note ? '・備考: ' + s.plan.note : ''}）`;
-        return el('td', { class: 'annual-cell' },
+        return el('td', { class: 'annual-cell' }, [
           canEdit
-            ? [el('button', { class: cls, style: `color:${type.color}`, title: tip, onclick: () => openPlanSheet(s.plan, `${m}月`) }, s.mark)]
-            : [el('a', { class: cls, style: `color:${type.color}`, title: tip, href: `/pages/plan?id=${s.plan.id}` }, s.mark)]);
+            ? el('button', { class: cls, style: `color:${type.color}`, title: tip, onclick: () => openPlanSheet(s.plan, `${m}月`) }, s.mark)
+            : el('a', { class: cls, style: `color:${type.color}`, title: tip, href: `/pages/plan?id=${s.plan.id}` }, s.mark),
+          inspBadge,
+        ]);
       }),
     ]);
   });
@@ -490,9 +513,34 @@ function renderView() {
 }
 
 // 年間計画（annual_only）を年に関係なく全件取得して描画（毎年共通のテンプレート）
+// 同時に当年の点検実績も取得し、年間計画グリッドとの突合に使う
 async function renderYear() {
-  const { plans } = await api.get('/api/plans?annual_only=1');
+  const [{ plans }, equipData, inspData] = await Promise.all([
+    api.get('/api/plans?annual_only=1'),
+    api.get('/api/equipment').catch(() => ({ equipment: [] })),
+    api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31`).catch(() => ({ inspections: [] })),
+  ]);
   plansCache = plans || [];
+
+  // equipment_id → "line_name|equipment_name" の逆引きマップ（inspections API は equipment_id しか返さない）
+  const idToLineEquip = new Map();
+  for (const eq of equipData.equipment || []) {
+    idToLineEquip.set(eq.id, `${eq.line_name || ''}|${eq.equipment_name || ''}`);
+  }
+
+  // 点検実績を "line_name|equipment_name" × "YYYY-MM" で集計
+  inspectionSummary = {};
+  for (const ins of inspData.inspections || []) {
+    const lineEquipKey = idToLineEquip.get(ins.equipment_id);
+    if (!lineEquipKey) continue;
+    const month = (ins.inspected_at || '').slice(0, 7); // YYYY-MM
+    if (!inspectionSummary[lineEquipKey]) inspectionSummary[lineEquipKey] = {};
+    if (!inspectionSummary[lineEquipKey][month]) {
+      inspectionSummary[lineEquipKey][month] = { count: 0, equipment_id: ins.equipment_id };
+    }
+    inspectionSummary[lineEquipKey][month].count++;
+  }
+
   renderView();
 }
 

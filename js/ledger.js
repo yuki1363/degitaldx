@@ -225,7 +225,7 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { equipment: eq, files, inspections, troubles = [], repairs = [], plans = [], history } =
+  const { equipment: eq, files, inspections, troubles = [], repairs = [], plans = [], history, parts = [] } =
     await api.get(`/api/equipment/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const isAdmin = hasRole(currentUser, 'admin');
@@ -458,6 +458,36 @@ async function renderDetail(id) {
                 el('span', { class: 'status-badge' }, PLAN_STATUS_LABELS[p.status] || p.status),
               ])
             )
+          ),
+    ]),
+    el('div', { class: 'card' }, [
+      el('div', { class: 'card-title-row' }, [
+        el('h3', { class: 'card-title' }, '関連部品'),
+        el('a', { class: 'btn btn-sm', href: '/pages/parts' }, '在庫一覧'),
+      ]),
+      parts.length === 0
+        ? el('p', { class: 'empty' }, eq.line_name
+            ? '設備名・機器名が一致する部品が登録されていません。'
+            : '設備名が未設定のため照合できません。')
+        : el('div', { class: 'row-list' },
+            parts.map((p) => {
+              const isLow = p.quantity < p.safety_stock;
+              const impClass = p.importance === '高' ? 'imp-high' : p.importance === '中' ? 'imp-mid' : 'imp-low';
+              return el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}` }, [
+                el('div', { class: 'list-item-main' }, [
+                  el('div', { class: 'list-item-title' }, [
+                    p.name,
+                    p.importance ? el('span', { class: `imp-badge ${impClass}` }, p.importance) : null,
+                  ]),
+                  p.model_no ? el('div', { class: 'list-item-sub' }, `型番: ${p.model_no}`) : null,
+                ]),
+                el('div', { class: `parts-qty${isLow ? ' is-low' : ''}` }, [
+                  el('span', { class: 'parts-qty-num' }, String(p.quantity)),
+                  el('span', { class: 'parts-qty-unit' }, `/ ${p.safety_stock}`),
+                  isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px;margin-left:4px' }, '要発注') : null,
+                ]),
+              ]);
+            })
           ),
     ]),
     el('div', { class: 'card' }, [
