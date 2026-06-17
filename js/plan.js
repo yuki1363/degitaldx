@@ -145,11 +145,12 @@ async function renderMonthCalendar(year, month) {
         renderWeekCalendar(getWeekStart(today)).catch(showError);
       },
     }),
-    hasRole(currentUser, 'editor')
-      ? el('div', { style: 'margin-bottom:8px' }, [
-          el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 予定を追加'),
-        ])
-      : null,
+    el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 予定を追加')
+        : null,
+      el('a', { class: 'btn', href: '/pages/plan-annual' }, '📅 年間計画表'),
+    ]),
     el('div', { class: 'cal-grid' }, [
       ...['日', '月', '火', '水', '木', '金', '土'].map((d) =>
         el('div', { class: 'cal-weekday' }, d)
@@ -233,11 +234,12 @@ async function renderWeekCalendar(weekStart) {
       },
       onWeekView: () => renderWeekCalendar(weekStart).catch(showError),
     }),
-    hasRole(currentUser, 'editor')
-      ? el('div', { style: 'margin-bottom:8px' }, [
-          el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 予定を追加'),
-        ])
-      : null,
+    el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 予定を追加')
+        : null,
+      el('a', { class: 'btn', href: '/pages/plan-annual' }, '📅 年間計画表'),
+    ]),
     el('div', { class: 'cal-week-grid' }, weekCols),
     el('div', { class: 'cal-legend' }, [
       ...Object.entries(PLAN_TYPES).map(([, { label, color, bg }]) =>
