@@ -39,13 +39,12 @@ export async function onRequestPost({ request, env, data }) {
 
   for (const it of items) {
     const resolvedStatus = STATUSES.includes(it.status) ? it.status : 'pending';
-    const result = await db.prepare(`
-      INSERT INTO maintenance_plan
-        (title, planned_date, planned_end_date, plan_type, line_name, equipment_name,
-         assignee_name, status, note, recurrence_rule, unscheduled,
-         created_by, created_at, updated_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
+    // 列名は固定の許可リストのみ（ユーザー入力を連結しない）。
+    // unscheduled は「未定」登録のときだけ列に含める（未マイグレーション環境でも
+    // 通常の月指定登録は動くようにするため）。
+    const cols = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'line_name',
+      'equipment_name', 'assignee_name', 'status', 'note', 'recurrence_rule'];
+    const vals = [
       String(it.title).trim(),
       it.planned_date,
       null,
@@ -56,9 +55,15 @@ export async function onRequestPost({ request, env, data }) {
       resolvedStatus,
       it.note?.trim() || null,
       null, // 一括登録は各月の個別予定として作成する（繰り返しルールは付けない）
-      it.unscheduled ? 1 : null, // 実施月未定の予定は 1
-      userEmail, now, userEmail, now
-    ).run();
+    ];
+    if (it.unscheduled) { cols.push('unscheduled'); vals.push(1); }
+    cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
+    vals.push(userEmail, now, userEmail, now);
+
+    const placeholders = cols.map(() => '?').join(', ');
+    const result = await db.prepare(
+      `INSERT INTO maintenance_plan (${cols.join(', ')}) VALUES (${placeholders})`
+    ).bind(...vals).run();
 
     const id = result.meta?.last_row_id;
     ids.push(id);

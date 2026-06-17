@@ -60,7 +60,6 @@ export async function onRequestGet({ request, env }) {
   // 実施月未定（年間計画表の「未定」枠）はカレンダー・月クエリでは除外し、
   // 年間計画表（include_unscheduled=1）でのみ返す
   const includeUnscheduled = sp.get('include_unscheduled') === '1';
-  const unschedFilter = includeUnscheduled ? '' : ' AND (p.unscheduled IS NULL OR p.unscheduled = 0)';
 
   let rangeStart, rangeEnd;
 
@@ -89,7 +88,7 @@ export async function onRequestGet({ request, env }) {
             AND COALESCE(p.planned_end_date, p.planned_date) >= ?)
           OR
           (p.recurrence_rule IS NOT NULL AND p.planned_date < ?)
-        )${unschedFilter}
+        )
       ORDER BY p.planned_date ASC, p.id ASC
     `).bind(rangeEnd, rangeStart, rangeEnd).all();
 
@@ -106,11 +105,16 @@ export async function onRequestGet({ request, env }) {
   } else {
     const { results: rows } = await db.prepare(`
       SELECT p.* FROM maintenance_plan p
-      WHERE p.deleted_at IS NULL${unschedFilter}
+      WHERE p.deleted_at IS NULL
       ORDER BY p.planned_date ASC, p.id ASC
     `).all();
     results = rows ?? [];
   }
+
+  // 実施月未定（年間計画表の「未定」枠）はカレンダー・月クエリでは除外し、
+  // include_unscheduled=1 のときだけ返す。
+  // ※ JS側で除外することで、unscheduled 列が未マイグレーションでもカレンダーは壊れない
+  if (!includeUnscheduled) results = results.filter((p) => !p.unscheduled);
 
   return json({ plans: results });
 }
