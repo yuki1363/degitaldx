@@ -7,6 +7,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { insertMaintenancePlan } from './index.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
@@ -64,10 +65,7 @@ export async function onRequestPost({ request, env, data }) {
     cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
     vals.push(userEmail, now, userEmail, now);
 
-    const placeholders = cols.map(() => '?').join(', ');
-    const result = await db.prepare(
-      `INSERT INTO maintenance_plan (${cols.join(', ')}) VALUES (${placeholders})`
-    ).bind(...vals).run();
+    const result = await insertMaintenancePlan(db, cols, vals);
 
     const id = result.meta?.last_row_id;
     ids.push(id);

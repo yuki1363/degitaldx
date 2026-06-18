@@ -43,13 +43,14 @@ export async function onRequestPost({ env, data }) {
   const stmts = toCreate.map((e) =>
     DB.prepare(
       `INSERT INTO parts_inventory
-         (line_name, equipment_name, name, quantity, safety_stock,
+         (part_no, name, line_name, equipment_name, unit, quantity, safety_stock,
           created_by, created_at, updated_by, updated_at)
-       VALUES (?1, ?2, ?3, 0, 0, ?4, ?5, ?4, ?5)`
+       VALUES (?1, ?2, ?3, ?4, '個', 0, 0, ?5, ?6, ?5, ?6)`
     ).bind(
+      crypto.randomUUID(), // 内部一意キー part_no（画面非表示・NOT NULL 制約を満たす）
+      '（部品を登録してください）',
       e.line_name,
       e.equipment_name || null,
-      '（部品を登録してください）',
       userEmail,
       now
     )

@@ -327,6 +327,8 @@ async function renderList() {
     btn.textContent = '登録中…';
     try {
       const res = await api.post('/api/parts/import-from-equipment', {});
+      // 追加した分がすぐ見えるよう「すべての設備を表示」に切り替える
+      if (res.created > 0) { selectedLine = ALL_LINES; selectedEquip = ''; }
       alert(res.created > 0
         ? `${res.created}件の設備のプレースホルダーを追加しました。\n部品名・型番などを各編集画面から登録してください。`
         : (res.message || '新規に追加する設備はありませんでした。'));

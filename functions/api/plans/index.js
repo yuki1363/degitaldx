@@ -51,6 +51,49 @@ function expandRecurring(plan, rangeStart, rangeEnd) {
   return instances;
 }
 
+// 年間計画表からの一括登録（/api/plans/batch）で作られた予定のID集合を返す。
+// 監査ログの diff に batch:true が残るため、登録日（1日以外でも）に依存せず判定できる。
+// → annual_only 列の導入前に登録した「旧年間計画」を確実に復元するための手がかり。
+async function getBatchPlanIds(db) {
+  try {
+    const { results } = await db.prepare(`
+      SELECT record_id FROM audit_log
+      WHERE table_name = 'maintenance_plan' AND action = 'create'
+        AND diff_json LIKE '%"batch":true%'
+    `).all();
+    return new Set((results ?? []).map((r) => String(r.record_id)));
+  } catch {
+    return new Set(); // audit_log 参照に失敗しても通常表示は続行
+  }
+}
+
+// maintenance_plan への INSERT。annual_only / unscheduled / inspector_name など、
+// マイグレーション前のDBに存在しない列が混じっていても登録が壊れないよう、
+// 「no such column」を検出したらその列を外して再試行する。
+// 列名は固定の許可リスト由来でユーザー入力を含まないため安全。
+export async function insertMaintenancePlan(db, cols, vals) {
+  let c = [...cols];
+  let v = [...vals];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const placeholders = c.map(() => '?').join(', ');
+    try {
+      return await db.prepare(
+        `INSERT INTO maintenance_plan (${c.join(', ')}) VALUES (${placeholders})`
+      ).bind(...v).run();
+    } catch (err) {
+      // SQLite の列不足エラーは "has no column named X"（INSERT）/ "no such column: X"（SELECT）の
+      // 2形式があるため両方に対応し、該当列を外して再試行する。
+      const msg = String(err?.message || '');
+      const m = /(?:has no column named|no such column):?\s*([A-Za-z_]\w*)/i.exec(msg);
+      const idx = m ? c.indexOf(m[1]) : -1;
+      if (idx === -1) throw err; // 列不足以外のエラーはそのまま投げる
+      c.splice(idx, 1);
+      v.splice(idx, 1);
+    }
+  }
+  throw new Error('予定の登録に失敗しました（列の不一致）。');
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
@@ -70,11 +113,14 @@ export async function onRequestGet({ request, env }) {
       WHERE p.deleted_at IS NULL
       ORDER BY p.planned_date ASC, p.id ASC
     `).all();
-    // annual_only=1 に加え、フラグ導入前に年間計画表から登録した「旧データ」も拾う。
-    // 一括登録は「各月1日・繰り返しなし・終了日なし」で作られるため、その特徴で判定する
-    // （annual_only 列が未マイグレーションでも undefined となり、旧データ判定で救済される）。
+    // フラグ導入前に年間計画表から登録した「旧データ」も拾う。判定は次のいずれか:
+    //   ・annual_only=1（新しい年間計画）
+    //   ・一括登録された予定（監査ログの batch 署名。1日以外で登録した旧データも復元）
+    //   ・繰り返しなし・終了日なし・各月1日（＋ボタンで追加した旧データの特徴）
+    const batchIds = await getBatchPlanIds(db);
     const plans = (rows ?? []).filter((p) =>
       p.annual_only ||
+      batchIds.has(String(p.id)) ||
       (!p.recurrence_rule && !p.planned_end_date && /-01$/.test(String(p.planned_date || '').slice(0, 10)))
     );
     return json({ plans });
@@ -132,9 +178,13 @@ export async function onRequestGet({ request, env }) {
 
   // 実施月未定（年間計画表の「未定」枠）はカレンダー・月クエリでは除外し、
   // include_unscheduled=1 のときだけ返す。
-  // annual_only=1（年間計画表専用）も同様にカレンダーから除外する。
+  // annual_only=1（年間計画表専用）と、一括登録された年間計画（batch 署名）も
+  // 同様にカレンダーから除外する（annual_only 列が未マイグレーションの旧データ対策）。
   // ※ JS側で除外することで、各列が未マイグレーションでもカレンダーは壊れない
-  if (!includeUnscheduled) results = results.filter((p) => !p.unscheduled && !p.annual_only);
+  if (!includeUnscheduled) {
+    const batchIds = await getBatchPlanIds(db);
+    results = results.filter((p) => !p.unscheduled && !p.annual_only && !batchIds.has(String(p.id)));
+  }
 
   return json({ plans: results });
 }
@@ -148,7 +198,7 @@ export async function onRequestPost({ request, env, data }) {
   const {
     title, planned_date, planned_end_date, plan_type,
     line_name, equipment_name, assignee_name, inspector_name, status, note,
-    recurrence_rule, unscheduled,
+    recurrence_rule, unscheduled, annual_only,
   } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
@@ -196,13 +246,13 @@ export async function onRequestPost({ request, env, data }) {
   const inspector = inspector_name ? String(inspector_name).trim() : '';
   if (inspector) { cols.push('inspector_name'); vals.push(inspector); }
   if (unscheduled) { cols.push('unscheduled'); vals.push(1); }
+  // annual_only=1（年間計画表の＋追加など）。未マイグレーション環境では
+  // insertMaintenancePlan が列を外して再試行する（年間計画表には batch/1日付で復元される）。
+  if (annual_only) { cols.push('annual_only'); vals.push(1); }
   cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
   vals.push(userEmail, now, userEmail, now);
 
-  const placeholders = cols.map(() => '?').join(', ');
-  const result = await db.prepare(
-    `INSERT INTO maintenance_plan (${cols.join(', ')}) VALUES (${placeholders})`
-  ).bind(...vals).run();
+  const result = await insertMaintenancePlan(db, cols, vals);
 
   const id = result.meta?.last_row_id;
 
