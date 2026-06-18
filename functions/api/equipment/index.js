@@ -65,14 +65,19 @@ export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const q = (url.searchParams.get('q') || '').trim();
 
-  const where = q
-    ? `WHERE deleted_at IS NULL AND (code LIKE ?1 OR name LIKE ?1 OR location LIKE ?1)`
-    : `WHERE deleted_at IS NULL`;
+  const cond = q
+    ? `e.deleted_at IS NULL AND (e.code LIKE ?1 OR e.name LIKE ?1 OR e.location LIKE ?1)`
+    : `e.deleted_at IS NULL`;
   const binds = q ? [`%${q}%`] : [];
+
+  // 設備ごとの画像ファイル数（content_type が image/* のもの）
+  const imgCountSub = `(SELECT COUNT(*) FROM files f
+      WHERE f.related_table = 'equipment_ledger' AND f.related_id = e.id
+        AND f.deleted_at IS NULL AND f.content_type LIKE 'image/%') AS image_count`;
 
   const run = async (cols) => {
     const stmt = env.DB.prepare(
-      `SELECT ${cols} FROM equipment_ledger ${where} ORDER BY code LIMIT 300`
+      `SELECT ${cols} FROM equipment_ledger e WHERE ${cond} ORDER BY e.code LIMIT 300`
     );
     const r = await (binds.length ? stmt.bind(...binds) : stmt).all();
     return r.results;
@@ -81,11 +86,22 @@ export async function onRequestGet({ request, env }) {
   let results;
   try {
     results = await run(
-      'id, code, name, line_name, equipment_name, location, manufacturer, model, installed_on, status'
+      `e.id, e.code, e.name, e.line_name, e.equipment_name, e.location, e.manufacturer, e.model, e.installed_on, e.status, ${imgCountSub}`
     );
   } catch {
-    // line_name / equipment_name 列が未追加の環境でも一覧が開くようにフォールバック
-    results = await run('id, code, name, location, manufacturer, model, installed_on, status');
+    try {
+      // line_name / equipment_name 列が未追加の環境でも一覧が開くようにフォールバック
+      results = await run(
+        `e.id, e.code, e.name, e.location, e.manufacturer, e.model, e.installed_on, e.status, ${imgCountSub}`
+      );
+    } catch {
+      // files テーブルも未作成の環境向け最終フォールバック
+      const stmt2 = env.DB.prepare(
+        `SELECT id, code, name, location, manufacturer, model, installed_on, status
+           FROM equipment_ledger WHERE deleted_at IS NULL ORDER BY code LIMIT 300`
+      );
+      results = (await stmt2.all()).results;
+    }
   }
   return json({ equipment: results });
 }

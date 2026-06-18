@@ -526,6 +526,17 @@ label {
   color: var(--color-danger);
 }
 
+.no-image-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
 .action-badge {
   flex-shrink: 0;
   padding: 1px 8px;

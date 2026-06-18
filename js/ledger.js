@@ -65,11 +65,13 @@ async function renderList() {
 
   const makeRow = (eq) => {
     const sub = [eq.line_name, eq.equipment_name].filter(Boolean).join(' / ') || eq.location || '';
+    const noImage = eq.image_count === 0 || eq.image_count === null;
     return el('a', { class: 'list-item', href: `/pages/ledger?id=${eq.id}` }, [
       el('div', { class: 'list-item-main' }, [
         el('div', { class: 'list-item-sub' }, [
           eq.code,
           el('span', { class: `status-badge is-${eq.status}` }, STATUS_LABELS[eq.status] || eq.status),
+          noImage ? el('span', { class: 'no-image-badge' }, '画像なし') : null,
         ]),
         el('div', { class: 'list-item-title' }, eq.name),
         sub ? el('div', { class: 'list-item-sub' }, sub) : null,
