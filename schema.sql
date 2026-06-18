@@ -688,3 +688,33 @@ ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by TEXT;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_at TEXT;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_by      TEXT;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at      TEXT;
+
+-- ---------------------------------------------------------------------
+-- print_templates — 帳票テンプレート（工事連絡書・トラブル報告書）
+--   既存のExcel用紙を画像化してアップロードし（image_file_id = files.id）、
+--   その上にデータ差込欄を位置指定（fields_json の x/y は画像に対する%）で
+--   重ねて印刷する。テンプレ管理は管理者、印刷は editor（保全計画・トラブル詳細）。
+--   template_type: construction_notice=工事連絡書 / trouble_report=トラブル報告書
+--   orientation:   portrait=縦 / landscape=横（印刷時の用紙向き）
+--   fields_json 要素例:
+--     { id, kind:'data'|'date'|'manual'|'fixed', source, text, x, y, font_size, align }
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS print_templates (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    NOT NULL,
+  template_type TEXT    NOT NULL
+                        CHECK (template_type IN ('construction_notice', 'trouble_report')),
+  image_file_id INTEGER,                              -- 背景用紙画像（files.id）。/api/files/{id} で取得
+  orientation   TEXT    NOT NULL DEFAULT 'portrait',  -- 'portrait' | 'landscape'
+  fields_json   TEXT    NOT NULL DEFAULT '[]',
+  -- 共通監査列
+  created_by    TEXT    NOT NULL,
+  created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by    TEXT,
+  updated_at    TEXT,
+  deleted_by    TEXT,
+  deleted_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_print_templates_type
+  ON print_templates (template_type, deleted_at);

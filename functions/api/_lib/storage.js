@@ -34,6 +34,7 @@ export const RELATED_TABLES = [
   'daily_report',
   'comments',
   'chat_messages',
+  'print_templates', // 帳票テンプレートの背景用紙画像
 ];
 
 /**
