@@ -180,7 +180,7 @@ function buildItemInput(master, existingValue) {
   return { box, getValue, master };
 }
 
-async function renderEntry({ equipmentId, existing, planId }) {
+async function renderEntry({ equipmentId, existing, planId, plannedDate, assigneeName }) {
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
   const [{ equipment }, { users }] = await Promise.all([
@@ -229,17 +229,24 @@ async function renderEntry({ equipmentId, existing, planId }) {
   // 担当者は自由入力（既定は空欄）。登録済みユーザー名は候補として表示。
   const assigneeInput = el('input', {
     type: 'text',
-    value: existing ? (existing.assignee_name || '') : '',
+    value: existing ? (existing.assignee_name || '') : (assigneeName || ''),
     placeholder: '担当者名（自由入力）',
     list: 'inspection-assignee-options',
   });
   const assigneeOptions = el('datalist', { id: 'inspection-assignee-options' },
     users.map((u) => el('option', { value: u.name }))
   );
-  const datetimeInput = el('input', {
-    type: 'datetime-local',
-    value: existing ? isoToLocalInputValue(existing.inspected_at) : nowLocalInputValue(),
-  });
+  // 計画から開始した場合は計画日＋現在時刻を初期値にする
+  const initialDatetime = (() => {
+    if (existing) return isoToLocalInputValue(existing.inspected_at);
+    if (plannedDate) {
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      return `${plannedDate}T${hhmm}`;
+    }
+    return nowLocalInputValue();
+  })();
+  const datetimeInput = el('input', { type: 'datetime-local', value: initialDatetime });
   const noteInput = el('textarea', { value: existing?.note || '', placeholder: '気づいた点があれば記入' });
 
   // 写真・動画
@@ -678,6 +685,8 @@ async function renderMasters(equipmentId) {
       await renderEntry({
         equipmentId: Number(params.get('equipment_id')) || undefined,
         planId: Number(params.get('plan_id')) || undefined,
+        plannedDate: params.get('date') || undefined,
+        assigneeName: params.get('assignee') || undefined,
       });
     } else if (params.get('masters')) {
       await renderMasters(Number(params.get('masters')));

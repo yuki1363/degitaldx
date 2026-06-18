@@ -99,10 +99,23 @@ function showDaySheet(fullDate, dateLabel, dayPlans) {
     el('div', { class: 'sheet-title' }, `${dateLabel}（${dayPlans.length}件）`),
     el('div', { class: 'day-plan-list' }, dayPlans.map((p) => {
       const type = PLAN_TYPES[p.plan_type] || PLAN_TYPES.other;
-      return el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
-        el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
-        el('span', { class: 'day-plan-title' }, p.title),
-        el('span', { class: 'day-plan-status' }, STATUS_LABELS[p.status] || p.status),
+      const canStart = p.plan_type === 'inspection' && p.status !== 'done' && hasRole(currentUser, 'editor');
+      const inspectionUrl = (() => {
+        if (!canStart) return null;
+        const q = new URLSearchParams({ new: '1', plan_id: String(p.id), date: fullDate });
+        const assignee = p.inspector_name || p.assignee_name || '';
+        if (assignee) q.set('assignee', assignee);
+        return `/pages/inspection?${q}`;
+      })();
+      return el('div', { class: 'day-plan-row' }, [
+        el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
+          el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
+          el('span', { class: 'day-plan-title' }, p.title),
+          el('span', { class: 'day-plan-status' }, STATUS_LABELS[p.status] || p.status),
+        ]),
+        canStart
+          ? el('a', { class: 'day-plan-start-btn', href: inspectionUrl, title: '点検を開始' }, '✅')
+          : null,
       ]);
     })),
     hasRole(currentUser, 'editor')
@@ -332,8 +345,12 @@ async function renderDetail(id, fromAnnual = false) {
                     if (match) equipmentId = match.id;
                   } catch { /* 設備解決失敗時は未指定で開く */ }
                   // plan_id を渡し、点検保存時にこの計画を自動で完了にする
+                  // 計画日・担当者も事前入力するためURLに含める
                   const q = new URLSearchParams({ new: '1', plan_id: String(plan.id) });
                   if (equipmentId) q.set('equipment_id', String(equipmentId));
+                  if (plan.planned_date) q.set('date', plan.planned_date.slice(0, 10));
+                  const assignee = plan.inspector_name || plan.assignee_name || '';
+                  if (assignee) q.set('assignee', assignee);
                   window.location.href = `/pages/inspection?${q}`;
                 },
               }, '✅ 点検を開始')

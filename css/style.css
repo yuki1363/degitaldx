@@ -940,13 +940,21 @@ input.is-abnormal {
 .cal-more:hover { text-decoration: underline; }
 
 .day-plan-list { display: flex; flex-direction: column; gap: 4px; max-height: 55vh; overflow-y: auto; margin: 4px 0; }
+.day-plan-row { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--color-border); }
+.day-plan-row:last-child { border-bottom: none; }
 .day-plan-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 4px;
-  border-bottom: 1px solid var(--color-border); text-decoration: none; color: inherit; border-radius: 4px;
+  flex: 1; min-width: 0; text-decoration: none; color: inherit; border-radius: 4px;
 }
 .day-plan-item:hover { background: #f8fafc; }
 .day-plan-title { flex: 1; font-size: 14px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .day-plan-status { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.day-plan-start-btn {
+  flex-shrink: 0; padding: 4px 8px; border-radius: 6px; font-size: 16px;
+  text-decoration: none; background: #dcfce7; border: 1px solid #bbf7d0;
+  line-height: 1; cursor: pointer;
+}
+.day-plan-start-btn:hover { background: #bbf7d0; }
 
 .cal-legend {
   display: flex;
