@@ -83,11 +83,21 @@ export function getLimits(env) {
 
 /** 現在の使用量と上限を返す（warning: 警告ライン超え） */
 export async function getStorageUsage(env) {
-  const row = await env.DB.prepare(
-    'SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM files'
-  ).first();
+  // 物理削除（purged_at）済みは R2 から実体を消しているため使用量から除外する。
+  // purged_at 列が無い古い環境ではフォールバックして全件合計する（破綻させない）。
+  let usedBytes = 0;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM files WHERE purged_at IS NULL'
+    ).first();
+    usedBytes = row ? row.used_bytes : 0;
+  } catch {
+    const row = await env.DB.prepare(
+      'SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM files'
+    ).first();
+    usedBytes = row ? row.used_bytes : 0;
+  }
   const { hardLimitBytes, warnBytes } = getLimits(env);
-  const usedBytes = row ? row.used_bytes : 0;
   return {
     used_bytes: usedBytes,
     hard_limit_bytes: hardLimitBytes,

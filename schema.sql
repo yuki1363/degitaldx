@@ -718,3 +718,10 @@ CREATE TABLE IF NOT EXISTS print_templates (
 
 CREATE INDEX IF NOT EXISTS idx_print_templates_type
   ON print_templates (template_type, deleted_at);
+
+-- files: 物理削除（R2の実体を削除して容量を空ける）の記録
+--   論理削除（deleted_at）= 一覧から隠すだけで R2 には残り使用量に含まれる。
+--   物理削除（purged_at）= R2 オブジェクトを実際に削除し、容量集計から除外する（解放）。
+--   管理画面「ファイル容量」から admin が個別に実行する。物理削除は復元不可。
+ALTER TABLE files ADD COLUMN IF NOT EXISTS purged_at TEXT;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS purged_by TEXT;

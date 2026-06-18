@@ -84,7 +84,58 @@ export async function onRequestGet({ request, env, data, params }) {
   return new Response(object.body, { status: 200, headers });
 }
 
-export async function onRequestDelete({ env, data, params }) {
+export async function onRequestDelete({ request, env, data, params }) {
+  const physical = new URL(request.url).searchParams.get('physical') === '1';
+
+  // ---- 物理削除（容量解放）: admin のみ。R2 の実体を削除し purged_at を記録。復元不可 ----
+  if (physical) {
+    const denied = requireRole(data.user, 'admin');
+    if (denied) return denied;
+
+    const id = Number(params.id);
+    if (!Number.isInteger(id) || id <= 0) return jsonError(400, '不正なIDです。');
+
+    // 論理削除済みも対象にするため deleted_at では絞らない（まだ物理削除していないもの）
+    const file = await env.DB.prepare(
+      `SELECT id, r2_key, file_name, size_bytes FROM files WHERE id = ?1`
+    ).bind(id).first();
+    if (!file) return jsonError(404, 'ファイルが見つかりません。');
+
+    // R2 から実体を削除（idempotent。既に無くてもエラーにしない）
+    if (env.FILES) {
+      try {
+        await env.FILES.delete(file.r2_key);
+      } catch (err) {
+        console.error('files purge: R2 delete failed:', err && err.stack ? err.stack : err);
+        return jsonError(502, 'R2からの削除に失敗しました。時間をおいて再度お試しください。');
+      }
+    }
+
+    const now = nowIso();
+    try {
+      await env.DB.prepare(
+        `UPDATE files
+            SET purged_at = ?1, purged_by = ?2,
+                deleted_at = COALESCE(deleted_at, ?1), deleted_by = COALESCE(deleted_by, ?2)
+          WHERE id = ?3`
+      ).bind(now, data.user.email, id).run();
+    } catch (err) {
+      console.error('files purge: D1 update failed:', err && err.stack ? err.stack : err);
+      return jsonError(500, '物理削除の記録に失敗しました（purged_at 列が無い可能性があります。schema.sql を適用してください）。');
+    }
+
+    await writeAuditLog(env.DB, {
+      tableName: 'files',
+      recordId: file.id,
+      action: 'delete',
+      changedBy: data.user.email,
+      diff: { physical: true, file_name: file.file_name, freed_bytes: file.size_bytes },
+    });
+
+    return json({ ok: true, id: file.id, freed_bytes: file.size_bytes });
+  }
+
+  // ---- 論理削除（editor 以上）: R2 には残し、一覧から消すだけ ----
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
 

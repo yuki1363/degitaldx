@@ -25,6 +25,28 @@ import {
   RELATED_TABLES,
 } from '../_lib/storage.js';
 
+// GET /api/files — 管理画面「ファイル容量」用のファイル一覧（admin のみ）
+//   物理削除（purged_at）済みは除外。サイズの大きい順に返す（容量を空けやすいように）。
+export async function onRequestGet({ env, data }) {
+  const denied = requireRole(data.user, 'admin');
+  if (denied) return denied;
+
+  const cols = `id, file_name, content_type, size_bytes, related_table, related_id,
+                created_by, created_at, deleted_at, deleted_by`;
+  let results;
+  try {
+    ({ results } = await env.DB.prepare(
+      `SELECT ${cols} FROM files WHERE purged_at IS NULL ORDER BY size_bytes DESC, id DESC LIMIT 500`
+    ).all());
+  } catch {
+    // purged_at 未追加の環境向けフォールバック
+    ({ results } = await env.DB.prepare(
+      `SELECT ${cols} FROM files ORDER BY size_bytes DESC, id DESC LIMIT 500`
+    ).all());
+  }
+  return json({ files: results ?? [], usage: await getStorageUsage(env) });
+}
+
 export async function onRequestPost({ request, env, data }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
