@@ -545,48 +545,69 @@ async function renderMasters() {
 // ---------------- バックアップ ----------------
 
 async function renderBackup() {
-  const statusEl = el('p', { class: 'notice' }, '「JSONをダウンロード」ボタンを押すと全テーブルのデータをまとめてダウンロードできます。');
-
-  const downloadBtn = el('button', { class: 'btn btn-primary', onclick: async () => {
-    downloadBtn.disabled = true;
-    downloadBtn.textContent = '準備中…';
-    try {
-      const res = await fetch('/api/admin/backup', { credentials: 'include' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error?.message || `エラー ${res.status}`);
+  const makeDownloadBtn = (label, url, filename, resetLabel) => {
+    const btn = el('button', { class: 'btn btn-primary', onclick: async () => {
+      btn.disabled = true;
+      btn.textContent = '準備中…';
+      try {
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.error?.message || `エラー ${res.status}`);
+        }
+        const blob = await res.blob();
+        const date = new Date().toISOString().slice(0, 10);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename.replace('DATE', date);
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        alert(`バックアップに失敗しました: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = resetLabel;
       }
-      const blob = await res.blob();
-      const date = new Date().toISOString().slice(0, 10);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `backup-${date}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      render(statusEl.parentElement ? statusEl : statusEl, []);
-    } catch (err) {
-      alert(`バックアップに失敗しました: ${err.message}`);
-    } finally {
-      downloadBtn.disabled = false;
-      downloadBtn.textContent = 'JSONをダウンロード';
-    }
-  }}, 'JSONをダウンロード');
+    }}, label);
+    return btn;
+  };
+
+  const jsonBtn = makeDownloadBtn(
+    'JSONをダウンロード（データのみ）',
+    '/api/admin/backup',
+    'backup-DATE.json',
+    'JSONをダウンロード（データのみ）',
+  );
+  const sqlBtn = makeDownloadBtn(
+    'SQLダンプをダウンロード（スキーマ＋データ）',
+    '/api/admin/backup?format=sql',
+    'backup-DATE.sql',
+    'SQLダンプをダウンロード（スキーマ＋データ）',
+  );
 
   render(tabContent, [
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, 'データバックアップ'),
-      el('p', { class: 'hint' }, 'データベースの全テーブルをJSON形式でダウンロードします。このファイルを保存しておくことで、万一データが失われた場合の復旧に役立てられます。'),
+      el('p', { class: 'hint' }, 'データベースの全テーブルをダウンロードします。定期的に保存しておくことで、万一に備えられます。'),
       el('ul', { class: 'hint', style: 'margin-top:4px;padding-left:18px' }, [
         el('li', {}, '含まれるデータ: 設備台帳・点検結果・トラブル記録・業務依頼・部品在庫・保全計画・日報・ユーザー・監査ログ など全テーブル'),
         el('li', {}, '含まれないもの: R2に保存された写真・動画・PDF（ファイルのURLは含まれます）'),
-        el('li', {}, 'アプリのコード・スキーマはGitHubに保存されているため、このファイルはデータのバックアップ専用です'),
       ]),
-      el('div', { class: 'action-row', style: 'margin-top:16px' }, [downloadBtn]),
+      el('div', { class: 'card', style: 'margin-top:12px;background:#f8fafc' }, [
+        el('p', { style: 'font-weight:600;margin-bottom:4px' }, 'JSON形式'),
+        el('p', { class: 'hint' }, 'データのみ。将来このアプリへ再インポートする用途に適しています。'),
+        el('div', { class: 'action-row', style: 'margin-top:8px' }, [jsonBtn]),
+      ]),
+      el('div', { class: 'card', style: 'margin-top:12px;background:#f8fafc' }, [
+        el('p', { style: 'font-weight:600;margin-bottom:4px' }, 'SQLダンプ形式（推奨）'),
+        el('p', { class: 'hint' }, 'テーブル定義（CREATE TABLE）＋全データ（INSERT）のセット。Cloudflareが使えなくなっても、手元のSQLiteや他のサービスへそのまま移植できます。'),
+        el('p', { class: 'hint', style: 'margin-top:2px' }, '復元方法: sqlite3 コマンド、DB Browser for SQLite、Turso、Neon、PlanetScale など SQLite 互換の DB に取り込めます。'),
+        el('div', { class: 'action-row', style: 'margin-top:8px' }, [sqlBtn]),
+      ]),
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, 'コード・スキーマのバックアップ'),
-      el('p', { class: 'hint' }, 'アプリのコードとデータベーススキーマ（table定義）はGitHubに保存されています。Cloudflare Pagesのデプロイ履歴からいつでも以前のバージョンに戻せます（ワンクリックロールバック）。'),
+      el('p', { class: 'hint' }, 'アプリのコードとDB定義はGitHubに保存されています。Cloudflare Pagesのデプロイ履歴からワンクリックで旧バージョンに戻せます。'),
       el('p', { class: 'hint', style: 'margin-top:4px' }, 'D1データベースはCloudflareのTime Travel機能で過去30日間の任意の時点に復元できます。万一の際はCloudflareダッシュボードから操作してください。'),
     ]),
   ]);

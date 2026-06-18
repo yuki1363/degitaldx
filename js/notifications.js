@@ -4,7 +4,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -47,7 +47,7 @@ function notificationCard(n, reload) {
   let footer;
   if (isAck) {
     footer = el('div', { class: 'notif-ack is-done' },
-      `✓ 確認済み（${n.acknowledged_by || '—'}・${formatDateTime(n.acknowledged_at)}）`);
+      `✓ 確認済み（${maskEmail(n.acknowledged_by) || '—'}・${formatDateTime(n.acknowledged_at)}）`);
   } else if (hasRole(currentUser, 'editor')) {
     const btn = el('button', { class: 'btn btn-sm' }, '確認');
     btn.addEventListener('click', async (e) => {
