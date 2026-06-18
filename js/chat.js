@@ -3,7 +3,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 
 const chatList = document.getElementById('chat-list');
 const chatForm = document.getElementById('chat-form');
@@ -33,7 +33,7 @@ function appendMessages(messages) {
     const isAdmin = currentUser.role === 'admin';
     const row = el('div', { class: `chat-msg ${isMine ? 'is-mine' : ''}` }, [
       el('div', { class: 'chat-meta' }, [
-        el('span', { class: 'chat-author' }, msg.author_name || msg.created_by),
+        el('span', { class: 'chat-author' }, msg.author_name || maskEmail(msg.created_by)),
         el('span', { class: 'chat-time' }, formatDateTime(msg.created_at)),
         (isMine || isAdmin) ? el('button', {
           class: 'btn-icon',

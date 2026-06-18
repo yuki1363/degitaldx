@@ -3,7 +3,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -20,6 +20,7 @@ const TABS = [
   { id: 'audit',   label: '監査ログ' },
   { id: 'restore', label: '削除済みデータ' },
   { id: 'masters', label: 'マスタ変更履歴' },
+  { id: 'backup',  label: 'バックアップ' },
 ];
 
 let activeTab = 'users';
@@ -40,6 +41,7 @@ async function loadTab() {
   if (activeTab === 'audit')   await renderAudit();
   if (activeTab === 'restore') await renderRestore();
   if (activeTab === 'masters') await renderMasters();
+  if (activeTab === 'backup')  await renderBackup();
 }
 
 // ---------------- ユーザー管理 ----------------
@@ -105,7 +107,7 @@ async function renderUsers() {
               el('thead', {}, [el('tr', {}, ['メール', '氏名', 'グループ', '権限', '操作'].map((h) => el('th', {}, h)))]),
               el('tbody', {}, active.map((u) =>
                 el('tr', {}, [
-                  el('td', {}, u.email),
+                  el('td', {}, maskEmail(u.email)),
                   el('td', {}, u.name),
                   el('td', {}, u.group_name || '—'),
                   el('td', {}, ROLE_LABELS[u.role] || u.role),
@@ -133,7 +135,7 @@ async function renderUsers() {
               el('thead', {}, [el('tr', {}, ['メール', '氏名', '操作'].map((h) => el('th', {}, h)))]),
               el('tbody', {}, deleted.map((u) =>
                 el('tr', { style: 'opacity:0.6' }, [
-                  el('td', {}, u.email),
+                  el('td', {}, maskEmail(u.email)),
                   el('td', {}, u.name),
                   el('td', {}, [
                     el('button', { class: 'btn btn-sm', onclick: async () => {
@@ -386,7 +388,7 @@ async function renderAudit() {
               el('td', {}, el('span', {
                 class: `action-badge ${log.action === 'create' ? 'is-create' : log.action === 'delete' ? 'is-delete' : 'is-update'}`,
               }, ACTION_LABELS[log.action] || log.action)),
-              el('td', {}, log.changed_by),
+              el('td', {}, maskEmail(log.changed_by)),
               el('td', { style: 'font-size:11px;max-width:200px;word-break:break-all' },
                 log.diff_json ? log.diff_json.slice(0, 120) + (log.diff_json.length > 120 ? '…' : '') : '—'
               ),
@@ -449,7 +451,7 @@ async function renderRestore() {
           el('tr', { style: 'opacity:0.7' }, [
             el('td', {}, String(r.display || '').slice(0, 40)),
             el('td', {}, r.date_val?.slice(0, 10) || '—'),
-            el('td', {}, r.deleted_by || '—'),
+            el('td', {}, maskEmail(r.deleted_by) || '—'),
             el('td', {}, r.deleted_at?.slice(0, 16).replace('T', ' ') || '—'),
             el('td', {}, el('button', {
               class: 'btn btn-sm',
@@ -504,7 +506,7 @@ async function renderMasters() {
           el('tr', {}, [
             el('td', {}, MASTER_LABELS[h.master_name] || h.master_name),
             el('td', {}, h.record_id != null ? String(h.record_id) : '—'),
-            el('td', {}, h.changed_by),
+            el('td', {}, maskEmail(h.changed_by)),
             el('td', {}, h.changed_at?.slice(0, 16).replace('T', ' ') || '—'),
             el('td', { style: 'font-size:11px;max-width:200px;word-break:break-all' },
               String(h.snapshot_json || '').slice(0, 120)
@@ -538,6 +540,56 @@ async function renderMasters() {
     listBox,
   ]);
   await load();
+}
+
+// ---------------- バックアップ ----------------
+
+async function renderBackup() {
+  const statusEl = el('p', { class: 'notice' }, '「JSONをダウンロード」ボタンを押すと全テーブルのデータをまとめてダウンロードできます。');
+
+  const downloadBtn = el('button', { class: 'btn btn-primary', onclick: async () => {
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = '準備中…';
+    try {
+      const res = await fetch('/api/admin/backup', { credentials: 'include' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error?.message || `エラー ${res.status}`);
+      }
+      const blob = await res.blob();
+      const date = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `backup-${date}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      render(statusEl.parentElement ? statusEl : statusEl, []);
+    } catch (err) {
+      alert(`バックアップに失敗しました: ${err.message}`);
+    } finally {
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = 'JSONをダウンロード';
+    }
+  }}, 'JSONをダウンロード');
+
+  render(tabContent, [
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, 'データバックアップ'),
+      el('p', { class: 'hint' }, 'データベースの全テーブルをJSON形式でダウンロードします。このファイルを保存しておくことで、万一データが失われた場合の復旧に役立てられます。'),
+      el('ul', { class: 'hint', style: 'margin-top:4px;padding-left:18px' }, [
+        el('li', {}, '含まれるデータ: 設備台帳・点検結果・トラブル記録・業務依頼・部品在庫・保全計画・日報・ユーザー・監査ログ など全テーブル'),
+        el('li', {}, '含まれないもの: R2に保存された写真・動画・PDF（ファイルのURLは含まれます）'),
+        el('li', {}, 'アプリのコード・スキーマはGitHubに保存されているため、このファイルはデータのバックアップ専用です'),
+      ]),
+      el('div', { class: 'action-row', style: 'margin-top:16px' }, [downloadBtn]),
+    ]),
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, 'コード・スキーマのバックアップ'),
+      el('p', { class: 'hint' }, 'アプリのコードとデータベーススキーマ（table定義）はGitHubに保存されています。Cloudflare Pagesのデプロイ履歴からいつでも以前のバージョンに戻せます（ワンクリックロールバック）。'),
+      el('p', { class: 'hint', style: 'margin-top:4px' }, 'D1データベースはCloudflareのTime Travel機能で過去30日間の任意の時点に復元できます。万一の際はCloudflareダッシュボードから操作してください。'),
+    ]),
+  ]);
 }
 
 // ---------------- 起動 ----------------

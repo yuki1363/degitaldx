@@ -7,7 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
@@ -228,7 +228,7 @@ async function renderDetail(id) {
       infoRow('原因', trouble.cause),
       infoRow('対策', trouble.countermeasure),
       ...parseCustomValues(trouble.custom_fields_json).map((v) => infoRow(v.name, v.value)),
-      infoRow('記録者', trouble.reporter_name || trouble.creator_name || trouble.created_by),
+      infoRow('記録者', trouble.reporter_name || trouble.creator_name || maskEmail(trouble.created_by)),
     ]),
     canEdit
       ? el('div', { class: 'action-row' }, [
@@ -303,7 +303,7 @@ async function renderDetail(id) {
             history.map((h) =>
               el('div', { class: 'history-row' }, [
                 el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, h.changed_by),
+                el('span', {}, maskEmail(h.changed_by)),
                 el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
               ])
             )

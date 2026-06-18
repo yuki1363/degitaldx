@@ -3,7 +3,7 @@
 //              renderの配列に追加するだけでコメント欄が付く
 
 import { api } from '/js/api.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 
 const PI_PATTERNS = [
   /\d{2,4}-\d{2,4}-\d{4}/,                    // 電話: 03-1234-5678
@@ -32,7 +32,7 @@ export function buildCommentsCard(relatedTable, relatedId, currentUser) {
       const isAdmin = currentUser?.role === 'admin';
       return el('div', { class: 'comment-row' }, [
         el('div', { class: 'comment-meta' }, [
-          el('span', { class: 'comment-author' }, c.author_name || c.created_by),
+          el('span', { class: 'comment-author' }, c.author_name || maskEmail(c.created_by)),
           el('span', { class: 'comment-time' }, formatDateTime(c.created_at)),
           (isMine || isAdmin) ? el('button', {
             class: 'btn-icon',

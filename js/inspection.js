@@ -10,7 +10,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import {
-  el, render, formatDateTime, nowLocalInputValue, isoToLocalInputValue, localInputToIso,
+  el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso,
   ACTION_LABELS,
 } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
@@ -393,7 +393,7 @@ async function renderDetail(id) {
         el('a', { href: `/pages/ledger?id=${inspection.equipment_id}` },
           `${inspection.equipment_code} ${inspection.equipment_name}`),
       ]),
-      el('div', { class: 'list-item-sub' }, `担当: ${inspection.assignee_name || '未設定'} ／ 記録者: ${inspection.created_by}`),
+      el('div', { class: 'list-item-sub' }, `担当: ${inspection.assignee_name || '未設定'} ／ 記録者: ${maskEmail(inspection.created_by)}`),
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '点検結果'),
@@ -518,7 +518,7 @@ async function renderDetail(id) {
         history.map((h) =>
           el('div', { class: 'history-row' }, [
             el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-            el('span', {}, h.changed_by),
+            el('span', {}, maskEmail(h.changed_by)),
             el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
           ])
         )

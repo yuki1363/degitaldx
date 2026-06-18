@@ -6,7 +6,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 
 const app = document.getElementById('app');
@@ -58,7 +58,7 @@ async function renderList() {
         el('div', { class: 'list-item-main' }, [
           el('div', { class: 'list-item-sub' }, [
             r.category_name ? el('span', { class: 'cat-badge' }, r.category_name) : null,
-            ` ${r.report_date}  ${r.reporter_name || r.created_by}`,
+            ` ${r.report_date}  ${r.reporter_name || maskEmail(r.created_by)}`,
           ]),
           el('div', { class: 'list-item-title' }, title),
         ]),
@@ -154,7 +154,7 @@ async function renderDetail(id) {
         el('h2', { class: 'card-title' }, report.report_date),
         report.category_name ? el('span', { class: 'cat-badge' }, report.category_name) : null,
       ]),
-      infoRow('入力者', report.reporter_name || report.created_by),
+      infoRow('入力者', report.reporter_name || maskEmail(report.created_by)),
       infoRow('記録日時', formatDateTime(report.created_at)),
       el('div', { class: 'note-box', style: 'white-space:pre-wrap' }, report.body),
     ]),

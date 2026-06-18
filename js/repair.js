@@ -8,7 +8,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDateTime, formatBytes, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
+import { el, render, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 import { openQrScanner } from '/js/qr-scan.js';
 
@@ -144,7 +144,7 @@ async function renderDetail(id) {
           el('div', { class: 'list-item-title' },
             u.part_model_no ? `${u.part_model_no}（${u.part_name}）` : u.part_name),
           el('div', { class: 'list-item-sub' }, [
-            `${formatDateTime(u.created_at)} ／ ${u.created_by}`,
+            `${formatDateTime(u.created_at)} ／ ${maskEmail(u.created_by)}`,
             hasStock ? `　現在庫: ${u.part_stock}` : null,
             isLow ? el('span', { class: 'abn-badge is-abn', style: 'margin-left:6px;font-size:10px;padding:1px 6px' }, '要発注') : null,
           ].filter((x) => x !== null)),
@@ -325,7 +325,7 @@ async function renderDetail(id) {
               const to = STATUS[h.new_status]?.label || h.new_status;
               return el('div', { class: 'history-row' }, [
                 el('span', { class: 'action-badge is-update' }, `${from} → ${to}`),
-                el('span', {}, h.changed_by),
+                el('span', {}, maskEmail(h.changed_by)),
                 el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
                 h.comment ? el('span', { class: 'list-item-sub' }, h.comment) : null,
               ]);

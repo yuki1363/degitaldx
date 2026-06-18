@@ -7,7 +7,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -476,7 +476,7 @@ async function renderDetail(id) {
                 }, TYPE_LABELS[t.type] || t.type),
                 el('span', { style: t.quantity < 0 ? 'color:#dc2626' : '' },
                   `${t.quantity > 0 ? '+' : ''}${t.quantity}`),
-                el('span', {}, t.created_by),
+                el('span', {}, maskEmail(t.created_by)),
                 el('span', { class: 'list-item-sub' }, formatDateTime(t.created_at)),
                 t.note ? el('span', { class: 'list-item-sub' }, t.note) : null,
               ])

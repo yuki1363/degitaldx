@@ -50,6 +50,13 @@ export function localInputToIso(value) {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+/** メールアドレスを部分的に伏字にする（例: user@example.com → u***@example.com） */
+export function maskEmail(email) {
+  if (!email || !email.includes('@')) return email || '';
+  const [local, domain] = email.split('@');
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
 /** バイト数 → 表示用文字列 */
 export function formatBytes(bytes) {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`;

@@ -9,7 +9,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import {
-  el, render, formatDate, formatDateTime, formatBytes, ACTION_LABELS,
+  el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS,
 } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 import { openQrScanner } from '/js/qr-scan.js';
@@ -498,7 +498,7 @@ async function renderDetail(id) {
             history.map((h) =>
               el('div', { class: 'history-row' }, [
                 el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, h.changed_by),
+                el('span', {}, maskEmail(h.changed_by)),
                 el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
               ])
             )
