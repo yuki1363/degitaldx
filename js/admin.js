@@ -4,6 +4,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
+import { renderPrintTemplates } from '/js/print-templates.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -20,6 +21,7 @@ const TABS = [
   { id: 'audit',   label: '監査ログ' },
   { id: 'restore', label: '削除済みデータ' },
   { id: 'masters', label: 'マスタ変更履歴' },
+  { id: 'print-templates', label: '帳票テンプレート' },
   { id: 'backup',  label: 'バックアップ' },
 ];
 
@@ -41,6 +43,7 @@ async function loadTab() {
   if (activeTab === 'audit')   await renderAudit();
   if (activeTab === 'restore') await renderRestore();
   if (activeTab === 'masters') await renderMasters();
+  if (activeTab === 'print-templates') await renderPrintTemplates(tabContent);
   if (activeTab === 'backup')  await renderBackup();
 }
 

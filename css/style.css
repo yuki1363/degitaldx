@@ -1772,6 +1772,135 @@ input.is-abnormal {
 }
 
 /* =====================================================================
+ * 帳票テンプレート（用紙画像オーバーレイ）— 管理エディタ＆印刷
+ * ===================================================================== */
+
+/* 一覧の行 */
+.pt-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* 編集エディタの用紙（背景画像＋差込チップ） */
+.pt-paper {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  min-height: 200px;
+  margin: 0 auto;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  overflow: hidden;
+}
+.pt-paper.is-landscape { max-width: 820px; }
+.pt-paper-img { width: 100%; display: block; user-select: none; pointer-events: none; }
+.pt-paper-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px; color: #94a3b8; font-size: 13px; text-align: center; padding: 16px;
+}
+
+/* 用紙上の差込チップ（ドラッグで配置） */
+.pt-chip {
+  position: absolute;
+  padding: 1px 4px;
+  background: rgba(37, 99, 235, 0.85);
+  color: #fff;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  line-height: 1.2;
+}
+.pt-chip.is-dragging { opacity: 0.85; outline: 2px solid #f59e0b; }
+
+/* 差込欄の設定リスト */
+.pt-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+.pt-field-row select,
+.pt-field-row input { padding: 4px 6px; font-size: 13px; }
+.pt-field-num { flex: 0 0 22px; text-align: center; font-weight: 700; color: #64748b; }
+.pt-field-mini { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: #64748b; }
+
+/* 印刷オーバーレイ（画面表示） */
+.print-form-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: #fff;
+  overflow: auto;
+  padding: 0 0 24px;
+}
+.print-form-bar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #1e293b;
+  color: #fff;
+  flex-wrap: wrap;
+}
+.print-form-hint { flex: 1; font-size: 13px; min-width: 160px; }
+
+/* 用紙（背景画像＋差込テキスト）。画面ではA4幅で中央寄せ */
+.print-form-paper {
+  position: relative;
+  width: 210mm;
+  max-width: 100%;
+  margin: 16px auto;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0;
+}
+.print-form-paper.is-landscape { width: 297mm; }
+.print-form-img { width: 100%; display: block; }
+.pf-field {
+  position: absolute;
+  white-space: pre-wrap;
+  line-height: 1.2;
+  color: #000;
+}
+.pf-manual {
+  min-width: 40px;
+  border-bottom: 1px dotted #1d4ed8;
+  background: rgba(254, 240, 138, 0.5);
+}
+
+@media print {
+  /* 帳票印刷時は用紙オーバーレイ以外を全て隠す */
+  body.printing-form > :not(.print-form-overlay) { display: none !important; }
+  body.printing-form .print-form-overlay {
+    position: static;
+    overflow: visible;
+    padding: 0;
+    background: #fff;
+  }
+  body.printing-form .print-form-bar { display: none !important; }
+  body.printing-form .print-form-paper {
+    width: 100%;
+    margin: 0;
+    box-shadow: none;
+  }
+  body.printing-form .pf-manual { background: transparent; border-bottom: none; }
+  body.printing-form .print-form-img {
+    width: 100%;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* =====================================================================
  * 通知センター（最近の動き・アラート）
  * ===================================================================== */
 
