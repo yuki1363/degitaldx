@@ -320,6 +320,25 @@ async function renderList() {
     },
   }, '全部品');
 
+  // 設備台帳にあって部品が未登録の設備をプレースホルダーとして一括追加する
+  const importFromEquipment = async (btn) => {
+    if (!confirm('設備台帳にある設備のうち、まだ部品が1件も登録されていないものを\nプレースホルダーとして追加します。よろしいですか？\n（追加後に部品名・型番などを個別に編集してください）')) return;
+    btn.disabled = true;
+    btn.textContent = '登録中…';
+    try {
+      const res = await api.post('/api/parts/import-from-equipment', {});
+      alert(res.created > 0
+        ? `${res.created}件の設備のプレースホルダーを追加しました。\n部品名・型番などを各編集画面から登録してください。`
+        : (res.message || '新規に追加する設備はありませんでした。'));
+      await load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📥 台帳から一括登録';
+    }
+  };
+
   render(app, [
     el('div', { class: 'field-pair', style: 'margin-bottom:10px' }, [
       el('div', { class: 'field' }, [
@@ -339,6 +358,7 @@ async function renderList() {
       ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
           el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 部品を追加'),
           el('button', { class: 'btn', onclick: () => go('?import=1') }, '📥 CSVインポート'),
+          el('button', { class: 'btn', onclick: (e) => importFromEquipment(e.currentTarget) }, '📥 台帳から一括登録'),
         ])
       : null,
     listBox,
