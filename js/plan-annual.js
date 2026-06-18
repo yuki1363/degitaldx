@@ -11,6 +11,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
+import { renderPlanImport } from '/js/plan-import.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -397,7 +398,15 @@ function typeLabel() {
   return typeFilter ? PLAN_TYPES[typeFilter].label : '全種別';
 }
 
-// CSVは年間表（行=タスク／列=12ヶ月）を出力。種別フィルターを反映
+// 月セルの完了状態テキスト（CSV出力用）。完了／未実施／期限超過、複数件は「N件(状態)」
+function monthCellText(list) {
+  const s = summarizeMonth(list);
+  if (s.empty) return '';
+  const label = s.done ? '完了' : s.overdue ? '期限超過' : '未実施';
+  return s.count > 1 ? `${s.count}件(${label})` : label;
+}
+
+// CSVは年間表（行=タスク／列=12ヶ月）を出力。種別フィルターを反映し、各月の完了状態を含める
 function exportCsv(rows, enc) {
   if (rows.length === 0) { alert('出力対象がありません。'); return; }
   const columns = [
@@ -406,8 +415,8 @@ function exportCsv(rows, enc) {
     { label: '設備', value: (r) => [r.line_name, r.equipment_name].filter(Boolean).join(' ') },
     { label: '点検者', value: (r) => r.inspector_name || '' },
     { label: '担当者', value: (r) => r.assignee_name || '' },
-    { label: '未定', value: (r) => summarizeMonth(r.unscheduledList).text },
-    ...MONTHS.map((m) => ({ label: `${m}月`, value: (r) => summarizeMonth(r.months.get(m)).text })),
+    { label: '未定', value: (r) => monthCellText(r.unscheduledList) },
+    ...MONTHS.map((m) => ({ label: `${m}月`, value: (r) => monthCellText(r.months.get(m)) })),
   ];
   const text = buildCsvText(rows, columns);
   downloadCsv(`annual_plan_${year}_${typeFilter || 'all'}.csv`, text, enc);
@@ -463,6 +472,9 @@ function toolbar() {
       // クリック時点の絞り込み結果で出力（検索中に再描画しても最新を反映）
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'UTF-8') }, '📥 CSV'),
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'sjis') }, '📥 CSV(Excel)'),
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn btn-sm', onclick: () => renderPlanImport(year, () => renderYear()) }, '📤 CSV取込')
+        : null,
     ]),
   ]);
 }
