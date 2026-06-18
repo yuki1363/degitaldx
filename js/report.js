@@ -34,8 +34,8 @@ async function renderList() {
 
   let filterCategory = '';
   let filterReporter = '';
-  let filterFrom     = '';
-  let filterTo       = '';
+  let filterFrom     = todayStr();
+  let filterTo       = todayStr();
   let reporterTimer  = null;
   const listBox = el('div', { class: 'row-list' }, []);
 
@@ -100,8 +100,8 @@ async function renderList() {
       reporterTimer = setTimeout(() => { filterReporter = v; load().catch(showError); }, 300);
     },
   });
-  const fromIn = el('input', { type: 'date', onchange: (e) => { filterFrom = e.target.value; load().catch(showError); } });
-  const toIn   = el('input', { type: 'date', onchange: (e) => { filterTo   = e.target.value; load().catch(showError); } });
+  const fromIn = el('input', { type: 'date', value: filterFrom, onchange: (e) => { filterFrom = e.target.value; load().catch(showError); } });
+  const toIn   = el('input', { type: 'date', value: filterTo,   onchange: (e) => { filterTo   = e.target.value; load().catch(showError); } });
 
   render(app, [
     el('div', { class: 'filter-bar' }, [catSel, reporterIn]),
