@@ -194,6 +194,25 @@ async function renderList() {
     }
   };
 
+  // INV以外の設備番号を INV-xxx に一括振り直し（管理者のみ）
+  const renumberEquipment = async (btn) => {
+    if (!confirm('INV以外の設備番号をすべて INV-xxx 形式に振り直します。\n既存のINV番号はそのまま維持され、続きの番号が付与されます。\nよろしいですか？')) return;
+    btn.disabled = true;
+    btn.textContent = '処理中…';
+    try {
+      const res = await api.post('/api/equipment/renumber', {});
+      alert(res.updated > 0
+        ? `${res.updated}件の設備番号を INV-xxx 形式に更新しました。`
+        : (res.message || 'INV以外の設備番号は見つかりませんでした。'));
+      await load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔢 設備番号を一括付与';
+    }
+  };
+
   render(app, [
     el('div', { class: 'field-pair', style: 'margin-bottom:10px' }, [
       el('div', { class: 'field' }, [el('label', {}, '設備名で絞り込み'), lineSelect]),
@@ -206,6 +225,9 @@ async function renderList() {
         : null,
       hasRole(currentUser, 'editor')
         ? el('button', { class: 'btn', onclick: (e) => importFromParts(e.currentTarget) }, '📥 在庫から一括登録')
+        : null,
+      hasRole(currentUser, 'admin')
+        ? el('button', { class: 'btn', onclick: (e) => renumberEquipment(e.currentTarget) }, '🔢 設備番号を一括付与')
         : null,
       el('button', { class: 'btn', onclick: openQrScanner }, '📷 QRスキャン'),
       el('a', { class: 'btn', href: '/pages/labels' }, '🖨 ラベル一括印刷'),
@@ -517,7 +539,10 @@ function field(label, input) {
 async function renderForm(existing) {
   // 設備名・機器名は全機能で共有の候補（在庫＋設備台帳）からカスケード入力する。
   // 旧データ（line_name 未設定で name のみ）の編集時は name を設備名の初期値に流用する。
-  const names = await fetchEquipNames();
+  const [names, nextCodeRes] = await Promise.all([
+    fetchEquipNames(),
+    existing ? Promise.resolve(null) : api.get('/api/equipment/next-code').catch(() => null),
+  ]);
   const cascade = buildEquipCascade(names, {
     line: existing?.line_name || existing?.name || '',
     equip: existing?.equipment_name || '',
@@ -525,7 +550,7 @@ async function renderForm(existing) {
   });
 
   const f = {
-    code: el('input', { type: 'text', value: existing ? existing.code : '', placeholder: '例: CP-001' }),
+    code: el('input', { type: 'text', value: existing ? existing.code : (nextCodeRes?.code || ''), placeholder: 'INV-001' }),
     location: el('input', { type: 'text', value: existing?.location || '', placeholder: '例: 第1工場' }),
     manufacturer: el('input', { type: 'text', value: existing?.manufacturer || '' }),
     model: el('input', { type: 'text', value: existing?.model || '' }),

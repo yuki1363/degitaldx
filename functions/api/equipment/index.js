@@ -27,7 +27,7 @@ export function parseEquipmentInput(body) {
   if (!name) name = [lineName, equipmentName].filter(Boolean).join(' ');
   name = name.slice(0, 100);
 
-  if (!code) return { error: '設備番号（code）は必須です。' };
+  // code の必須チェックは POST 側で auto-generate できるため省略可（PUT は呼び出し元でチェック）
   if (!name) return { error: '設備名は必須です。' };
   if (code.length > 50) return { error: '設備番号は50文字以内で入力してください。' };
 
@@ -97,6 +97,16 @@ export async function onRequestPost({ request, env, data }) {
   const parsed = parseEquipmentInput(await readJson(request));
   if (parsed.error) return jsonError(400, parsed.error);
   const v = parsed.value;
+
+  // code が空なら次の INV-xxx を自動生成
+  if (!v.code) {
+    const { results } = await env.DB.prepare(
+      `SELECT MAX(CAST(REPLACE(code, 'INV-', '') AS INTEGER)) AS max_num
+       FROM equipment_ledger WHERE code LIKE 'INV-%'`
+    ).all();
+    const maxNum = results?.[0]?.max_num || 0;
+    v.code = `INV-${String(maxNum + 1).padStart(3, '0')}`;
+  }
 
   // 設備番号の重複チェック（論理削除済みも含めて一意 = UNIQUE 制約と整合）
   const dup = await env.DB.prepare('SELECT id FROM equipment_ledger WHERE code = ?1')

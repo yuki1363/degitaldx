@@ -159,6 +159,7 @@ export async function onRequestPut({ request, env, data, params }) {
   const parsed = parseEquipmentInput(await readJson(request));
   if (parsed.error) return jsonError(400, parsed.error);
   const v = parsed.value;
+  if (!v.code) return jsonError(400, '設備番号（code）は必須です。');
 
   if (v.code !== existing.code) {
     const dup = await env.DB.prepare('SELECT id FROM equipment_ledger WHERE code = ?1 AND id != ?2')
