@@ -196,22 +196,22 @@ async function renderList() {
     }
   };
 
-  // INV以外の設備番号を INV-xxx に一括振り直し（管理者のみ）
+  // 設備番号を「設備ごとの連番（NN-MM）」に振り直し（管理者のみ）
   const renumberEquipment = async (btn) => {
-    if (!confirm('INV以外の設備番号をすべて INV-xxx 形式に振り直します。\n既存のINV番号はそのまま維持され、続きの番号が付与されます。\nよろしいですか？')) return;
+    if (!confirm('すべての設備番号を、設備ごとにまとまる連番（例 01-01, 01-02 / 02-01）に振り直します。\n同じ設備の機器が連続した番号になります。既存の番号も変わります。\nよろしいですか？')) return;
     btn.disabled = true;
     btn.textContent = '処理中…';
     try {
       const res = await api.post('/api/equipment/renumber', {});
       alert(res.updated > 0
-        ? `${res.updated}件の設備番号を INV-xxx 形式に更新しました。`
-        : (res.message || 'INV以外の設備番号は見つかりませんでした。'));
+        ? `${res.updated}件の設備番号を設備ごとの連番に更新しました。`
+        : (res.message || '対象の設備がありませんでした。'));
       await load();
     } catch (err) {
       alert(err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = '🔢 設備番号を一括付与';
+      btn.textContent = '🔢 設備番号を振り直し';
     }
   };
 
@@ -229,7 +229,7 @@ async function renderList() {
         ? el('button', { class: 'btn', onclick: (e) => importFromParts(e.currentTarget) }, '📥 在庫から一括登録')
         : null,
       hasRole(currentUser, 'admin')
-        ? el('button', { class: 'btn', onclick: (e) => renumberEquipment(e.currentTarget) }, '🔢 設備番号を一括付与')
+        ? el('button', { class: 'btn', onclick: (e) => renumberEquipment(e.currentTarget) }, '🔢 設備番号を振り直し')
         : null,
       el('button', { class: 'btn', onclick: openQrScanner }, '📷 QRスキャン'),
       el('a', { class: 'btn', href: '/pages/labels' }, '🖨 ラベル一括印刷'),
@@ -541,9 +541,11 @@ function field(label, input) {
 async function renderForm(existing) {
   // 設備名・機器名は全機能で共有の候補（在庫＋設備台帳）からカスケード入力する。
   // 旧データ（line_name 未設定で name のみ）の編集時は name を設備名の初期値に流用する。
+  const initialLine = existing?.line_name || existing?.name || '';
   const [names, nextCodeRes] = await Promise.all([
     fetchEquipNames(),
-    existing ? Promise.resolve(null) : api.get('/api/equipment/next-code').catch(() => null),
+    existing ? Promise.resolve(null)
+      : api.get(`/api/equipment/next-code?line_name=${encodeURIComponent(initialLine)}`).catch(() => null),
   ]);
   const cascade = buildEquipCascade(names, {
     line: existing?.line_name || existing?.name || '',
@@ -552,7 +554,7 @@ async function renderForm(existing) {
   });
 
   const f = {
-    code: el('input', { type: 'text', value: existing ? existing.code : (nextCodeRes?.code || ''), placeholder: 'INV-001' }),
+    code: el('input', { type: 'text', value: existing ? existing.code : (nextCodeRes?.code || ''), placeholder: '空欄で自動採番（例 01-01）' }),
     location: el('input', { type: 'text', value: existing?.location || '', placeholder: '例: 第1工場' }),
     manufacturer: el('input', { type: 'text', value: existing?.manufacturer || '' }),
     model: el('input', { type: 'text', value: existing?.model || '' }),
@@ -567,10 +569,24 @@ async function renderForm(existing) {
     note: el('textarea', { value: existing?.note || '' }),
   };
 
+  // 新規時は設備名に応じて設備番号を自動採番する（手入力されたら以後は上書きしない）
+  let codeEdited = false;
+  if (!existing) {
+    f.code.addEventListener('input', () => { codeEdited = true; });
+    cascade.lineInput.addEventListener('change', async () => {
+      if (codeEdited) return;
+      try {
+        const r = await api.get(`/api/equipment/next-code?line_name=${encodeURIComponent(cascade.lineInput.value.trim())}`);
+        if (!codeEdited) f.code.value = r.code;
+      } catch { /* 採番取得に失敗しても入力は続行できる */ }
+    });
+  }
+
   const save = async () => {
     // 表示名(name)はサーバー側で「設備名＋機器名」から自動生成する
     const body = {
-      code: f.code.value.trim(),
+      // 新規でコードを手入力していなければ空で送り、サーバー側で設備ごとの連番を採番する
+      code: (!existing && !codeEdited) ? '' : f.code.value.trim(),
       line_name: cascade.lineInput.value.trim() || null,
       equipment_name: cascade.equipInput.value.trim() || null,
       location: f.location.value.trim(),
@@ -582,8 +598,8 @@ async function renderForm(existing) {
       status: f.status.value,
       note: f.note.value.trim(),
     };
-    if (!body.code) { alert('設備番号は必須です。'); return; }
     if (!body.line_name) { alert('設備名は必須です。'); return; }
+    if (existing && !body.code) { alert('設備番号は必須です。'); return; }
     try {
       if (existing) {
         await api.put(`/api/equipment/${existing.id}`, body);
@@ -600,7 +616,7 @@ async function renderForm(existing) {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '設備を編集' : '設備を追加'),
-      field('設備番号（必須・QRラベルに使用）', f.code),
+      field('設備番号（QRラベルに使用・新規は空欄で自動採番）', f.code),
       field('設備名（必須・在庫/台帳から選択 or 自由入力）', cascade.lineInput),
       cascade.lineDatalist,
       field('機器名（設備名を選ぶと候補表示）', cascade.equipInput),

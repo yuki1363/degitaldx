@@ -1,12 +1,11 @@
-// GET /api/equipment/next-code — 次の設備番号（INV-xxx）を返す
+// GET /api/equipment/next-code?line_name=... — 次の設備番号（設備ごとの連番 NN-MM）を返す
+//   line_name を渡すと、その設備の続き番号を返す（新しい設備なら新しい設備番号で MM=01）
 import { json } from '../_lib/http.js';
+import { computeNextEquipmentCode } from './index.js';
 
-export async function onRequestGet({ env }) {
-  const { results } = await env.DB.prepare(
-    `SELECT MAX(CAST(REPLACE(code, 'INV-', '') AS INTEGER)) AS max_num
-     FROM equipment_ledger WHERE code LIKE 'INV-%'`
-  ).all();
-  const maxNum = results?.[0]?.max_num || 0;
-  const nextNum = maxNum + 1;
-  return json({ code: `INV-${String(nextNum).padStart(3, '0')}` });
+export async function onRequestGet({ request, env }) {
+  const url = new URL(request.url);
+  const lineName = (url.searchParams.get('line_name') || '').trim() || null;
+  const code = await computeNextEquipmentCode(env.DB, lineName);
+  return json({ code });
 }

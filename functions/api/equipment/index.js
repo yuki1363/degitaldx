@@ -61,6 +61,40 @@ export function parseEquipmentInput(body) {
   };
 }
 
+const EQ_CODE_RE = /^(\d+)-(\d+)$/;
+
+/**
+ * 設備（line_name）ごとの連番コード「NN-MM」を採番する。
+ *   - 同じ設備に既存の機器があれば、その設備番号(NN)の続き番号(MM)を付ける
+ *   - 新しい設備なら、設備番号(NN)を「最大+1」にして MM=01 から始める
+ * UNIQUE 制約（論理削除済みも対象）と衝突しないよう、MM は同一設備の全行の最大+1 にする。
+ */
+export async function computeNextEquipmentCode(db, lineName) {
+  const { results } = await db.prepare(
+    'SELECT code, line_name, deleted_at FROM equipment_ledger'
+  ).all();
+
+  let maxSetubi = 0;
+  const maxKikiBySetubi = new Map();   // 設備番号NN -> その設備の最大 機器番号MM（全行・削除含む）
+  let setubiOfLine = null;             // 指定 line_name の既存 設備番号（有効行から）
+
+  for (const r of results || []) {
+    const m = EQ_CODE_RE.exec(r.code || '');
+    if (!m) continue;
+    const nn = Number(m[1]);
+    const mm = Number(m[2]);
+    if (nn > maxSetubi) maxSetubi = nn;
+    if (mm > (maxKikiBySetubi.get(nn) || 0)) maxKikiBySetubi.set(nn, mm);
+    if (!r.deleted_at && lineName && (r.line_name || '') === lineName) {
+      setubiOfLine = setubiOfLine === null ? nn : Math.min(setubiOfLine, nn);
+    }
+  }
+
+  const nn = setubiOfLine !== null ? setubiOfLine : maxSetubi + 1;
+  const mm = (maxKikiBySetubi.get(nn) || 0) + 1;
+  return `${String(nn).padStart(2, '0')}-${String(mm).padStart(2, '0')}`;
+}
+
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const q = (url.searchParams.get('q') || '').trim();
@@ -114,14 +148,9 @@ export async function onRequestPost({ request, env, data }) {
   if (parsed.error) return jsonError(400, parsed.error);
   const v = parsed.value;
 
-  // code が空なら次の INV-xxx を自動生成
+  // code が空なら設備（line_name）ごとの連番を自動採番する
   if (!v.code) {
-    const { results } = await env.DB.prepare(
-      `SELECT MAX(CAST(REPLACE(code, 'INV-', '') AS INTEGER)) AS max_num
-       FROM equipment_ledger WHERE code LIKE 'INV-%'`
-    ).all();
-    const maxNum = results?.[0]?.max_num || 0;
-    v.code = `INV-${String(maxNum + 1).padStart(3, '0')}`;
+    v.code = await computeNextEquipmentCode(env.DB, v.line_name);
   }
 
   // 設備番号の重複チェック（論理削除済みも含めて一意 = UNIQUE 制約と整合）
