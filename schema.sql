@@ -682,12 +682,14 @@ UPDATE maintenance_plan
    AND planned_end_date IS NULL
    AND substr(planned_date, 9, 2) = '01';
 
--- 通知（notifications）: 古いスキーマで作成されたDBに acknowledged カラムが
--- 存在しない場合のマイグレーション。SQLite 3.37+ の IF NOT EXISTS を使用。
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by TEXT;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_at TEXT;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_by      TEXT;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at      TEXT;
+-- 通知（notifications）: acknowledged_by/at・updated_by/at は上の CREATE TABLE に
+-- 定義済みのため、新規DBでは ALTER 不要（以前ここにあった ADD COLUMN IF NOT EXISTS は
+-- SQLite/D1 で構文エラーになる無効な記述だったため削除）。
+-- 旧DBで列が無い場合のみ、手動で次を一度だけ実行する:
+--   ALTER TABLE notifications ADD COLUMN acknowledged_by TEXT;
+--   ALTER TABLE notifications ADD COLUMN acknowledged_at TEXT;
+--   ALTER TABLE notifications ADD COLUMN updated_by TEXT;
+--   ALTER TABLE notifications ADD COLUMN updated_at TEXT;
 
 -- ---------------------------------------------------------------------
 -- print_templates — 帳票テンプレート（工事連絡書・トラブル報告書）
@@ -723,5 +725,7 @@ CREATE INDEX IF NOT EXISTS idx_print_templates_type
 --   論理削除（deleted_at）= 一覧から隠すだけで R2 には残り使用量に含まれる。
 --   物理削除（purged_at）= R2 オブジェクトを実際に削除し、容量集計から除外する（解放）。
 --   管理画面「ファイル容量」から admin が個別に実行する。物理削除は復元不可。
-ALTER TABLE files ADD COLUMN IF NOT EXISTS purged_at TEXT;
-ALTER TABLE files ADD COLUMN IF NOT EXISTS purged_by TEXT;
+-- ※ SQLite/D1 は ADD COLUMN に IF NOT EXISTS を付けられない（near "EXISTS" 構文エラー）。
+--   このマイグレーションは列が無いDBに対して一度だけ実行する（既存列があれば重複エラー）。
+ALTER TABLE files ADD COLUMN purged_at TEXT;
+ALTER TABLE files ADD COLUMN purged_by TEXT;
