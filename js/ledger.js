@@ -80,7 +80,9 @@ async function renderList() {
     ]);
   };
 
-  // 設備名→機器名でグループ化して描画
+  // 設備名→機器名でグループ化して描画（設備名順→機器名順→設備番号順で並べる）
+  const groupCollator = new Intl.Collator('ja', { numeric: true });
+  const byName = (a, b) => (!a ? 1 : !b ? -1 : groupCollator.compare(a, b));
   const renderGroups = (list) => {
     if (list.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '該当する設備がありません。'));
@@ -96,9 +98,11 @@ async function renderList() {
       em.get(equip).push(eq);
     }
     const nodes = [];
-    for (const [line, em] of lineMap) {
+    for (const line of [...lineMap.keys()].sort(byName)) {
+      const em = lineMap.get(line);
       nodes.push(el('div', { class: 'group-header-line' }, line || '（設備名なし）'));
-      for (const [equip, items] of em) {
+      for (const equip of [...em.keys()].sort(byName)) {
+        const items = em.get(equip).slice().sort((a, b) => groupCollator.compare(a.code || '', b.code || ''));
         nodes.push(el('div', { class: 'group-header-equip' }, equip || '（機器名なし）'));
         nodes.push(el('div', { class: 'row-list' }, items.map(makeRow)));
       }

@@ -1,6 +1,6 @@
 // POST /api/equipment/renumber — 管理者専用: 設備番号を「設備ごとの連番 NN-MM」に振り直す
-//   設備（line_name）を最初の登録順（min id）で 01,02,… に採番し、各設備の機器を
-//   登録順（id）で 01,02,… の機器番号にする。例: 設備1=01-01,01-02 / 設備2=02-01。
+//   設備（line_name）を設備名順で 01,02,… に採番し、各設備の機器を機器名順（同名はid順）で
+//   01,02,… の機器番号にする。一覧の並び（設備名→機器名）と番号を一致させる。例: 設備1=01-01,01-02。
 //   UNIQUE 制約（論理削除済みも対象）と衝突しないよう、二段階更新＋削除済みコード退避を行う。
 import { json } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
@@ -27,19 +27,26 @@ export async function onRequestPost({ env, data }) {
     return json({ updated: 0, message: '設備が登録されていません。' });
   }
 
-  // 設備（line_name）を「最初に登録された順」で並べ、機器を id 順でまとめる
-  const order = [];                     // line_name の出現順
-  const byLine = new Map();             // line_name -> [eq...]（id順）
+  // 機器を設備（line_name）ごとにまとめる
+  const byLine = new Map();             // line_name -> [eq...]
   for (const eq of active) {
     const key = eq.line_name || '';
-    if (!byLine.has(key)) { byLine.set(key, []); order.push(key); }
+    if (!byLine.has(key)) byLine.set(key, []);
     byLine.get(key).push(eq);
   }
 
-  // 最終コード NN-MM を計算（設備=出現順, 機器=id順）
+  // 設備=設備名順（空は末尾）、機器=機器名順（同名はid順）で NN-MM を割り当てる
+  const collator = new Intl.Collator('ja', { numeric: true });
+  const nameCmp = (a, b) => (!a ? 1 : !b ? -1 : collator.compare(a, b));
+  const order = [...byLine.keys()].sort(nameCmp);
+
   const finalCode = new Map();          // id -> "NN-MM"
   order.forEach((line, i) => {
-    byLine.get(line).forEach((eq, j) => finalCode.set(eq.id, `${pad(i + 1)}-${pad(j + 1)}`));
+    const machines = byLine.get(line).slice().sort((a, b) => {
+      const c = nameCmp(a.equipment_name || '', b.equipment_name || '');
+      return c !== 0 ? c : a.id - b.id;
+    });
+    machines.forEach((eq, j) => finalCode.set(eq.id, `${pad(i + 1)}-${pad(j + 1)}`));
   });
 
   // 削除済みで NN-MM 形式のコードは退避（有効設備の最終コードと衝突しないように）
