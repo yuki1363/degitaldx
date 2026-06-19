@@ -9,7 +9,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
-import { openPrintDialog } from '/js/print-form.js';
+import { openExcelExport } from '/js/excel-fill.js';
 
 const PLAN_TYPES = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -366,7 +366,7 @@ async function renderDetail(id, fromAnnual = false) {
               }, '✓ 完了にする')
             : null,
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}${fromAnnual ? '&from=annual' : ''}`) }, '編集'),
-          el('button', { class: 'btn', onclick: () => openPrintDialog('construction_notice', plan) }, '🖨 帳票印刷'),
+          el('button', { class: 'btn', onclick: () => openExcelExport('construction_notice', plan) }, '📄 帳票(Excel)出力'),
           el('button', {
             class: 'btn btn-danger',
             onclick: async () => {

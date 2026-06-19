@@ -11,7 +11,7 @@ import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_
 import { buildCommentsCard } from '/js/comments.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
-import { openPrintDialog } from '/js/print-form.js';
+import { openExcelExport } from '/js/excel-fill.js';
 
 // CSV出力の列定義（トラブル履歴）
 const CSV_COLUMNS = [
@@ -261,7 +261,7 @@ async function renderDetail(id) {
             return el('a', { class: 'btn', href: `/pages/report?${q}` }, '📝 日報に記録');
           })(),
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}`) }, '編集'),
-          el('button', { class: 'btn', onclick: () => openPrintDialog('trouble_report', trouble) }, '🖨 帳票印刷'),
+          el('button', { class: 'btn', onclick: () => openExcelExport('trouble_report', trouble) }, '📄 帳票(Excel)出力'),
           el('button', {
             class: 'btn btn-danger',
             onclick: async () => {

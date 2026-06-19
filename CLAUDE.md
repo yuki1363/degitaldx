@@ -91,7 +91,7 @@
 - 予定の登録・編集・削除が可能。**担当者・登録者・削除者を記録**（共通監査設計）
 - 予定から点検実施画面（02）へワンタップで遷移
 - **年間計画表のCSV取込・出力**: 行=タスク／列=12ヶ月の表形式でCSV入出力。出力は各月の完了状態（完了／未実施／期限超過）を含む。取込は同形式を `/api/plans/batch` で一括登録（`js/plan-import.js`）
-- **帳票印刷（工事連絡書）**: 計画詳細から、管理者が登録した用紙テンプレートにデータを差し込んで印刷できる（後述「帳票テンプレート」）
+- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）
 **テーブル**: `maintenance_plan`（id, equipment_id, plan_type[inspection/parts/construction/other], title, planned_date, recurrence_rule, assignee_id, status, +共通監査列）
 ### 02. 点検実施（スマホ入力・報告）
 - 点検項目をチェックリスト形式で表示し、スマホから簡単入力（OK/NG/数値/選択式）
@@ -114,7 +114,7 @@
 - カスタマイズ可能なトラブル記録帳票（管理者が入力項目を追加・削除できるフォームビルダー。定義変更は `master_history` で復元可能）
 - 設備台帳（06）・点検結果（02）との紐づけ
 - 記録の登録・編集・削除と監査記録（共通設計）
-- **帳票印刷（トラブル報告書）**: 記録詳細から、管理者が登録した用紙テンプレートにデータを差し込んで印刷できる（後述「帳票テンプレート」）
+- **帳票出力（トラブル報告書）**: 記録詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（後述「帳票テンプレート」）
 **テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, +監査列）、`trouble_category`（ジャンルマスタ）
 ### 05. 部品在庫管理（PowerAppsからのデータ移行あり）
 - 使用部品を記録すると在庫に自動反映。+/−ボタンでワンタップ更新
@@ -150,7 +150,7 @@
 - マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**
 - `audit_log` の閲覧画面（誰がいつ何を追加・編集・削除したかを検索）
 - 削除済みデータの閲覧・復元（論理削除の復元）
-- **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。既存Excel用紙を画像化してアップロード（R2・`/api/files`）し、その上にデータ差込欄（差込／印刷日／手入力／固定文字）をドラッグで配置する。印刷は各詳細画面から `window.print()` で用紙画像にデータを重ねて出力（手入力欄は印刷前に記入可）。管理は admin、印刷は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）
+- **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation/fields_json は未使用）
 **テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
 ### 10. チャット / コメント
 - トラブル・点検・修理の各レコードにコメントスレッド

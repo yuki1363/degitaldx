@@ -22,6 +22,9 @@ export const FILE_RULES = {
   'video/mp4': { exts: ['.mp4'], maxBytes: 100 * 1024 * 1024, label: '動画' },
   'video/quicktime': { exts: ['.mov'], maxBytes: 100 * 1024 * 1024, label: '動画' },
   'application/pdf': { exts: ['.pdf'], maxBytes: 20 * 1024 * 1024, label: 'PDF' },
+  // 帳票テンプレート用 Excel（差込タグ入りの用紙）
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+    { exts: ['.xlsx'], maxBytes: 10 * 1024 * 1024, label: 'Excel' },
 };
 
 // 添付先として許可するテーブル名（各機能の実装フェーズで使用）
