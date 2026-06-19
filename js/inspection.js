@@ -74,9 +74,7 @@ async function renderList(presetEquipmentId) {
     );
   };
 
-  equipmentSelect.addEventListener('change', () => load().catch(showError));
-  fromInput.addEventListener('change', () => load().catch(showError));
-  toInput.addEventListener('change', () => load().catch(showError));
+  const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
 
   render(app, [
     el('div', { class: 'toolbar' }, [
@@ -91,10 +89,17 @@ async function renderList(presetEquipmentId) {
         el('div', { class: 'field' }, [el('label', {}, '開始日'), fromInput]),
         el('div', { class: 'field' }, [el('label', {}, '終了日'), toInput]),
       ]),
+      el('div', { class: 'action-row' }, [searchBtn]),
     ]),
     listBox,
   ]);
-  await load();
+
+  // 検索するまではデータを表示しない（設備を指定して遷移してきた場合のみ自動検索）
+  if (presetEquipmentId) {
+    await load();
+  } else {
+    render(listBox, el('p', { class: 'empty' }, '🔍 設備や期間を指定して「検索」を押してください。'));
+  }
 }
 
 // ---------------- 入力フォーム（新規・編集） ----------------
