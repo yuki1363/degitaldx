@@ -98,12 +98,13 @@ export function el(tag, attrs = {}, children = []) {
   return node;
 }
 
-/** コンテナを空にして子要素を入れ替える */
+/** コンテナを空にして子要素を入れ替える（文字列・数値は textNode に変換して受け付ける） */
 export function render(container, children) {
   container.replaceChildren();
   const list = Array.isArray(children) ? children : [children];
   for (const child of list) {
-    if (child) container.appendChild(child);
+    if (!child) continue;
+    container.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
   }
 }
 
