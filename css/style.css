@@ -1804,6 +1804,34 @@ input.is-abnormal {
   font-family: ui-monospace, monospace;
 }
 
+/* 入力項目エディタの行 */
+.pt-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+.pt-field-row input,
+.pt-field-row select { padding: 4px 6px; font-size: 13px; }
+.pt-field-num { flex: 0 0 22px; text-align: center; font-weight: 700; color: #64748b; }
+.pt-tag-brace { color: #94a3b8; font-family: ui-monospace, monospace; }
+
+/* 出力時の入力フォーム */
+.pf-input-form {
+  margin: 8px 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.pf-input-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+}
+.pf-input-check input { width: 18px; height: 18px; }
+
 /* =====================================================================
  * 通知センター（最近の動き・アラート）
  * ===================================================================== */
