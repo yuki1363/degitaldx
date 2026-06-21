@@ -46,7 +46,7 @@ const cloneDefaults = (type) => (DEFAULT_FIELDS[type] || []).map((f) => ({ ...f 
 
 // 計画/記録から自動で入る差込タグ（種別別）。excel-fill.js の buildValues と対応させる
 const AUTO_TAGS = {
-  construction_notice: ['タイトル', '種別', '予定日', '期間終了日', '開始年', '開始月', '開始日', '終了年', '終了月', '終了日', '日間', '設備名', '機器名', '点検者', '担当者', '状態', '備考', '印刷日'],
+  construction_notice: ['タイトル', '工事作業名称', '種別', '予定日', '期間終了日', '開始年', '開始月', '開始日', '終了年', '終了月', '終了日', '日間', '設備名', '機器名', '点検者', '担当者', '状態', '備考', '印刷日'],
   trouble_report: ['発生日時', '設備番号', '設備名', 'ジャンル', '現象', '原因', '対策', '記録者', '印刷日'],
 };
 
@@ -150,17 +150,25 @@ function showForm(container, existing) {
       : inputFields.map((f, i) => fieldRow(f, i)));
   };
   function fieldRow(f, i) {
-    const tagIn = el('input', { type: 'text', value: f.tag, placeholder: 'タグ名 例: 会社名', style: 'width:140px', onchange: (e) => { f.tag = e.target.value.trim(); } });
-    const labelIn = el('input', { type: 'text', value: f.label, placeholder: 'ラベル 例: 工事業者会社名', style: 'flex:1;min-width:120px', onchange: (e) => { f.label = e.target.value; } });
+    const tagIn = el('input', { type: 'text', value: f.tag, placeholder: 'タグ名 例: 会社名', style: 'width:140px', oninput: (e) => { f.tag = e.target.value; } });
+    const labelIn = el('input', { type: 'text', value: f.label, placeholder: 'ラベル 例: 工事業者会社名', style: 'flex:1;min-width:120px', oninput: (e) => { f.label = e.target.value; } });
     const typeSel = el('select', { onchange: (e) => { f.type = e.target.value; } },
       Object.entries(FIELD_TYPES).map(([v, l]) => el('option', { value: v }, l)));
     typeSel.value = f.type;
+    const move = (d) => {
+      const j = i + d;
+      if (j < 0 || j >= inputFields.length) return;
+      [inputFields[i], inputFields[j]] = [inputFields[j], inputFields[i]];
+      renderFields();
+    };
     return el('div', { class: 'pt-field-row' }, [
       el('span', { class: 'pt-field-num' }, String(i + 1)),
       el('span', { class: 'pt-tag-brace' }, '{{'), tagIn, el('span', { class: 'pt-tag-brace' }, '}}'),
       labelIn,
       typeSel,
-      el('button', { class: 'btn btn-sm btn-danger', onclick: () => { inputFields.splice(i, 1); renderFields(); } }, '×'),
+      el('button', { class: 'btn btn-sm', disabled: i === 0, title: '上へ', onclick: () => move(-1) }, '↑'),
+      el('button', { class: 'btn btn-sm', disabled: i === inputFields.length - 1, title: '下へ', onclick: () => move(1) }, '↓'),
+      el('button', { class: 'btn btn-sm btn-danger', title: '削除', onclick: () => { inputFields.splice(i, 1); renderFields(); } }, '×'),
     ]);
   }
   const addField = () => { inputFields.push({ tag: '', label: '', type: 'text' }); renderFields(); };
@@ -194,7 +202,9 @@ function showForm(container, existing) {
   async function save() {
     const name = nameInput.value.trim();
     if (!name) { alert('テンプレート名は必須です。'); return; }
-    const fields = inputFields.filter((f) => f.tag && f.tag.trim());
+    const fields = inputFields
+      .map((f) => ({ tag: (f.tag || '').trim(), label: f.label || '', type: f.type || 'text' }))
+      .filter((f) => f.tag);
     if (!fileId && !confirm('Excelファイルが未設定です。あとで設定する場合はこのまま保存できます。続けますか？')) return;
     const payload = { name, template_type: templateType, image_file_id: fileId, fields_json: JSON.stringify(fields) };
     try {

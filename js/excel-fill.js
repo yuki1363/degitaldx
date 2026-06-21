@@ -58,6 +58,7 @@ function buildValues(type, r) {
     const de = datePart(r.planned_end_date || r.planned_date);
     return {
       'タイトル': r.title || '',
+      '工事作業名称': r.title || '',
       '種別': PLAN_TYPE_LABELS[r.plan_type] || r.plan_type || '',
       '予定日': formatDate(r.planned_date),
       '期間終了日': formatDate(r.planned_end_date),
