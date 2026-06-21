@@ -13,11 +13,13 @@ import { uploadFile } from '/js/files.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', check: 'チェック(レ点)' };
+const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', time: '時刻', check: 'チェック(レ点)' };
 
 // 種別ごとの標準入力項目（「標準項目を読み込む」で一括投入。後から1つずつ編集・削除できる）
 const DEFAULT_FIELDS = {
   construction_notice: [
+    { tag: '開始時間', label: '開始時間', type: 'time' },
+    { tag: '終了時間', label: '終了時間', type: 'time' },
     { tag: '会社名', label: '工事業者 会社名', type: 'text' },
     { tag: '会社TEL', label: '会社 連絡先TEL', type: 'text' },
     { tag: '責任者', label: '工事業者 責任者', type: 'text' },

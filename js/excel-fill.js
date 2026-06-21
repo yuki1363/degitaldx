@@ -150,6 +150,7 @@ function collectInputs(title, inputFields) {
       let input;
       if (f.type === 'textarea') input = el('textarea', { rows: '2' });
       else if (f.type === 'date') input = el('input', { type: 'date' });
+      else if (f.type === 'time') input = el('input', { type: 'time' });
       else input = el('input', { type: 'text' });
       getters.push(() => [tag, f.type === 'date' ? formatDate(input.value) : (input.value || '')]);
       return el('div', { class: 'field' }, [el('label', {}, f.label || tag), input]);
