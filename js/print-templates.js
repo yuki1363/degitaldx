@@ -15,6 +15,35 @@ const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: '�
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', check: 'チェック(レ点)' };
 
+// 種別ごとの標準入力項目（「標準項目を読み込む」で一括投入。後から1つずつ編集・削除できる）
+const DEFAULT_FIELDS = {
+  construction_notice: [
+    { tag: '会社名', label: '工事業者 会社名', type: 'text' },
+    { tag: '会社TEL', label: '会社 連絡先TEL', type: 'text' },
+    { tag: '責任者', label: '工事業者 責任者', type: 'text' },
+    { tag: '責任者TEL', label: '責任者 連絡先TEL', type: 'text' },
+    { tag: '担当', label: 'シーバイエス担当名', type: 'text' },
+    { tag: '担当TEL', label: '担当 連絡先TEL', type: 'text' },
+    { tag: '内線', label: '担当 内線', type: 'text' },
+    { tag: '工事概要', label: '工事概要', type: 'textarea' },
+    { tag: '高所作業', label: '高所作業', type: 'check' },
+    { tag: '火気使用', label: '火気の使用', type: 'check' },
+    { tag: 'LOTO', label: 'LOTO・エネルギー遮断', type: 'check' },
+    { tag: '閉塞スペース', label: '閉塞スペースで作業', type: 'check' },
+    { tag: '特殊作業', label: 'その他の特殊作業', type: 'check' },
+    { tag: '特殊作業詳細', label: '特殊作業の詳細', type: 'text' },
+    { tag: '設備停止連絡', label: '設備停止の連絡済み', type: 'check' },
+    { tag: 'タンク確認', label: 'タンク内バルク確認', type: 'check' },
+    { tag: '備考', label: '備考', type: 'textarea' },
+  ],
+  trouble_report: [
+    { tag: '確認者', label: '確認者', type: 'text' },
+    { tag: '承認者', label: '承認者', type: 'text' },
+    { tag: '備考', label: '備考', type: 'textarea' },
+  ],
+};
+const cloneDefaults = (type) => (DEFAULT_FIELDS[type] || []).map((f) => ({ ...f }));
+
 // 計画/記録から自動で入る差込タグ（種別別）。excel-fill.js の buildValues と対応させる
 const AUTO_TAGS = {
   construction_notice: ['タイトル', '種別', '予定日', '期間終了日', '開始年', '開始月', '開始日', '終了年', '終了月', '終了日', '日間', '設備名', '機器名', '点検者', '担当者', '状態', '備考', '印刷日'],
@@ -87,16 +116,21 @@ function showForm(container, existing) {
   let templateType = existing?.template_type || 'construction_notice';
   let fileId = existing?.image_file_id || null;
   let fileName = '';
+  // 新規は種別の標準項目を最初から入れておく（編集・削除可）。既存は保存済みを読む
   let inputFields = [];
   try {
-    const parsed = existing ? JSON.parse(existing.fields_json || '[]') : [];
+    const parsed = existing ? JSON.parse(existing.fields_json || '[]') : cloneDefaults(templateType);
     if (Array.isArray(parsed)) inputFields = parsed.map((f) => ({ tag: f.tag || '', label: f.label || '', type: f.type || 'text' }));
   } catch { inputFields = []; }
 
   const nameInput = el('input', { type: 'text', value: existing?.name || '', placeholder: '例: 工事連絡書（標準）' });
 
   const typeSelect = el('select', {
-    onchange: (e) => { templateType = e.target.value; render(autoBox, autoTagHelp(templateType)); },
+    onchange: (e) => {
+      templateType = e.target.value;
+      render(autoBox, autoTagHelp(templateType));
+      if (!existing) { inputFields = cloneDefaults(templateType); renderFields(); } // 新規は種別の標準項目に切替
+    },
   }, Object.entries(TYPE_LABELS).map(([v, l]) => el('option', { value: v }, l)));
   typeSelect.value = templateType;
   if (existing) typeSelect.disabled = true; // 編集時は種別固定
@@ -130,6 +164,13 @@ function showForm(container, existing) {
     ]);
   }
   const addField = () => { inputFields.push({ tag: '', label: '', type: 'text' }); renderFields(); };
+  const loadDefaults = () => {
+    const def = cloneDefaults(templateType);
+    if (!def.length) return;
+    if (inputFields.some((f) => f.tag) && !confirm('現在の入力項目を、標準項目で置き換えますか？')) return;
+    inputFields = def;
+    renderFields();
+  };
   renderFields();
 
   const fileInput = el('input', { type: 'file', accept: '.xlsx', onchange: (e) => onUpload(e.target.files[0]) });
@@ -178,6 +219,7 @@ function showForm(container, existing) {
       fieldsBox,
       el('div', { class: 'action-row', style: 'margin-top:6px' }, [
         el('button', { class: 'btn btn-sm', onclick: addField }, '＋ 入力項目を追加'),
+        DEFAULT_FIELDS[templateType] ? el('button', { class: 'btn btn-sm', onclick: loadDefaults }, '📋 標準項目を読み込む') : null,
       ]),
     ]),
     el('p', { class: 'hint', style: 'margin-top:8px' }, '※ タグはセルに書式を変えずそのまま入力してください（例: A3 セルに {{予定日}}、レ点セルに {{高所作業}}）。'),
