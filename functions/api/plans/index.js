@@ -94,6 +94,20 @@ export async function insertMaintenancePlan(db, cols, vals) {
   throw new Error('予定の登録に失敗しました（列の不一致）。');
 }
 
+// 帳票の入力値（{タグ名:値} のJSON）を検証・正規化する。
+//   戻り値: { value: 文字列|null } または { error }
+export function normalizeFormValues(raw) {
+  if (raw == null || raw === '') return { value: null };
+  if (typeof raw === 'object' && !Array.isArray(raw)) return { value: JSON.stringify(raw) };
+  if (typeof raw === 'string') {
+    try {
+      const o = JSON.parse(raw);
+      if (o && typeof o === 'object' && !Array.isArray(o)) return { value: JSON.stringify(o) };
+    } catch { /* 落ちる */ }
+  }
+  return { error: 'form_values_json が不正です（オブジェクトJSONで指定してください）' };
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
@@ -249,6 +263,10 @@ export async function onRequestPost({ request, env, data }) {
   // annual_only=1（年間計画表の＋追加など）。未マイグレーション環境では
   // insertMaintenancePlan が列を外して再試行する（年間計画表には batch/1日付で復元される）。
   if (annual_only) { cols.push('annual_only'); vals.push(1); }
+  // 帳票の入力値（列が無い旧DBでは insertMaintenancePlan が外して再試行する）
+  const fvj = normalizeFormValues(body.form_values_json);
+  if (fvj.error) return jsonError(400, fvj.error);
+  if (fvj.value != null) { cols.push('form_values_json'); vals.push(fvj.value); }
   cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
   vals.push(userEmail, now, userEmail, now);
 

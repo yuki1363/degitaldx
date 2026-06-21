@@ -388,7 +388,30 @@ function field(label, input) {
 }
 
 async function renderForm(existing, fromAnnual = false) {
-  const names = await fetchEquipNames();
+  const [names, tmplRes] = await Promise.all([
+    fetchEquipNames(),
+    api.get('/api/print-templates').catch(() => ({ templates: [] })),
+  ]);
+  // 工事連絡書テンプレートの「入力項目」をまとめる（同じタグは1つに）。計画ページで入力する欄
+  const permitFields = [];
+  {
+    const seen = new Set();
+    for (const t of (tmplRes.templates || [])) {
+      if (t.template_type !== 'construction_notice') continue;
+      let fs = [];
+      try { fs = JSON.parse(t.fields_json || '[]'); } catch { fs = []; }
+      for (const f of (Array.isArray(fs) ? fs : [])) {
+        if (f && f.tag && !seen.has(f.tag)) {
+          seen.add(f.tag);
+          permitFields.push({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' });
+        }
+      }
+    }
+  }
+  const permitValues = (() => {
+    try { return existing?.form_values_json ? (JSON.parse(existing.form_values_json) || {}) : {}; }
+    catch { return {}; }
+  })();
   const existingRule = (() => {
     try { return existing?.recurrence_rule ? JSON.parse(existing.recurrence_rule) : null; } catch { return null; }
   })();
@@ -469,6 +492,34 @@ async function renderForm(existing, fromAnnual = false) {
     return rule;
   };
 
+  // ---- 帳票（工事連絡許可書）の入力欄。種別=工事のときに表示し、計画に保存する ----
+  const permitBox = el('div', {});
+  const permitInput = (f) => {
+    const cur = permitValues[f.tag] != null ? String(permitValues[f.tag]) : '';
+    if (f.type === 'check') {
+      const cb = el('input', { type: 'checkbox' });
+      cb.checked = cur === '✓';
+      cb.addEventListener('change', () => { permitValues[f.tag] = cb.checked ? '✓' : ''; });
+      return el('label', { class: 'pf-input-check' }, [cb, ` ${f.label}`]);
+    }
+    let input;
+    if (f.type === 'textarea') input = el('textarea', { rows: '2', value: cur });
+    else if (f.type === 'date') input = el('input', { type: 'date', value: cur });
+    else if (f.type === 'time') input = el('input', { type: 'time', value: cur });
+    else input = el('input', { type: 'text', value: cur });
+    input.addEventListener('input', () => { permitValues[f.tag] = input.value; });
+    return el('div', { class: 'field' }, [el('label', {}, f.label), input]);
+  };
+  const renderPermit = () => {
+    if (typeSelect.value !== 'construction' || permitFields.length === 0) { render(permitBox, []); return; }
+    render(permitBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, [
+      el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, '帳票（工事連絡許可書）の入力'),
+      el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます。'),
+      ...permitFields.map(permitInput),
+    ]));
+  };
+  typeSelect.addEventListener('change', renderPermit);
+
   const save = async () => {
     const recRule = buildRecurrenceRule();
     const body = {
@@ -483,6 +534,7 @@ async function renderForm(existing, fromAnnual = false) {
       status: statusSelect.value,
       note: noteInput.value.trim() || null,
       recurrence_rule: recRule,
+      form_values_json: Object.keys(permitValues).length ? JSON.stringify(permitValues) : null,
     };
     if (!body.title) { alert('タイトルは必須です。'); return; }
     if (!fromAnnual && !body.planned_date) { alert('開始日は必須です。'); return; }
@@ -517,6 +569,7 @@ async function renderForm(existing, fromAnnual = false) {
       field('担当者', assigneeInput),
       field('状態', statusSelect),
       field('備考', noteInput),
+      permitBox,
       el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, [
         el('h4', { style: 'margin:0 0 8px;font-size:14px;color:#374151' }, '繰り返し設定'),
         field('繰り返し', freqSelect),
@@ -532,6 +585,7 @@ async function renderForm(existing, fromAnnual = false) {
       ]),
     ]),
   ]);
+  renderPermit();
 }
 
 // ---------------- 起動 ----------------

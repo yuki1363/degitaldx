@@ -729,3 +729,8 @@ CREATE INDEX IF NOT EXISTS idx_print_templates_type
 --   このマイグレーションは列が無いDBに対して一度だけ実行する（既存列があれば重複エラー）。
 ALTER TABLE files ADD COLUMN purged_at TEXT;
 ALTER TABLE files ADD COLUMN purged_by TEXT;
+
+-- maintenance_plan: 帳票（工事連絡許可書など）の入力値を計画に保存する
+--   {タグ名: 値} の JSON。開始時間/終了時間・会社名・許可作業のレ点(✓) などを計画編集で
+--   入力して保存し、帳票出力（js/excel-fill.js）で Excel に差し込む。
+ALTER TABLE maintenance_plan ADD COLUMN form_values_json TEXT;

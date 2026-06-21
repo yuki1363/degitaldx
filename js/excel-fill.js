@@ -231,18 +231,22 @@ export async function openExcelExport(type, record) {
   const template = matches.length === 1 ? matches[0] : await chooseTemplate(matches);
   if (!template) return;
 
-  // テンプレートに定義された入力項目を画面で集める
-  let inputFields = [];
-  try {
-    const parsed = JSON.parse(template.fields_json || '[]');
-    if (Array.isArray(parsed)) inputFields = parsed.filter((f) => f && f.tag);
-  } catch { inputFields = []; }
-
   let inputValues = {};
-  if (inputFields.length > 0) {
-    const collected = await collectInputs(`${TYPE_LABELS[type] || '帳票'}の入力`, inputFields);
-    if (collected === null) return; // キャンセル
-    inputValues = collected;
+  // 計画に保存済みの帳票入力値があれば、それを使う（出力時フォームは出さない）
+  if (record && typeof record.form_values_json === 'string' && record.form_values_json) {
+    try { inputValues = JSON.parse(record.form_values_json) || {}; } catch { inputValues = {}; }
+  } else {
+    // 保存値が無い場合（トラブル報告書・旧データ）は、テンプレートの入力項目をフォームで集める
+    let inputFields = [];
+    try {
+      const parsed = JSON.parse(template.fields_json || '[]');
+      if (Array.isArray(parsed)) inputFields = parsed.filter((f) => f && f.tag);
+    } catch { inputFields = []; }
+    if (inputFields.length > 0) {
+      const collected = await collectInputs(`${TYPE_LABELS[type] || '帳票'}の入力`, inputFields);
+      if (collected === null) return; // キャンセル
+      inputValues = collected;
+    }
   }
 
   try {

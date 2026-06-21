@@ -36,7 +36,6 @@ const DEFAULT_FIELDS = {
     { tag: '特殊作業詳細', label: '特殊作業の詳細', type: 'text' },
     { tag: '設備停止連絡', label: '設備停止の連絡済み', type: 'check' },
     { tag: 'タンク確認', label: 'タンク内バルク確認', type: 'check' },
-    { tag: '備考', label: '備考', type: 'textarea' },
   ],
   trouble_report: [
     { tag: '確認者', label: '確認者', type: 'text' },

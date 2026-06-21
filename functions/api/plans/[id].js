@@ -2,6 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { normalizeFormValues } from './index.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
@@ -95,14 +96,29 @@ export async function onRequestPut({ request, params, env, data }) {
     binds.push(newValue);
   }
 
-  if (setClauses.length === 0) return jsonError(400, '更新するフィールドがありません');
+  if (setClauses.length === 0 && !('form_values_json' in body)) {
+    return jsonError(400, '更新するフィールドがありません');
+  }
 
-  setClauses.push('updated_by = ?', 'updated_at = ?');
-  binds.push(userEmail, now, id);
+  if (setClauses.length > 0) {
+    setClauses.push('updated_by = ?', 'updated_at = ?');
+    binds.push(userEmail, now, id);
+    await db.prepare(`
+      UPDATE maintenance_plan SET ${setClauses.join(', ')} WHERE id = ?
+    `).bind(...binds).run();
+  }
 
-  await db.prepare(`
-    UPDATE maintenance_plan SET ${setClauses.join(', ')} WHERE id = ?
-  `).bind(...binds).run();
+  // 帳票の入力値は別UPDATE（form_values_json 列が無い旧DBでも本体更新が壊れないように）
+  if ('form_values_json' in body) {
+    const fvj = normalizeFormValues(body.form_values_json);
+    if (fvj.error) return jsonError(400, fvj.error);
+    try {
+      await db.prepare('UPDATE maintenance_plan SET form_values_json = ?, updated_by = ?, updated_at = ? WHERE id = ?')
+        .bind(fvj.value, userEmail, now, id).run();
+    } catch (err) {
+      if (!/no such column/i.test(String(err?.message || ''))) throw err;
+    }
+  }
 
   if (Object.keys(diff).length > 0) {
     await writeAuditLog(db, {
