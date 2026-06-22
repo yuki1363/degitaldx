@@ -41,6 +41,8 @@
     <p class="notice is-warning" id="storage-alert" hidden></p>
     <p class="notice is-warning" id="planend-alert" hidden></p>
 
+    <div id="plan-status"></div>
+
     <section class="home-activity" id="home-activity" hidden>
       <div class="home-activity-head">
         <h2 class="home-activity-title">最近の動き</h2>
@@ -123,6 +125,7 @@
     import { getCurrentUser, hasRole, ROLE_LABELS } from '/js/auth.js';
     import { api } from '/js/api.js';
     import { el, render, formatDateTime } from '/js/util.js';
+    import { loadPlanStatusInto } from '/js/plan-summary.js';
 
     // Service Worker 登録（PWA: オフラインでもアプリが起動する）
     if ('serviceWorker' in navigator) {
@@ -149,6 +152,7 @@
       document.getElementById('user-chip').hidden = false;
       showStorageAlertForAdmin(user);
       showMonthEndPlanAlert();
+      loadPlanStatusInto(document.getElementById('plan-status'));
       loadHomeActivity();
       // 管理者のみ管理タイルを有効化
       if (user.role === 'admin') {

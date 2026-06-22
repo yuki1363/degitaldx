@@ -323,7 +323,6 @@ async function renderDetail(id, fromAnnual = false) {
           ? `${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)}`
           : formatDate(plan.planned_date)
       ),
-      infoRow('繰り返し', formatRecurrence(plan.recurrence_rule)),
       infoRow('設備名', plan.line_name),
       infoRow('機器名', plan.equipment_name),
       infoRow('点検者', plan.inspector_name),
@@ -412,9 +411,6 @@ async function renderForm(existing, fromAnnual = false) {
     try { return existing?.form_values_json ? (JSON.parse(existing.form_values_json) || {}) : {}; }
     catch { return {}; }
   })();
-  const existingRule = (() => {
-    try { return existing?.recurrence_rule ? JSON.parse(existing.recurrence_rule) : null; } catch { return null; }
-  })();
 
   const cascade = buildEquipCascade(names, {
     line: existing?.line_name || '',
@@ -446,56 +442,6 @@ async function renderForm(existing, fromAnnual = false) {
     )
   );
   const noteInput    = el('textarea', { value: existing?.note || '' });
-
-  // ---- 繰り返しUI ----
-  const freqOptions = [
-    ['', 'なし（1回のみ）'],
-    ['daily', '毎日'],
-    ['weekly', '毎週'],
-    ['monthly', '毎月'],
-    ['yearly', '毎年'],
-    ['daily_custom', 'N日ごと'],
-  ];
-  // 既存ルールからUI初期値を決定
-  const initFreq = (() => {
-    if (!existingRule) return '';
-    if (existingRule.freq === 'daily' && existingRule.interval > 1) return 'daily_custom';
-    return existingRule.freq || '';
-  })();
-  const initInterval = existingRule?.interval > 1 ? existingRule.interval : 7;
-  const initUntil = existingRule?.until || '';
-
-  const freqSelect = el('select', {},
-    freqOptions.map(([v, l]) => el('option', { value: v, selected: v === initFreq }, l))
-  );
-  const intervalInput = el('input', {
-    type: 'number', min: '2', max: '365', value: String(initInterval), style: 'width:80px',
-  });
-  const untilInput = el('input', { type: 'date', value: initUntil });
-
-  const intervalRow = el('div', { class: 'field-pair', style: 'align-items:center;gap:8px' }, [
-    el('div', { class: 'field' }, [el('label', {}, '間隔'), intervalInput]),
-    el('span', { style: 'padding-top:22px' }, '日ごと'),
-  ]);
-  intervalRow.style.display = initFreq === 'daily_custom' ? '' : 'none';
-
-  freqSelect.addEventListener('change', () => {
-    intervalRow.style.display = freqSelect.value === 'daily_custom' ? '' : 'none';
-  });
-
-  const buildRecurrenceRule = () => {
-    const freq = freqSelect.value;
-    if (!freq) return null;
-    if (freq === 'daily_custom') {
-      const n = parseInt(intervalInput.value, 10) || 2;
-      const rule = { freq: 'daily', interval: n };
-      if (untilInput.value) rule.until = untilInput.value;
-      return rule;
-    }
-    const rule = { freq, interval: 1 };
-    if (untilInput.value) rule.until = untilInput.value;
-    return rule;
-  };
 
   // ---- 帳票（工事連絡許可書）の入力欄。種別=工事のときに表示し、計画に保存する ----
   const permitBox = el('div', {});
@@ -535,7 +481,6 @@ async function renderForm(existing, fromAnnual = false) {
   typeSelect.addEventListener('change', renderPermit);
 
   const save = async () => {
-    const recRule = buildRecurrenceRule();
     const body = {
       title: titleInput.value.trim(),
       plan_type: typeSelect.value,
@@ -547,7 +492,7 @@ async function renderForm(existing, fromAnnual = false) {
       assignee_name: assigneeInput.value.trim() || null,
       status: statusSelect.value,
       note: noteInput.value.trim() || null,
-      recurrence_rule: recRule,
+      recurrence_rule: null,
       form_values_json: Object.keys(permitValues).length ? JSON.stringify(permitValues) : null,
     };
     if (!body.title) { alert('タイトルは必須です。'); return; }
@@ -584,12 +529,6 @@ async function renderForm(existing, fromAnnual = false) {
       field('状態', statusSelect),
       field('備考', noteInput),
       permitBox,
-      el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, [
-        el('h4', { style: 'margin:0 0 8px;font-size:14px;color:#374151' }, '繰り返し設定'),
-        field('繰り返し', freqSelect),
-        intervalRow,
-        field('繰り返し終了日（空欄なら無期限）', untilInput),
-      ]),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', {

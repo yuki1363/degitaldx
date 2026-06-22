@@ -4,6 +4,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
+import { loadPlanStatusInto } from '/js/plan-summary.js';
 
 const app = document.getElementById('app');
 
@@ -378,7 +379,9 @@ async function renderDashboard() {
     }
   };
 
+  const planStatusBox = el('div', { style: 'margin-bottom:8px' });
   render(app, [
+    planStatusBox,
     el('div', { class: 'period-bar' }, [
       el('label', { class: 'filter-label' }, ['FROM ', fromInput]),
       el('label', { class: 'filter-label' }, ['TO ', toInput]),
@@ -388,6 +391,7 @@ async function renderDashboard() {
     tabContent,
   ]);
 
+  loadPlanStatusInto(planStatusBox);
   await loadTab();
 }
 

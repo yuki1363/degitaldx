@@ -1915,6 +1915,24 @@ input.is-abnormal {
   box-shadow: var(--shadow);
 }
 
+/* 保全予定の状況（ホーム/ダッシュボード共通） */
+.plan-sum-head { font-weight: 700; font-size: 13px; color: #374151; }
+.plan-sum-head.is-over { color: #b91c1c; }
+.plan-sum-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  border-bottom: 1px solid #f1f5f9;
+  text-decoration: none;
+  color: inherit;
+  font-size: 13px;
+}
+.plan-sum-date { flex: 0 0 86px; color: #64748b; font-variant-numeric: tabular-nums; }
+.plan-sum-date.is-over { color: #b91c1c; font-weight: 600; }
+.plan-sum-badge { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+.plan-sum-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .home-activity-head {
   display: flex;
   align-items: baseline;
