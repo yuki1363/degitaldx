@@ -66,6 +66,7 @@ function openPlanSheet(plan, monthLabel) {
   const isUnsched = !!plan.unscheduled;
   const actions = [
     { label: '詳細を開く', onClick: () => { window.location.href = `/pages/plan?id=${plan.id}&from=annual`; } },
+    { label: '📝 日時・内容を編集', onClick: () => { window.location.href = `/pages/plan?edit=${plan.id}`; } },
   ];
   if (recurring) {
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
