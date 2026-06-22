@@ -195,8 +195,17 @@ async function fillAndDownload(template, type, record, inputValues) {
     throw new Error('Excel(.xlsx) として読み取れませんでした。管理画面で Excel を登録し直してください。');
   }
 
-  // 自動タグ＋入力タグをマージ（入力タグ優先）
-  const values = { ...buildValues(type, record), ...(inputValues || {}) };
+  // 自動タグ → 定義済み入力項目の「空」既定 → 実際の入力値、の順でマージする。
+  // これで未入力の入力項目も {{タグ}} を残さず空欄になる（自動タグと同名のものは除外）。
+  const auto = buildValues(type, record);
+  const base = { '開始時間': '', '終了時間': '' };
+  try {
+    const fields = JSON.parse(template.fields_json || '[]');
+    if (Array.isArray(fields)) {
+      for (const f of fields) if (f && f.tag && !(f.tag in auto)) base[f.tag] = '';
+    }
+  } catch { /* テンプレ定義が壊れていても続行 */ }
+  const values = { ...auto, ...base, ...(inputValues || {}) };
   const targets = Object.keys(zip.files).filter(
     (p) => p === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(p)
   );
