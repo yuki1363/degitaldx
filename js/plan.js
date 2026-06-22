@@ -433,6 +433,11 @@ async function renderForm(existing, fromAnnual = false) {
   );
   const startInput   = el('input', { type: 'date', value: existing?.planned_date || prefillDate });
   const endInput     = el('input', { type: 'date', value: existing?.planned_end_date || '' });
+  // 開始時間・終了時間は日付の隣に表示し、計画の帳票入力値（form_values_json）に保存する
+  const timeStart = el('input', { type: 'time', value: permitValues['開始時間'] != null ? String(permitValues['開始時間']) : '' });
+  timeStart.addEventListener('input', () => { permitValues['開始時間'] = timeStart.value; });
+  const timeEnd = el('input', { type: 'time', value: permitValues['終了時間'] != null ? String(permitValues['終了時間']) : '' });
+  timeEnd.addEventListener('input', () => { permitValues['終了時間'] = timeEnd.value; });
   const inspectorInput = el('input', { type: 'text', value: existing?.inspector_name || '', placeholder: '点検者名（任意）' });
   const assigneeInput = el('input', { type: 'text', value: existing?.assignee_name || '', placeholder: '担当者名（任意）' });
   const statusSelect = el('select', {},
@@ -508,15 +513,24 @@ async function renderForm(existing, fromAnnual = false) {
     else if (f.type === 'time') input = el('input', { type: 'time', value: cur });
     else input = el('input', { type: 'text', value: cur });
     input.addEventListener('input', () => { permitValues[f.tag] = input.value; });
-    return el('div', { class: 'field' }, [el('label', {}, f.label), input]);
+    return el('div', { class: 'field' + (f.type === 'textarea' ? ' pf-full' : '') }, [el('label', {}, f.label), input]);
   };
   const renderPermit = () => {
     if (typeSelect.value !== 'construction' || permitFields.length === 0) { render(permitBox, []); return; }
-    render(permitBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, [
+    // 開始時間/終了時間は日付の隣に表示済みなので除外。似た項目をまとめて表示する
+    const fields = permitFields.filter((f) => f.tag !== '開始時間' && f.tag !== '終了時間');
+    const inputs = fields.filter((f) => f.type !== 'check');
+    const checks = fields.filter((f) => f.type === 'check');
+    const children = [
       el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, '帳票（工事連絡許可書）の入力'),
       el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます。'),
-      ...permitFields.map(permitInput),
-    ]));
+    ];
+    if (inputs.length) children.push(el('div', { class: 'pf-grid' }, inputs.map(permitInput)));
+    if (checks.length) {
+      children.push(el('div', { class: 'pt-tags-label', style: 'margin:8px 0 4px' }, '許可必要作業（該当をチェック）'));
+      children.push(el('div', { class: 'pf-checklist' }, checks.map(permitInput)));
+    }
+    render(permitBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, children));
   };
   typeSelect.addEventListener('change', renderPermit);
 
@@ -559,8 +573,8 @@ async function renderForm(existing, fromAnnual = false) {
       el('h2', { class: 'card-title' }, existing ? '予定を編集' : '予定を追加'),
       field('タイトル（必須）', titleInput),
       field('種別', typeSelect),
-      fromAnnual ? null : field('開始日（必須）', startInput),
-      fromAnnual ? null : field('終了日（空欄なら1日のみ）', endInput),
+      fromAnnual ? null : el('div', { class: 'field-pair' }, [field('開始日（必須）', startInput), field('開始時間', timeStart)]),
+      fromAnnual ? null : el('div', { class: 'field-pair' }, [field('終了日（空欄なら1日のみ）', endInput), field('終了時間', timeEnd)]),
       field('設備名', cascade.lineInput),
       cascade.lineDatalist,
       field('機器名', cascade.equipInput),

@@ -18,8 +18,6 @@ const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', tim
 // 種別ごとの標準入力項目（「標準項目を読み込む」で一括投入。後から1つずつ編集・削除できる）
 const DEFAULT_FIELDS = {
   construction_notice: [
-    { tag: '開始時間', label: '開始時間', type: 'time' },
-    { tag: '終了時間', label: '終了時間', type: 'time' },
     { tag: '会社名', label: '工事業者 会社名', type: 'text' },
     { tag: '会社TEL', label: '会社 連絡先TEL', type: 'text' },
     { tag: '責任者', label: '工事業者 責任者', type: 'text' },
@@ -47,7 +45,7 @@ const cloneDefaults = (type) => (DEFAULT_FIELDS[type] || []).map((f) => ({ ...f 
 
 // 計画/記録から自動で入る差込タグ（種別別）。excel-fill.js の buildValues と対応させる
 const AUTO_TAGS = {
-  construction_notice: ['タイトル', '工事作業名称', '種別', '予定日', '期間終了日', '開始年', '開始月', '開始日', '終了年', '終了月', '終了日', '日間', '設備名', '機器名', '点検者', '担当者', '状態', '備考', '印刷日'],
+  construction_notice: ['タイトル', '工事作業名称', '種別', '予定日', '期間終了日', '開始年', '開始月', '開始日', '終了年', '終了月', '終了日', '開始時間', '終了時間', '日間', '設備名', '機器名', '点検者', '担当者', '状態', '備考', '印刷日'],
   trouble_report: ['発生日時', '設備番号', '設備名', 'ジャンル', '現象', '原因', '対策', '記録者', '印刷日'],
 };
 

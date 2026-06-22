@@ -1832,6 +1832,23 @@ input.is-abnormal {
 }
 .pf-input-check input { width: 18px; height: 18px; }
 
+/* 帳票入力欄: テキスト系は2列、許可作業はチェックリストでまとめる */
+.pf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+.pf-grid .pf-full { grid-column: 1 / -1; }
+@media (max-width: 520px) {
+  .pf-grid { grid-template-columns: 1fr; }
+}
+.pf-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+.pf-checklist .pf-input-check { padding: 3px 0; }
+
 /* =====================================================================
  * 通知センター（最近の動き・アラート）
  * ===================================================================== */
