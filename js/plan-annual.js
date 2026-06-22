@@ -82,8 +82,9 @@ async function registerToCalendar(plan) {
       status: 'pending',
       note: plan.note || null,
       form_values_json: plan.form_values_json || null,
+      source_plan_id: plan.id, // 完了同期用（このカレンダー予定を完了にすると年間タスクも完了）
     });
-    alert(`カレンダーに登録しました（${d}）。保全計画のカレンダーで確認できます。`);
+    alert(`カレンダーに登録しました（${d}）。完了にすると年間計画のタスクも完了になります。`);
   } catch (err) {
     alert(err.message);
   }

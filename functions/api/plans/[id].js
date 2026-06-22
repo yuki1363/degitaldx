@@ -130,6 +130,27 @@ export async function onRequestPut({ request, params, env, data }) {
     });
   }
 
+  // 同期: カレンダー登録元（年間計画タスク）がある予定を「完了」にしたら、登録元も完了にする
+  if (body.status === 'done' && existing.source_plan_id) {
+    try {
+      const r = await db.prepare(
+        `UPDATE maintenance_plan SET status='done', updated_by=?, updated_at=?
+           WHERE id=? AND deleted_at IS NULL AND status != 'done'`
+      ).bind(userEmail, now, existing.source_plan_id).run();
+      if (r.meta?.changes > 0) {
+        await writeAuditLog(db, {
+          tableName: 'maintenance_plan',
+          recordId: String(existing.source_plan_id),
+          action: 'update',
+          changedBy: userEmail,
+          diff: { status: 'done', synced_from: String(id) },
+        });
+      }
+    } catch (err) {
+      if (!/no such column/i.test(String(err?.message || ''))) throw err;
+    }
+  }
+
   return json({ ok: true });
 }
 

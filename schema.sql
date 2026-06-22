@@ -734,3 +734,7 @@ ALTER TABLE files ADD COLUMN purged_by TEXT;
 --   {タグ名: 値} の JSON。開始時間/終了時間・会社名・許可作業のレ点(✓) などを計画編集で
 --   入力して保存し、帳票出力（js/excel-fill.js）で Excel に差し込む。
 ALTER TABLE maintenance_plan ADD COLUMN form_values_json TEXT;
+
+-- maintenance_plan: 年間計画タスクから「カレンダーに登録」した予定の登録元タスクID。
+--   このカレンダー予定を「完了」にすると、登録元の年間計画タスクも完了に同期する。
+ALTER TABLE maintenance_plan ADD COLUMN source_plan_id INTEGER;

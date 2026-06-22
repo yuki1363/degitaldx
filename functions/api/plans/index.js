@@ -267,6 +267,9 @@ export async function onRequestPost({ request, env, data }) {
   const fvj = normalizeFormValues(body.form_values_json);
   if (fvj.error) return jsonError(400, fvj.error);
   if (fvj.value != null) { cols.push('form_values_json'); vals.push(fvj.value); }
+  // カレンダー登録元（年間計画タスク）のID。列が無い旧DBでは insert が外して再試行する
+  const srcId = Number(body.source_plan_id);
+  if (Number.isInteger(srcId) && srcId > 0) { cols.push('source_plan_id'); vals.push(srcId); }
   cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
   vals.push(userEmail, now, userEmail, now);
 
