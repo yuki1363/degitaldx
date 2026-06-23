@@ -467,15 +467,16 @@ async function renderForm(existing, fromAnnual = false) {
     input.addEventListener('input', () => { permitValues[f.tag] = input.value; });
     return el('div', { class: 'field' + (f.type === 'textarea' ? ' pf-full' : '') }, [el('label', {}, f.label), input]);
   };
+  // 帳票入力欄は種別に関わらず表示する（工事以外の予定でも工事連絡書を出せるように）
   const renderPermit = () => {
-    if (typeSelect.value !== 'construction' || permitFields.length === 0) { render(permitBox, []); return; }
+    if (permitFields.length === 0) { render(permitBox, []); return; }
     // 開始時間/終了時間は日付の隣に表示済みなので除外。似た項目をまとめて表示する
     const fields = permitFields.filter((f) => f.tag !== '開始時間' && f.tag !== '終了時間');
     const inputs = fields.filter((f) => f.type !== 'check');
     const checks = fields.filter((f) => f.type === 'check');
     const children = [
       el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, '帳票（工事連絡許可書）の入力'),
-      el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます。'),
+      el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます（種別に関わらず入力できます）。'),
     ];
     if (inputs.length) children.push(el('div', { class: 'pf-grid' }, inputs.map(permitInput)));
     if (checks.length) {
@@ -484,7 +485,6 @@ async function renderForm(existing, fromAnnual = false) {
     }
     render(permitBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, children));
   };
-  typeSelect.addEventListener('change', renderPermit);
 
   const save = async () => {
     const body = {
