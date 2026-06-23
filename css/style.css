@@ -1497,6 +1497,35 @@ input.is-abnormal {
   color: var(--color-text-muted);
 }
 
+/* ---- AI ボットパネル ---- */
+.ai-bot-wrap {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  background: #f0f9ff;
+}
+.ai-bot-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px;
+}
+.ai-bot-q {
+  background: #dbeafe;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 6px 0 2px;
+  font-size: 13px;
+}
+.ai-bot-a {
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 2px 0 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 /* ---- 横断検索（11） ---- */
 .search-box-wrap {
   margin-bottom: 4px;
