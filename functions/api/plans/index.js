@@ -136,15 +136,22 @@ export async function onRequestGet({ request, env }) {
 
     // 当年の完了状況を重ねる（毎年共通テンプレートの「その年の実施状況」）。
     // on_calendar の予定は日付固定の単発なので本体 status をそのまま使う。
+    // annual_plan_status 未作成（未マイグレーション）のときは重ねず本体 status を使う
+    // ＝従来どおり完了できる（テーブル作成後に年ごと管理へ自動で切り替わる）。
+    let hasYearStatus = true;
     const statusMap = new Map();
     try {
       const { results: st } = await db.prepare(
         'SELECT plan_id, status FROM annual_plan_status WHERE year = ?'
       ).bind(viewYear).all();
       for (const r of (st ?? [])) statusMap.set(String(r.plan_id), r.status);
-    } catch { /* テーブル未作成（未マイグレーション）でも通常表示は続行 */ }
-    for (const p of plans) {
-      if (!p.on_calendar) p.status = statusMap.get(String(p.id)) ?? 'pending';
+    } catch {
+      hasYearStatus = false;
+    }
+    if (hasYearStatus) {
+      for (const p of plans) {
+        if (!p.on_calendar) p.status = statusMap.get(String(p.id)) ?? 'pending';
+      }
     }
     return json({ plans, year: viewYear });
   }

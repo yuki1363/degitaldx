@@ -20,6 +20,7 @@ let equipNames = null;
 let year = new Date().getFullYear();
 let typeFilter = '';                       // '' = 全種別
 let nameFilter = '';                        // 名称あいまい検索
+let sortKey = 'equipment';                  // 並び順: 'equipment'（設備順・既定）| 'inspector'（点検者順）
 let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
 let viewMonth = new Date().getMonth() + 1;  // 月別表示で見ている月
 let plansCache = [];                        // 取得済みの当年の予定（再取得を避ける）
@@ -263,9 +264,18 @@ function buildRows(plans) {
     if (!row.months.has(month)) row.months.set(month, []);
     row.months.get(month).push(p);
   }
-  return [...rowsMap.values()].sort((a, b) =>
-    (a.line_name || '').localeCompare(b.line_name || '', 'ja') ||
-    (a.title || '').localeCompare(b.title || '', 'ja'));
+  return [...rowsMap.values()].sort(compareBySort);
+}
+
+// 並び替え比較。点検者順は 点検者 → 設備 → タスク名、既定（設備順）は 設備 → タスク名。
+// rows（集約行）にも plan（個別予定）にも inspector_name/line_name/title があるため共用できる。
+function compareBySort(a, b) {
+  const byEquip = (a.line_name || '').localeCompare(b.line_name || '', 'ja')
+    || (a.title || '').localeCompare(b.title || '', 'ja');
+  if (sortKey === 'inspector') {
+    return (a.inspector_name || '').localeCompare(b.inspector_name || '', 'ja') || byEquip;
+  }
+  return byEquip;
 }
 
 // ---------------- 月別表示（既定） ----------------
@@ -300,9 +310,7 @@ function planRow(p, monthLabel) {
 function buildMonthView() {
   const inMonth = plansCache.filter((p) =>
     !p.unscheduled && monthOf(p) === viewMonth && (!typeFilter || p.plan_type === typeFilter) && matchesName(p));
-  inMonth.sort((a, b) =>
-    (a.line_name || '').localeCompare(b.line_name || '', 'ja') ||
-    (a.title || '').localeCompare(b.title || '', 'ja'));
+  inMonth.sort(compareBySort);
 
   const undecided = plansCache.filter((p) => p.unscheduled && (!typeFilter || p.plan_type === typeFilter) && matchesName(p));
   const doneCount = inMonth.filter((p) => p.status === 'done').length;
@@ -485,9 +493,17 @@ function toolbar() {
     el('button', { class: `btn btn-sm${viewMode === 'month' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'month'; renderView(); } }, '月別'),
     el('button', { class: `btn btn-sm${viewMode === 'all' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'all'; renderView(); } }, '全月'),
   ]);
+  // 並び順（設備順 / 点検者順）。結果領域だけ再描画して切り替える
+  const sortSel = el('select', {
+    onchange: (e) => { sortKey = e.target.value; renderResults(); },
+  }, [
+    el('option', { value: 'equipment', selected: sortKey === 'equipment' }, '設備順'),
+    el('option', { value: 'inspector', selected: sortKey === 'inspector' }, '点検者順'),
+  ]);
   return el('div', { class: 'annual-toolbar no-print' }, [
     el('div', { class: 'annual-filter-row' }, [
       el('label', { class: 'annual-filter' }, ['種別: ', sel]),
+      el('label', { class: 'annual-filter' }, ['並び: ', sortSel]),
       nameInput,
     ]),
     viewToggle,
