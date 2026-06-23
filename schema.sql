@@ -500,6 +500,17 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_channel
   ON chat_messages (channel, created_at);
 
+-- 添付ファイルID列（migration）
+ALTER TABLE chat_messages ADD COLUMN file_ids_json TEXT;
+
+-- chat_channel_reads — チャット既読管理（ユーザーごとに最後に読んだ位置を保存）
+CREATE TABLE IF NOT EXISTS chat_channel_reads (
+  channel       TEXT NOT NULL,
+  user_email    TEXT NOT NULL,
+  last_read_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (channel, user_email)
+);
+
 -- ---------------------------------------------------------------------
 -- trouble_custom_field — トラブル記録のカスタム項目定義（04 フォームビルダー）
 --   管理画面（09）から項目の追加・編集・削除が可能。

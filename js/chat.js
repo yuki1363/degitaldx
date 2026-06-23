@@ -1,9 +1,11 @@
 // 10 チャット — グループチャット（シフト引き継ぎ・一斉連絡）
 //   30秒ポーリングで新着メッセージを自動取得
+//   ファイル/写真添付対応、既読数表示
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
+import { uploadFile, resizeImageFile } from '/js/files.js';
 
 const chatList = document.getElementById('chat-list');
 const chatForm = document.getElementById('chat-form');
@@ -11,8 +13,8 @@ const chatForm = document.getElementById('chat-form');
 let currentUser = null;
 let lastTimestamp = null;
 let pollTimer = null;
+const CHANNEL = 'general';
 
-// 個人情報パターン検出
 const PI_PATTERNS = [
   /\d{2,4}-\d{2,4}-\d{4}/,
   /0\d{9,10}/,
@@ -23,15 +25,48 @@ function detectPersonalInfo(text) {
   return PI_PATTERNS.some((p) => p.test(text));
 }
 
+// メッセージに添付されたファイルのサムネイル/リンクを描画
+async function renderAttachments(fileIds) {
+  if (!fileIds || fileIds.length === 0) return null;
+  const items = await Promise.all(fileIds.map(async (id) => {
+    // ファイル情報取得（失敗しても表示を止めない）
+    let meta = null;
+    try { meta = await api.get(`/api/files/${id}`).catch(() => null); } catch { /* skip */ }
+    const isImage = meta?.content_type?.startsWith('image/');
+    if (isImage) {
+      return el('a', { href: `/api/files/${id}`, target: '_blank', class: 'chat-img-link' }, [
+        el('img', { src: `/api/files/${id}`, class: 'chat-thumb', loading: 'lazy', alt: meta?.file_name || '添付画像' }),
+      ]);
+    }
+    return el('a', { href: `/api/files/${id}`, target: '_blank', class: 'chat-file-link' }, [
+      '📎 ', meta?.file_name || `ファイル(${id})`,
+    ]);
+  }));
+  return el('div', { class: 'chat-attachments' }, items);
+}
+
 // メッセージをDOMに追加（最下部へ）
-function appendMessages(messages) {
+async function appendMessages(messages) {
   if (messages.length === 0) return;
   const atBottom = chatList.scrollHeight - chatList.scrollTop <= chatList.clientHeight + 60;
 
   for (const msg of messages) {
     const isMine = msg.created_by === currentUser.email;
     const isAdmin = currentUser.role === 'admin';
-    const row = el('div', { class: `chat-msg ${isMine ? 'is-mine' : ''}` }, [
+
+    // 既読数バッジ
+    const readBadge = msg.read_count != null
+      ? el('span', { class: 'chat-read-count', title: `${msg.read_count}人が既読` }, `既読${msg.read_count}`)
+      : null;
+
+    // 添付ファイル
+    const fileIds = (() => { try { return JSON.parse(msg.file_ids_json || 'null') || []; } catch { return []; } })();
+    const attachEl = el('div', { class: 'chat-attachments' }, []);
+    if (fileIds.length > 0) {
+      renderAttachments(fileIds).then((el2) => { if (el2) render(attachEl, el2.childNodes ? Array.from(el2.childNodes) : [el2]); });
+    }
+
+    const row = el('div', { class: `chat-msg ${isMine ? 'is-mine' : ''}`, dataset: { id: String(msg.id) } }, [
       el('div', { class: 'chat-meta' }, [
         el('span', { class: 'chat-author' }, msg.author_name || maskEmail(msg.created_by)),
         el('span', { class: 'chat-time' }, formatDateTime(msg.created_at)),
@@ -45,7 +80,9 @@ function appendMessages(messages) {
           },
         }, '✕') : null,
       ]),
-      el('div', { class: 'chat-body', style: 'white-space:pre-wrap' }, msg.body),
+      msg.body ? el('div', { class: 'chat-body', style: 'white-space:pre-wrap' }, msg.body) : null,
+      fileIds.length > 0 ? attachEl : null,
+      isMine && readBadge ? el('div', { class: 'chat-read-row' }, [readBadge]) : null,
     ]);
     chatList.appendChild(row);
     if (msg.created_at > (lastTimestamp || '')) lastTimestamp = msg.created_at;
@@ -54,34 +91,71 @@ function appendMessages(messages) {
   if (atBottom) chatList.scrollTop = chatList.scrollHeight;
 }
 
-// 初回ロード
 async function loadInitial() {
   render(chatList, el('p', { class: 'loading' }, '読み込み中…'));
-  const { messages } = await api.get('/api/chat?limit=50');
+  const { messages } = await api.get(`/api/chat?channel=${CHANNEL}&limit=50`);
   chatList.innerHTML = '';
   if (messages.length === 0) {
     chatList.appendChild(el('p', { class: 'empty', style: 'text-align:center;margin-top:40px' }, 'メッセージはありません。最初のメッセージを送ってみましょう！'));
   } else {
-    appendMessages(messages);
+    await appendMessages(messages);
     chatList.scrollTop = chatList.scrollHeight;
   }
+  // 既読位置を更新
+  api.put(`/api/chat?channel=${CHANNEL}`).catch(() => {});
 }
 
-// ポーリング（30秒ごとに新着取得）
 async function poll() {
   try {
     if (!lastTimestamp) return;
-    const { messages } = await api.get(`/api/chat?since=${encodeURIComponent(lastTimestamp)}`);
-    if (messages.length > 0) appendMessages(messages);
+    const { messages } = await api.get(`/api/chat?channel=${CHANNEL}&since=${encodeURIComponent(lastTimestamp)}`);
+    if (messages.length > 0) {
+      await appendMessages(messages);
+      api.put(`/api/chat?channel=${CHANNEL}`).catch(() => {});
+    }
   } catch { /* オフライン時は無視 */ }
 }
 
-// フォーム描画
 function renderForm() {
   if (!hasRole(currentUser, 'editor')) {
     render(chatForm, el('p', { class: 'hint', style: 'text-align:center' }, '閲覧のみ権限ではメッセージを送信できません。'));
     return;
   }
+
+  let pendingFiles = []; // アップロード済みファイルのIDリスト
+
+  const filePreview = el('div', { class: 'chat-file-preview' }, []);
+  const fileInput = el('input', {
+    type: 'file',
+    accept: 'image/*,video/*,application/pdf',
+    multiple: true,
+    style: 'display:none',
+    onchange: async (e) => {
+      const files = Array.from(e.target.files || []);
+      fileInput.value = '';
+      for (const file of files) {
+        const placeholderId = Date.now() + Math.random();
+        const thumb = el('div', { class: 'chat-file-item', dataset: { key: String(placeholderId) } }, [
+          el('span', { class: 'chat-file-uploading' }, `⏳ ${file.name}`),
+        ]);
+        filePreview.appendChild(thumb);
+        try {
+          const processedFile = file.type.startsWith('image/') ? await resizeImageFile(file, 1280, 0.7) : file;
+          const meta = await uploadFile(processedFile);
+          pendingFiles.push(meta.id);
+          thumb.innerHTML = '';
+          thumb.appendChild(el('span', {}, `📎 ${meta.file_name || file.name} `));
+          thumb.appendChild(el('button', { class: 'btn-icon', onclick: () => {
+            pendingFiles = pendingFiles.filter((id) => id !== meta.id);
+            thumb.remove();
+          } }, '✕'));
+        } catch (err) {
+          thumb.innerHTML = '';
+          thumb.appendChild(el('span', { class: 'notice is-error', style: 'font-size:12px' }, `❌ ${file.name}: ${err.message}`));
+        }
+      }
+    },
+  });
 
   const textarea = el('textarea', {
     placeholder: '氏名・電話番号・住所等の個人情報は入力しないでください',
@@ -96,15 +170,17 @@ function renderForm() {
 
   const send = async () => {
     const body = textarea.value.trim();
-    if (!body) return;
-    if (detectPersonalInfo(body)) {
+    if (!body && pendingFiles.length === 0) return;
+    if (body && detectPersonalInfo(body)) {
       if (!confirm('電話番号・メールアドレス・郵便番号などの個人情報が含まれている可能性があります。このまま送信しますか？')) return;
     }
     sendBtn.disabled = true;
     try {
-      await api.post('/api/chat', { body });
+      const fileIds = [...pendingFiles];
+      await api.post('/api/chat', { body, channel: CHANNEL, file_ids: fileIds });
       textarea.value = '';
-      // 即時ポーリングで新着取得
+      pendingFiles = [];
+      render(filePreview, []);
       await poll();
     } catch (err) {
       alert(err.message);
@@ -114,14 +190,22 @@ function renderForm() {
     }
   };
 
-  render(chatForm, el('div', { class: 'chat-input-row' }, [
-    textarea,
-    sendBtn,
-  ]));
+  render(chatForm, [
+    filePreview,
+    el('div', { class: 'chat-input-row' }, [
+      el('button', {
+        class: 'btn btn-sm',
+        title: 'ファイル・写真を添付',
+        style: 'align-self:flex-end;font-size:18px;padding:4px 8px',
+        onclick: () => fileInput.click(),
+      }, '📎'),
+      fileInput,
+      textarea,
+      sendBtn,
+    ]),
+  ]);
   textarea.focus();
 }
-
-// ---------------- 起動 ----------------
 
 (async () => {
   try {
@@ -129,7 +213,6 @@ function renderForm() {
     await loadInitial();
     renderForm();
     pollTimer = setInterval(poll, 30000);
-    // ページ離脱時にポーリング停止
     window.addEventListener('pagehide', () => clearInterval(pollTimer));
   } catch (err) {
     render(chatList, el('p', { class: 'notice is-error' }, err.message || String(err)));
