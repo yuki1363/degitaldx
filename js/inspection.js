@@ -104,6 +104,33 @@ async function renderList(presetEquipmentId) {
 
 // ---------------- 入力フォーム（新規・編集） ----------------
 
+async function handleMeterCapture(file, master, input, statusEl, fileInput) {
+  if (!file) return;
+  fileInput.value = '';
+  statusEl.textContent = '⏳ アップロード中…';
+  try {
+    const img = await resizeImageFile(file, 1280, 0.85);
+    const meta = await uploadFile(img);
+    statusEl.textContent = '🤖 読み取り中…';
+    const { value, note } = await api.post('/api/ai/read-meter', {
+      file_id: meta.id,
+      item_name: master.name,
+      unit: master.unit || '',
+      min_value: master.min_value ?? null,
+      max_value: master.max_value ?? null,
+    });
+    if (value === null) {
+      statusEl.textContent = note || '読み取れませんでした。手入力してください。';
+    } else {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      statusEl.textContent = `✅ ${value}${master.unit ? ' ' + master.unit : ''}（確認してください）`;
+    }
+  } catch (err) {
+    statusEl.textContent = `❌ ${err.message}`;
+  }
+}
+
 /** 1項目分の入力UIを作る。getValue() は未入力なら undefined を返す */
 function buildItemInput(master, existingValue) {
   const limits =
@@ -148,9 +175,24 @@ function buildItemInput(master, existingValue) {
         },
       });
       if (existingValue !== undefined) input.dispatchEvent(new Event('input'));
+
+      const camStatus = el('span', { class: 'hint meter-cam-status' });
+      const camFileInput = el('input', {
+        type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none',
+        onchange: (e) => handleMeterCapture(e.target.files?.[0], master, input, camStatus, camFileInput),
+      });
+      const camBtn = el('button', {
+        type: 'button', class: 'btn btn-sm meter-cam-btn',
+        title: `${master.name} の計器を撮影して自動入力`,
+        onclick: () => camFileInput.click(),
+      }, '📷');
+
       inputArea = el('div', { class: 'number-row' }, [
         input,
         master.unit ? el('span', { class: 'unit' }, master.unit) : null,
+        camBtn,
+        camFileInput,
+        camStatus,
       ]);
       // 初期値の異常表示
       setTimeout(() => input.dispatchEvent(new Event('input')), 0);
