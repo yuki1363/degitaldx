@@ -10,31 +10,16 @@
 import { api } from '/js/api.js';
 import { el, render } from '/js/util.js';
 import { uploadFile } from '/js/files.js';
+import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', time: '時刻', check: 'チェック(レ点)' };
 
 // 種別ごとの標準入力項目（「標準項目を読み込む」で一括投入。後から1つずつ編集・削除できる）
+// 工事連絡書の標準項目は plan.js（計画ページの入力欄）と共有する（permit-fields.js）
 const DEFAULT_FIELDS = {
-  construction_notice: [
-    { tag: '会社名', label: '工事業者 会社名', type: 'text' },
-    { tag: '会社TEL', label: '会社 連絡先TEL', type: 'text' },
-    { tag: '責任者', label: '工事業者 責任者', type: 'text' },
-    { tag: '責任者TEL', label: '責任者 連絡先TEL', type: 'text' },
-    { tag: '担当', label: 'シーバイエス担当名', type: 'text' },
-    { tag: '担当TEL', label: '担当 連絡先TEL', type: 'text' },
-    { tag: '内線', label: '担当 内線', type: 'text' },
-    { tag: '工事概要', label: '工事概要', type: 'textarea' },
-    { tag: '高所作業', label: '高所作業', type: 'check' },
-    { tag: '火気使用', label: '火気の使用', type: 'check' },
-    { tag: 'LOTO', label: 'LOTO・エネルギー遮断', type: 'check' },
-    { tag: '閉塞スペース', label: '閉塞スペースで作業', type: 'check' },
-    { tag: '特殊作業', label: 'その他の特殊作業', type: 'check' },
-    { tag: '特殊作業詳細', label: '特殊作業の詳細', type: 'text' },
-    { tag: '設備停止連絡', label: '設備停止の連絡済み', type: 'check' },
-    { tag: 'タンク確認', label: 'タンク内バルク確認', type: 'check' },
-  ],
+  construction_notice: CONSTRUCTION_NOTICE_FIELDS,
   trouble_report: [
     { tag: '確認者', label: '確認者', type: 'text' },
     { tag: '承認者', label: '承認者', type: 'text' },

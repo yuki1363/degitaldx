@@ -10,6 +10,7 @@ import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 import { openExcelExport } from '/js/excel-fill.js';
+import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 
 const PLAN_TYPES = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -392,7 +393,7 @@ async function renderForm(existing, fromAnnual = false) {
     api.get('/api/print-templates').catch(() => ({ templates: [] })),
   ]);
   // 工事連絡書テンプレートの「入力項目」をまとめる（同じタグは1つに）。計画ページで入力する欄
-  const permitFields = [];
+  let permitFields = [];
   {
     const seen = new Set();
     for (const t of (tmplRes.templates || [])) {
@@ -406,6 +407,11 @@ async function renderForm(existing, fromAnnual = false) {
         }
       }
     }
+  }
+  // テンプレート未登録／入力項目が未設定（古いテンプレート等）の場合は標準項目を使う。
+  // これで種別＝工事を選べば必ず帳票入力欄が表示される。
+  if (permitFields.length === 0) {
+    permitFields = CONSTRUCTION_NOTICE_FIELDS.map((f) => ({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' }));
   }
   const permitValues = (() => {
     try { return existing?.form_values_json ? (JSON.parse(existing.form_values_json) || {}) : {}; }
