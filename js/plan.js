@@ -11,6 +11,7 @@ import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputVal
 import { buildCommentsCard } from '/js/comments.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
+import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
 
 const PLAN_TYPES = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -102,13 +103,6 @@ function showDaySheet(fullDate, dateLabel, dayPlans) {
     el('div', { class: 'day-plan-list' }, dayPlans.map((p) => {
       const type = PLAN_TYPES[p.plan_type] || PLAN_TYPES.other;
       const canStart = p.plan_type === 'inspection' && p.status !== 'done' && hasRole(currentUser, 'editor');
-      const inspectionUrl = (() => {
-        if (!canStart) return null;
-        const q = new URLSearchParams({ new: '1', plan_id: String(p.id), date: fullDate });
-        const assignee = p.inspector_name || p.assignee_name || '';
-        if (assignee) q.set('assignee', assignee);
-        return `/pages/inspection?${q}`;
-      })();
       return el('div', { class: 'day-plan-row' }, [
         el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
           el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
@@ -116,7 +110,13 @@ function showDaySheet(fullDate, dateLabel, dayPlans) {
           el('span', { class: 'day-plan-status' }, STATUS_LABELS[p.status] || p.status),
         ]),
         canStart
-          ? el('a', { class: 'day-plan-start-btn', href: inspectionUrl, title: '点検を開始' }, '✅')
+          ? el('button', {
+              class: 'day-plan-start-btn', title: '点検を開始（計画の設備・日付・点検者を引き継ぎ）',
+              onclick: async (e) => {
+                e.currentTarget.disabled = true;
+                window.location.href = await buildInspectionStartUrl(p, fullDate);
+              },
+            }, '✅')
           : null,
       ]);
     })),
@@ -335,24 +335,11 @@ async function renderDetail(id, fromAnnual = false) {
           plan.plan_type === 'inspection'
             ? el('button', {
                 class: 'btn btn-primary',
-                onclick: async () => {
-                  let equipmentId = null;
-                  try {
-                    const { equipment } = await api.get('/api/equipment');
-                    const match = equipment.find((e) =>
-                      (e.line_name || '') === (plan.line_name || '') &&
-                      (e.equipment_name || '') === (plan.equipment_name || '')
-                    );
-                    if (match) equipmentId = match.id;
-                  } catch { /* 設備解決失敗時は未指定で開く */ }
-                  // plan_id を渡し、点検保存時にこの計画を自動で完了にする
-                  // 計画日・担当者も事前入力するためURLに含める
-                  const q = new URLSearchParams({ new: '1', plan_id: String(plan.id) });
-                  if (equipmentId) q.set('equipment_id', String(equipmentId));
-                  if (plan.planned_date) q.set('date', plan.planned_date.slice(0, 10));
-                  const assignee = plan.inspector_name || plan.assignee_name || '';
-                  if (assignee) q.set('assignee', assignee);
-                  window.location.href = `/pages/inspection?${q}`;
+                // 計画の設備・実施日・点検者を引き継いで点検入力へ。設備が一致すれば点検項目も読み込まれる。
+                // plan_id を渡すので点検保存時にこの計画は自動で完了になる。
+                onclick: async (e) => {
+                  e.currentTarget.disabled = true;
+                  window.location.href = await buildInspectionStartUrl(plan);
                 },
               }, '✅ 点検を開始')
             : null,

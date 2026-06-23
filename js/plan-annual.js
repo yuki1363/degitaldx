@@ -12,6 +12,7 @@ import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { renderPlanImport } from '/js/plan-import.js';
+import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -83,6 +84,10 @@ function openPlanSheet(plan, monthLabel) {
       ? { label: '📅 カレンダー表示を解除', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { on_calendar: 0 })) }
       : { label: '📅 カレンダーに表示（日付指定）', onClick: () => registerToCalendar(plan) },
   ];
+  // 点検タスクは点検入力へ直接ジャンプ（設備・実施日・点検者を引き継ぐ）
+  if (plan.plan_type === 'inspection' && plan.status !== 'done') {
+    actions.push({ label: '✅ 点検を開始', onClick: async () => { window.location.href = await buildInspectionStartUrl(plan); } });
+  }
   if (recurring) {
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
     return;

@@ -10,7 +10,7 @@
  * 将来拡張（CLAUDE.md）: 入力中データの IndexedDB 一時保存とオンライン復帰時の
  * 自動同期は、入力フォームを実装するフェーズで追加する。
  */
-const CACHE_VERSION = 'v0.73.0';
+const CACHE_VERSION = 'v0.73.1';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -33,6 +33,7 @@ const PRECACHE_URLS = [
   '/js/plan-annual.js',
   '/js/plan-import.js',
   '/js/plan-summary.js',
+  '/js/plan-inspection-link.js',
   '/js/permit-fields.js',
   '/js/print-templates.js',
   '/js/excel-fill.js',
