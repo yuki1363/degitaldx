@@ -483,8 +483,8 @@ async function renderForm(existing, fromAnnual = false) {
     const body = {
       title: titleInput.value.trim(),
       plan_type: typeSelect.value,
-      planned_date: fromAnnual ? (existing?.planned_date || '') : startInput.value,
-      planned_end_date: fromAnnual ? null : (endInput.value || null),
+      planned_date: startInput.value,
+      planned_end_date: endInput.value || null,
       line_name: cascade.lineInput.value.trim() || null,
       equipment_name: cascade.equipInput.value.trim() || null,
       inspector_name: inspectorInput.value.trim() || null,
@@ -497,8 +497,8 @@ async function renderForm(existing, fromAnnual = false) {
     // 年間計画タスクは「カレンダーにも表示」フラグを送る（年間計画表にはそのまま残る）
     if (isAnnualTask) body.on_calendar = onCalCheckbox.checked ? 1 : 0;
     if (!body.title) { alert('タイトルは必須です。'); return; }
-    if (!fromAnnual && !body.planned_date) { alert('開始日は必須です。'); return; }
-    if (!fromAnnual && body.planned_end_date && body.planned_end_date < body.planned_date) {
+    if (!body.planned_date) { alert('開始日は必須です。'); return; }
+    if (body.planned_end_date && body.planned_end_date < body.planned_date) {
       alert('終了日は開始日以降にしてください。'); return;
     }
     try {
@@ -519,8 +519,8 @@ async function renderForm(existing, fromAnnual = false) {
       el('h2', { class: 'card-title' }, existing ? '予定を編集' : '予定を追加'),
       field('タイトル（必須）', titleInput),
       field('種別', typeSelect),
-      fromAnnual ? null : el('div', { class: 'field-pair' }, [field('開始日（必須）', startInput), field('開始時間', timeStart)]),
-      fromAnnual ? null : el('div', { class: 'field-pair' }, [field('終了日（空欄なら1日のみ）', endInput), field('終了時間', timeEnd)]),
+      el('div', { class: 'field-pair' }, [field('開始日（必須）', startInput), field('開始時間', timeStart)]),
+      el('div', { class: 'field-pair' }, [field('終了日（空欄なら1日のみ）', endInput), field('終了時間', timeEnd)]),
       isAnnualTask
         ? el('label', { class: 'plan-oncal-check', style: 'display:flex;align-items:center;gap:8px;margin:4px 0 8px;padding:8px 10px;background:#eff6ff;border-radius:6px;font-size:14px;cursor:pointer' },
             [onCalCheckbox, el('span', {}, '📅 この予定を上の日付でカレンダーにも表示する（年間計画表にもそのまま残ります）')])
