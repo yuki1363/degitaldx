@@ -197,7 +197,12 @@ export async function onRequestGet({ request, env }) {
   // ※ JS側で除外することで、各列が未マイグレーションでもカレンダーは壊れない
   if (!includeUnscheduled) {
     const batchIds = await getBatchPlanIds(db);
-    results = results.filter((p) => !p.unscheduled && !p.annual_only && !batchIds.has(String(p.id)));
+    results = results.filter((p) => {
+      if (p.unscheduled) return false;
+      // 年間計画の予定でも on_calendar=1 なら、その planned_date でカレンダーに表示する
+      if (p.on_calendar) return true;
+      return !p.annual_only && !batchIds.has(String(p.id));
+    });
   }
 
   return json({ plans: results });
@@ -212,7 +217,7 @@ export async function onRequestPost({ request, env, data }) {
   const {
     title, planned_date, planned_end_date, plan_type,
     line_name, equipment_name, assignee_name, inspector_name, status, note,
-    recurrence_rule, unscheduled, annual_only,
+    recurrence_rule, unscheduled, annual_only, on_calendar,
   } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
@@ -263,6 +268,8 @@ export async function onRequestPost({ request, env, data }) {
   // annual_only=1（年間計画表の＋追加など）。未マイグレーション環境では
   // insertMaintenancePlan が列を外して再試行する（年間計画表には batch/1日付で復元される）。
   if (annual_only) { cols.push('annual_only'); vals.push(1); }
+  // on_calendar=1（年間計画の予定をカレンダーにも表示）。列が無い旧DBでは insert が外して再試行する
+  if (on_calendar) { cols.push('on_calendar'); vals.push(1); }
   // 帳票の入力値（列が無い旧DBでは insertMaintenancePlan が外して再試行する）
   const fvj = normalizeFormValues(body.form_values_json);
   if (fvj.error) return jsonError(400, fvj.error);

@@ -96,7 +96,7 @@ export async function onRequestPut({ request, params, env, data }) {
     binds.push(newValue);
   }
 
-  if (setClauses.length === 0 && !('form_values_json' in body)) {
+  if (setClauses.length === 0 && !('form_values_json' in body) && !('on_calendar' in body)) {
     return jsonError(400, '更新するフィールドがありません');
   }
 
@@ -115,6 +115,18 @@ export async function onRequestPut({ request, params, env, data }) {
     try {
       await db.prepare('UPDATE maintenance_plan SET form_values_json = ?, updated_by = ?, updated_at = ? WHERE id = ?')
         .bind(fvj.value, userEmail, now, id).run();
+    } catch (err) {
+      if (!/no such column/i.test(String(err?.message || ''))) throw err;
+    }
+  }
+
+  // カレンダー表示フラグも別UPDATE（on_calendar 列が無い旧DBでも本体更新が壊れないように）
+  if ('on_calendar' in body) {
+    const v = body.on_calendar ? 1 : 0;
+    try {
+      await db.prepare('UPDATE maintenance_plan SET on_calendar = ?, updated_by = ?, updated_at = ? WHERE id = ?')
+        .bind(v, userEmail, now, id).run();
+      if (String(existing.on_calendar ?? '') !== String(v)) diff['on_calendar'] = { from: existing.on_calendar, to: v };
     } catch (err) {
       if (!/no such column/i.test(String(err?.message || ''))) throw err;
     }

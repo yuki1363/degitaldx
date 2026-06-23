@@ -449,6 +449,12 @@ async function renderForm(existing, fromAnnual = false) {
   );
   const noteInput    = el('textarea', { value: existing?.note || '' });
 
+  // 年間計画のタスクを編集しているとき、上の日付でカレンダーにも表示するチェック。
+  // 年間計画表にはそのまま残り、同じ予定がカレンダーにも出る（on_calendar=1）。
+  const isAnnualTask = !!existing?.annual_only;
+  const onCalCheckbox = el('input', { type: 'checkbox' });
+  onCalCheckbox.checked = !!existing?.on_calendar;
+
   // ---- 帳票（工事連絡許可書）の入力欄。種別=工事のときに表示し、計画に保存する ----
   const permitBox = el('div', {});
   const permitInput = (f) => {
@@ -501,6 +507,8 @@ async function renderForm(existing, fromAnnual = false) {
       recurrence_rule: null,
       form_values_json: Object.keys(permitValues).length ? JSON.stringify(permitValues) : null,
     };
+    // 年間計画タスクは「カレンダーにも表示」フラグを送る（年間計画表にはそのまま残る）
+    if (isAnnualTask) body.on_calendar = onCalCheckbox.checked ? 1 : 0;
     if (!body.title) { alert('タイトルは必須です。'); return; }
     if (!fromAnnual && !body.planned_date) { alert('開始日は必須です。'); return; }
     if (!fromAnnual && body.planned_end_date && body.planned_end_date < body.planned_date) {
@@ -526,6 +534,10 @@ async function renderForm(existing, fromAnnual = false) {
       field('種別', typeSelect),
       fromAnnual ? null : el('div', { class: 'field-pair' }, [field('開始日（必須）', startInput), field('開始時間', timeStart)]),
       fromAnnual ? null : el('div', { class: 'field-pair' }, [field('終了日（空欄なら1日のみ）', endInput), field('終了時間', timeEnd)]),
+      isAnnualTask
+        ? el('label', { class: 'plan-oncal-check', style: 'display:flex;align-items:center;gap:8px;margin:4px 0 8px;padding:8px 10px;background:#eff6ff;border-radius:6px;font-size:14px;cursor:pointer' },
+            [onCalCheckbox, el('span', {}, '📅 この予定を上の日付でカレンダーにも表示する（年間計画表にもそのまま残ります）')])
+        : null,
       field('設備名', cascade.lineInput),
       cascade.lineDatalist,
       field('機器名', cascade.equipInput),

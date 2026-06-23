@@ -60,34 +60,16 @@ function openSheet(titleText, actions) {
   document.body.appendChild(backdrop);
 }
 
-// 年間計画のタスクを、指定日付の「カレンダーの予定」として新規登録する。
-// 年間計画表のタスクはそのまま残し、カレンダー用に別の予定（annual_only なし）を作る。
-// 日付・時刻（form_values_json の開始/終了時間）・帳票の入力内容も引き継ぐ。
+// 年間計画のタスクを、指定日付でカレンダーにも表示する（on_calendar=1）。
+// 別レコードは作らず同じ予定の planned_date を指定日にして on_calendar を立てるだけなので、
+// 年間計画表にそのまま残りつつ、同じ予定がカレンダーにも出る（完了状態も常に一致する）。
 async function registerToCalendar(plan) {
   const defaultDate = (plan.planned_date || '').slice(0, 10) || `${year}-01-01`;
-  const date = prompt('カレンダーに登録する日付（YYYY-MM-DD）', defaultDate);
+  const date = prompt('カレンダーに表示する日付（YYYY-MM-DD）', defaultDate);
   if (date === null) return;
   const d = date.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { alert('日付は YYYY-MM-DD の形式で入力してください。'); return; }
-  try {
-    await api.post('/api/plans', {
-      title: plan.title,
-      plan_type: plan.plan_type,
-      planned_date: d,
-      planned_end_date: plan.planned_end_date || null,
-      line_name: plan.line_name || null,
-      equipment_name: plan.equipment_name || null,
-      inspector_name: plan.inspector_name || null,
-      assignee_name: plan.assignee_name || null,
-      status: 'pending',
-      note: plan.note || null,
-      form_values_json: plan.form_values_json || null,
-      source_plan_id: plan.id, // 完了同期用（このカレンダー予定を完了にすると年間タスクも完了）
-    });
-    alert(`カレンダーに登録しました（${d}）。完了にすると年間計画のタスクも完了になります。`);
-  } catch (err) {
-    alert(err.message);
-  }
+  await mutate(() => api.put(`/api/plans/${plan.id}`, { planned_date: d, on_calendar: 1 }));
 }
 
 // 既存予定の操作（完了切替・点検者変更・移動・削除・詳細）
@@ -97,7 +79,9 @@ function openPlanSheet(plan, monthLabel) {
   const actions = [
     { label: '詳細を開く', onClick: () => { window.location.href = `/pages/plan?id=${plan.id}&from=annual`; } },
     { label: '📝 日時・内容を編集', onClick: () => { window.location.href = `/pages/plan?edit=${plan.id}`; } },
-    { label: '📅 カレンダーに登録', onClick: () => registerToCalendar(plan) },
+    plan.on_calendar
+      ? { label: '📅 カレンダー表示を解除', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { on_calendar: 0 })) }
+      : { label: '📅 カレンダーに表示（日付指定）', onClick: () => registerToCalendar(plan) },
   ];
   if (recurring) {
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
@@ -291,6 +275,7 @@ function planRow(p, monthLabel) {
       el('div', { class: 'mplan-head' }, [
         el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
         el('span', { class: 'mplan-title' }, p.title),
+        p.on_calendar ? el('span', { style: 'margin-left:4px', title: `カレンダー表示中（${(p.planned_date || '').slice(0, 10)}）` }, '📅') : null,
       ]),
       el('div', { class: 'mplan-sub' }, [
         eqLabel ? el('span', { class: 'mplan-eq' }, eqLabel) : null,

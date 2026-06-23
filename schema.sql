@@ -738,3 +738,8 @@ ALTER TABLE maintenance_plan ADD COLUMN form_values_json TEXT;
 -- maintenance_plan: 年間計画タスクから「カレンダーに登録」した予定の登録元タスクID。
 --   このカレンダー予定を「完了」にすると、登録元の年間計画タスクも完了に同期する。
 ALTER TABLE maintenance_plan ADD COLUMN source_plan_id INTEGER;
+
+-- maintenance_plan: 年間計画(annual_only)の予定を、カレンダーにも表示するかのフラグ。
+--   1=表示する。年間計画タスクに実施日(planned_date)を入れて on_calendar=1 にすると、
+--   年間計画表に残したまま、その日付でカレンダーにも表示される（同一レコードを両ビューで表示）。
+ALTER TABLE maintenance_plan ADD COLUMN on_calendar INTEGER;
