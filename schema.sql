@@ -763,3 +763,16 @@ INSERT OR IGNORE INTO annual_plan_status (plan_id, year, status)
 SELECT id, CAST(substr(planned_date, 1, 4) AS INTEGER), 'done'
   FROM maintenance_plan
  WHERE annual_only = 1 AND status = 'done' AND deleted_at IS NULL AND planned_date IS NOT NULL;
+
+-- plan_reset_log — 年間計画の年度末リセット履歴
+--   9月末リセット時に CSV スナップショット（テキスト）を保存し、後から参照できるようにする。
+--   fiscal_year は会計年度の開始年（弊社は10月始まり: FY2025 = 2025-10 〜 2026-09）。
+CREATE TABLE IF NOT EXISTS plan_reset_log (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  fiscal_year    INTEGER NOT NULL,           -- 例: 2025（2025-10〜2026-09 を指す）
+  reset_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  reset_by       TEXT NOT NULL,
+  plan_count     INTEGER NOT NULL DEFAULT 0, -- リセットした予定件数
+  csv_snapshot   TEXT                        -- 実施状況の CSV（UTF-8）。大きくなれば別テーブルへ分離可
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_reset_log_fy ON plan_reset_log (fiscal_year);

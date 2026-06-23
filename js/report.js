@@ -86,7 +86,7 @@ async function renderList() {
   };
 
   const catSel = el('select', {
-    onchange: (e) => { filterCategory = e.target.value; updateWriteLabel(); load().catch(showError); },
+    onchange: (e) => { filterCategory = e.target.value; updateWriteLabel(); },
   }, [
     el('option', { value: '' }, '全カテゴリ'),
     ...categories.map((c) => el('option', { value: c.id }, c.name)),
@@ -94,25 +94,22 @@ async function renderList() {
   const reporterIn = el('input', {
     type: 'search',
     placeholder: '入力者で検索',
-    oninput: (e) => {
-      clearTimeout(reporterTimer);
-      const v = e.target.value.trim();
-      reporterTimer = setTimeout(() => { filterReporter = v; load().catch(showError); }, 300);
-    },
+    oninput: (e) => { filterReporter = e.target.value.trim(); },
   });
-  const fromIn = el('input', { type: 'date', value: filterFrom, onchange: (e) => { filterFrom = e.target.value; load().catch(showError); } });
-  const toIn   = el('input', { type: 'date', value: filterTo,   onchange: (e) => { filterTo   = e.target.value; load().catch(showError); } });
+  const fromIn = el('input', { type: 'date', value: filterFrom, onchange: (e) => { filterFrom = e.target.value; } });
+  const toIn   = el('input', { type: 'date', value: filterTo,   onchange: (e) => { filterTo   = e.target.value; } });
+  const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
 
   render(app, [
     el('div', { class: 'filter-bar' }, [catSel, reporterIn]),
     el('div', { class: 'filter-bar' }, [
       el('label', { class: 'filter-label' }, ['FROM ', fromIn]),
       el('label', { class: 'filter-label' }, ['TO ', toIn]),
+      searchBtn,
     ]),
     (writeBtn || hasRole(currentUser, 'admin'))
       ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
           writeBtn,
-          // カテゴリの追加・削除は管理画面（マスタ管理）で行う
           hasRole(currentUser, 'admin')
             ? el('a', { class: 'btn', href: '/pages/admin?tab=manage' }, '⚙ カテゴリを管理')
             : null,
@@ -121,7 +118,7 @@ async function renderList() {
     listBox,
   ]);
   updateWriteLabel();
-  await load();
+  render(listBox, el('p', { class: 'empty' }, '🔍 条件を選んで「検索」を押してください。'));
 }
 
 // ---------------- 詳細 ----------------

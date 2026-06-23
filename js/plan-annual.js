@@ -93,10 +93,9 @@ function openPlanSheet(plan, monthLabel) {
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
     return;
   }
-  // 完了は年ごとに記録（annual_year=表示年）。新年は自動で未実施から始まる
   actions.push(plan.status === 'done'
-    ? { label: `未完了に戻す（${year}年）`, onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'pending', annual_year: year })) }
-    : { label: `✓ 完了にする（${year}年）`, onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'done', annual_year: year })) });
+    ? { label: '未完了に戻す', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'pending' })) }
+    : { label: '✓ 完了にする', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'done' })) });
   actions.push({ label: '👤 点検者を変更', onClick: () => {
     const name = prompt('点検者名を入力', plan.inspector_name || '');
     if (name === null) return; // キャンセル
@@ -509,11 +508,13 @@ function toolbar() {
     viewToggle,
     el('div', { class: 'annual-output-btns' }, [
       el('button', { class: 'btn btn-sm', onclick: () => window.print() }, '🖨 印刷'),
-      // クリック時点の絞り込み結果で出力（検索中に再描画しても最新を反映）
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'UTF-8') }, '📥 CSV'),
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'sjis') }, '📥 CSV(Excel)'),
       hasRole(currentUser, 'editor')
         ? el('button', { class: 'btn btn-sm', onclick: () => renderPlanImport(year, () => renderYear()) }, '📤 CSV取込')
+        : null,
+      hasRole(currentUser, 'editor')
+        ? el('button', { class: 'btn btn-sm btn-danger', onclick: () => runAnnualReset(currentFiscalYear(), null) }, '🔁 年度リセット')
         : null,
     ]),
   ]);
@@ -570,11 +571,11 @@ function renderView() {
   ]);
 }
 
-// 年間計画（annual_only）を年に関係なく全件取得して描画（毎年共通のテンプレート）
+// 年間計画（annual_only）を全件取得して描画（毎年共通のテンプレート）
 // 同時に当年の点検実績も取得し、年間計画グリッドとの突合に使う
 async function renderYear() {
   const [{ plans }, equipData, inspData] = await Promise.all([
-    api.get(`/api/plans?annual_only=1&year=${year}`),
+    api.get('/api/plans?annual_only=1'),
     api.get('/api/equipment').catch(() => ({ equipment: [] })),
     api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31`).catch(() => ({ inspections: [] })),
   ]);
@@ -602,11 +603,70 @@ async function renderYear() {
   renderView();
 }
 
+// 会計年度: 10月始まり9月終わり（FY = 当年の10月〜翌年の9月）
+// 例: 2025-10-01〜2026-09-30 → FY2025
+function currentFiscalYear() {
+  const d = new Date();
+  return d.getMonth() >= 9 ? d.getFullYear() : d.getFullYear() - 1;
+}
+
+// 年度末リセットが必要かチェックし、必要なら通知バナーを表示する
+async function checkAnnualReset() {
+  const fy = currentFiscalYear();
+  let logs = [];
+  try { ({ logs } = await api.get('/api/plans/annual-reset')); } catch { return; }
+  const alreadyReset = (logs || []).some((l) => l.fiscal_year === fy);
+  if (alreadyReset) return; // 今年度はリセット済み
+
+  // 10月以降で未リセットなら、管理者/editorにバナーを表示
+  if (!hasRole(currentUser, 'editor')) return;
+  const fyLabel = `FY${fy}（${fy}年10月〜${fy + 1}年9月）`;
+  const notice = el('div', { class: 'notice is-warning', id: 'annual-reset-notice', style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap' }, [
+    el('span', {}, `⚠ ${fyLabel} の年間計画がまだリセットされていません。`),
+    el('button', { class: 'btn btn-sm btn-danger', onclick: () => runAnnualReset(fy, notice) }, '🔁 年度リセット実行'),
+  ]);
+  app.insertBefore(notice, app.firstChild);
+}
+
+// 年度末リセット実行: CSV をダウンロードしてからサーバーにリセットを依頼
+async function runAnnualReset(fy, noticeEl) {
+  const fyLabel = `FY${fy}（${fy}年10月〜${fy + 1}年9月）`;
+  if (!confirm(`${fyLabel} の年間計画をリセットします。\n・現在の完了状態をCSVに保存\n・全タスクを「未実施」に戻す\n\n続けますか？`)) return;
+
+  // CSV を生成してダウンロード（リセット前の状態を保存）
+  if (plansCache.length > 0) exportCsv(buildRows(plansCache), 'UTF-8');
+
+  // CSV テキストを生成してサーバーに送信（サーバー側でも保持）
+  let csvText = '';
+  try {
+    const columns = [
+      { label: '種別',  value: (r) => PLAN_TYPES[r.plan_type]?.label || r.plan_type },
+      { label: 'タスク', value: (r) => r.title },
+      { label: '設備',  value: (r) => [r.line_name, r.equipment_name].filter(Boolean).join(' ') },
+      { label: '点検者', value: (r) => r.inspector_name || '' },
+      { label: '担当者', value: (r) => r.assignee_name || '' },
+      { label: '未定',  value: (r) => monthCellText(r.unscheduledList) },
+      ...MONTHS.map((m) => ({ label: `${m}月`, value: (r) => monthCellText(r.months.get(m)) })),
+    ];
+    csvText = buildCsvText(buildRows(plansCache), columns);
+  } catch { /* CSV 生成失敗はリセット続行 */ }
+
+  try {
+    const { reset_count } = await api.post('/api/plans/annual-reset', { fiscal_year: fy, csv_snapshot: csvText || null });
+    alert(`${fyLabel} のリセットが完了しました（${reset_count}件を未実施に戻しました）。`);
+    if (noticeEl) noticeEl.remove();
+    await renderYear();
+  } catch (err) {
+    alert(`リセットに失敗しました: ${err.message}`);
+  }
+}
+
 (async () => {
   try {
     currentUser = await getCurrentUser();
     equipNames = await fetchEquipNames();
     await renderYear();
+    await checkAnnualReset();
   } catch (err) {
     showError(err);
   }

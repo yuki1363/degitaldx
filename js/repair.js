@@ -83,10 +83,11 @@ async function renderList(equipmentId) {
     );
   };
 
-  const statusSel = el('select', { onchange: (e) => { filterStatus = e.target.value; load().catch(showError); } }, [
+  const statusSel = el('select', { onchange: (e) => { filterStatus = e.target.value; } }, [
     el('option', { value: '' }, '全ステータス'),
     ...Object.entries(STATUS).map(([v, { label }]) => el('option', { value: v }, label)),
   ]);
+  const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
 
   render(app, [
     filterEquipName
@@ -97,13 +98,18 @@ async function renderList(equipmentId) {
       : null,
     el('div', { class: 'toolbar' }, [
       statusSel,
+      searchBtn,
       hasRole(currentUser, 'editor')
         ? el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 依頼を登録')
         : null,
     ]),
     listBox,
   ]);
-  await load();
+  if (equipmentId) {
+    await load();
+  } else {
+    render(listBox, el('p', { class: 'empty' }, '🔍 ステータスを選んで「検索」を押してください。'));
+  }
 }
 
 // ---------------- 詳細 ----------------

@@ -8,7 +8,6 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue } from '/js/util.js';
-import { buildCommentsCard } from '/js/comments.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
@@ -364,7 +363,6 @@ async function renderDetail(id, fromAnnual = false) {
           }, '削除'),
         ])
       : null,
-    buildCommentsCard('maintenance_plan', id, currentUser),
   ]);
 }
 

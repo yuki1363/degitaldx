@@ -120,40 +120,18 @@ export async function onRequestGet({ request, env }) {
   // annual_only=1: 年間計画表専用予定を「年に関係なく」全件返す（毎年共通のテンプレート）
   const annualOnly = sp.get('annual_only') === '1';
 
-  // 年間計画表は毎年共通（タスクは年に関係なく全件）。完了状況だけを year ごとに重ねて返す
+  // 年間計画表は毎年共通（タスクは年に関係なく全件）。
+  // ステータスは maintenance_plan.status を直接使う（annual_plan_status は廃止）。
+  // 会計年度末（9月）に /api/plans/annual-reset でリセットし、CSV 履歴を保存する。
   if (annualOnly) {
-    const viewYear = Number(sp.get('year')) || new Date().getUTCFullYear();
     const { results: rows } = await db.prepare(`
       SELECT p.* FROM maintenance_plan p
       WHERE p.deleted_at IS NULL
       ORDER BY p.planned_date ASC, p.id ASC
     `).all();
-    // 年間計画タスクの判定: annual_only=1（新しい年間計画）か、一括登録（batch署名）。
-    // ※ かつての「各月1日」ヒューリスティックは、1日付の通常カレンダー予定まで
-    //   年間計画表に混ざる原因になっていたため廃止（annual_only 列は移行済み前提）。
     const batchIds = await getBatchPlanIds(db);
     const plans = (rows ?? []).filter((p) => p.annual_only || batchIds.has(String(p.id)));
-
-    // 当年の完了状況を重ねる（毎年共通テンプレートの「その年の実施状況」）。
-    // on_calendar の予定は日付固定の単発なので本体 status をそのまま使う。
-    // annual_plan_status 未作成（未マイグレーション）のときは重ねず本体 status を使う
-    // ＝従来どおり完了できる（テーブル作成後に年ごと管理へ自動で切り替わる）。
-    let hasYearStatus = true;
-    const statusMap = new Map();
-    try {
-      const { results: st } = await db.prepare(
-        'SELECT plan_id, status FROM annual_plan_status WHERE year = ?'
-      ).bind(viewYear).all();
-      for (const r of (st ?? [])) statusMap.set(String(r.plan_id), r.status);
-    } catch {
-      hasYearStatus = false;
-    }
-    if (hasYearStatus) {
-      for (const p of plans) {
-        if (!p.on_calendar) p.status = statusMap.get(String(p.id)) ?? 'pending';
-      }
-    }
-    return json({ plans, year: viewYear });
+    return json({ plans });
   }
 
   let rangeStart, rangeEnd;

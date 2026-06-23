@@ -98,22 +98,17 @@ async function renderList(equipmentId) {
     );
   };
 
-  const catSel = el('select', { onchange: (e) => { filterCategory = e.target.value; load().catch(showError); } }, [
+  const catSel = el('select', { onchange: (e) => { filterCategory = e.target.value; } }, [
     el('option', { value: '' }, '全ジャンル'),
     ...cats.map((c) => el('option', { value: c.id }, c.name)),
   ]);
-  const eqSel = el('select', { onchange: (e) => { filterEquipment = e.target.value; load().catch(showError); } }, [
+  const eqSel = el('select', { onchange: (e) => { filterEquipment = e.target.value; } }, [
     el('option', { value: '' }, '全設備'),
     ...equipment.map((e) => el('option', { value: e.id, selected: String(e.id) === filterEquipment }, `${e.code} ${e.name}`)),
   ]);
-  const fromInput = el('input', {
-    type: 'date',
-    onchange: (e) => { filterFrom = e.target.value; load().catch(showError); },
-  });
-  const toInput = el('input', {
-    type: 'date',
-    onchange: (e) => { filterTo = e.target.value; load().catch(showError); },
-  });
+  const fromInput = el('input', { type: 'date', onchange: (e) => { filterFrom = e.target.value; } });
+  const toInput   = el('input', { type: 'date', onchange: (e) => { filterTo   = e.target.value; } });
+  const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
 
   // CSV出力（現在の絞り込み結果をそのまま出力。Shift_JIS は Excel 文字化け対策）
   const exportCsv = (enc) => {
@@ -136,6 +131,7 @@ async function renderList(equipmentId) {
         el('div', { class: 'field' }, [el('label', {}, '期間（から）'), fromInput]),
         el('div', { class: 'field' }, [el('label', {}, '〜（まで）'), toInput]),
       ]),
+      el('div', { class: 'action-row', style: 'margin-top:8px' }, [searchBtn]),
     ]),
     el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
       hasRole(currentUser, 'editor')
@@ -147,7 +143,11 @@ async function renderList(equipmentId) {
     ]),
     listBox,
   ]);
-  await load();
+  if (equipmentId) {
+    await load();
+  } else {
+    render(listBox, el('p', { class: 'empty' }, '🔍 絞り込み条件を選んで「検索」を押してください。'));
+  }
 }
 
 // ---------------- 詳細 ----------------
