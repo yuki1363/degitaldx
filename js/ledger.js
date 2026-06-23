@@ -617,9 +617,39 @@ async function renderForm(existing) {
     }
   };
 
+  // 銘板写真から自動読み取り（Cloudflare Workers AI Vision）
+  const ocrStatus = el('span', { class: 'hint', style: 'margin-left:8px' });
+  const ocrInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    ocrStatus.textContent = '⏳ 画像をアップロード中…';
+    try {
+      const img = await resizeImageFile(file, 1280, 0.85);
+      const meta = await uploadFile(img);
+      ocrStatus.textContent = '🤖 AIが読み取り中…';
+      const { extracted, note } = await api.post('/api/ai/extract-equipment', { file_id: meta.id });
+      if (!extracted) { ocrStatus.textContent = note || '読み取れませんでした。'; return; }
+      if (extracted.equipment_name) cascade.lineInput.value = extracted.equipment_name;
+      if (extracted.manufacturer) f.manufacturer.value = extracted.manufacturer;
+      if (extracted.model) f.model.value = extracted.model;
+      if (extracted.serial_no) f.serial_no.value = extracted.serial_no;
+      if (extracted.year) f.manufactured_on.value = `${extracted.year}-01`;
+      if (extracted.note) f.note.value = (f.note.value ? f.note.value + '\n' : '') + extracted.note;
+      ocrStatus.textContent = '✅ 読み取り完了！内容を確認してください。';
+    } catch (err) {
+      ocrStatus.textContent = `❌ ${err.message}`;
+    }
+    ocrInput.value = '';
+  } });
+
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '設備を編集' : '設備を追加'),
+      el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [
+        el('button', { class: 'btn btn-sm', onclick: () => ocrInput.click() }, '📷 銘板から自動読み取り（AI）'),
+        ocrInput,
+        ocrStatus,
+      ]),
       field('設備番号（QRラベルに使用・新規は空欄で自動採番）', f.code),
       field('設備名（必須・在庫/台帳から選択 or 自由入力）', cascade.lineInput),
       cascade.lineDatalist,
