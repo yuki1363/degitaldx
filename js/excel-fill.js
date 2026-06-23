@@ -97,10 +97,15 @@ function xmlEscape(s) {
     .replace(/'/g, '&apos;');
 }
 
-// XML文字列中の {{タグ}} を置換する。未知タグは原文のまま残す
+// XML文字列中の {{タグ}} を置換する。未知タグは原文のまま残す。
+//   Excel はセルに {{会社名}} と入力しても、書式や編集履歴の都合で文字を複数の
+//   <r>（run）に分割して保存することがある（例: <t>{{会社</t></r><r><t>名}}</t>）。
+//   その場合タグ名の途中に XML タグが挟まるため、捕捉した名前から <...> を除去してから
+//   照合する。一致したらマッチ全体（途中の run 区切りタグを含む）を値に置換するので、
+//   分割された run は1つにまとまり、書式・レイアウトは保持される。
 function replaceTags(xml, values) {
   return xml.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (m, raw) => {
-    const tag = raw.trim();
+    const tag = raw.replace(/<[^>]*>/g, '').trim();
     return Object.prototype.hasOwnProperty.call(values, tag) ? xmlEscape(values[tag]) : m;
   });
 }
