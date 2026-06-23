@@ -1915,6 +1915,53 @@ input.is-abnormal {
   box-shadow: var(--shadow);
 }
 
+/* ホーム概要タブ（期限超過 / 直近 / 最近の動き を1カードにまとめる） */
+.home-tabs {
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.home-tabs-bar { display: flex; border-bottom: 1px solid #e5e7eb; }
+.home-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 11px 6px;
+  background: #f8fafc;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.home-tab:hover { background: #f1f5f9; }
+.home-tab.is-active {
+  background: var(--color-surface);
+  color: #1e40af;
+  border-bottom-color: #1e40af;
+}
+.home-tab-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #94a3b8;
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-weight: 700;
+}
+.home-tab-count.is-over { background: #dc2626; }
+.home-tabs-body { padding: 12px 14px; }
+.home-tab-empty { color: #9ca3af; font-size: 13px; margin: 6px 0; }
+
 /* 保全予定の状況（ホーム/ダッシュボード共通） */
 .plan-sum-head { font-weight: 700; font-size: 13px; color: #374151; }
 .plan-sum-head.is-over { color: #b91c1c; }

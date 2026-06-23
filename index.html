@@ -39,17 +39,9 @@
   <main class="container">
     <p class="notice is-error" id="auth-notice" hidden></p>
     <p class="notice is-warning" id="storage-alert" hidden></p>
-    <p class="notice is-warning" id="planend-alert" hidden></p>
 
-    <div id="plan-status"></div>
-
-    <section class="home-activity" id="home-activity" hidden>
-      <div class="home-activity-head">
-        <h2 class="home-activity-title">最近の動き</h2>
-        <a class="home-activity-more" href="/pages/notifications">すべて見る ›</a>
-      </div>
-      <div id="home-activity-list"></div>
-    </section>
+    <!-- ホーム概要（期限超過 / 直近 / 最近の動き をタブで切り替え。js/home-tabs.js） -->
+    <div id="home-overview"></div>
 
     <nav class="tile-grid" aria-label="機能メニュー">
       <a class="tile" href="/pages/plan">
@@ -124,8 +116,7 @@
   <script type="module">
     import { getCurrentUser, hasRole, ROLE_LABELS } from '/js/auth.js';
     import { api } from '/js/api.js';
-    import { el, render, formatDateTime } from '/js/util.js';
-    import { loadPlanStatusInto } from '/js/plan-summary.js';
+    import { loadHomeTabs } from '/js/home-tabs.js';
 
     // Service Worker 登録（PWA: オフラインでもアプリが起動する）
     if ('serviceWorker' in navigator) {
@@ -151,9 +142,7 @@
       document.getElementById('user-role').textContent = ROLE_LABELS[user.role] || user.role;
       document.getElementById('user-chip').hidden = false;
       showStorageAlertForAdmin(user);
-      showMonthEndPlanAlert();
-      loadPlanStatusInto(document.getElementById('plan-status'));
-      loadHomeActivity();
+      loadHomeTabs(document.getElementById('home-overview'));
       // 管理者のみ管理タイルを有効化
       if (user.role === 'admin') {
         const tile = document.getElementById('tile-admin');
@@ -169,70 +158,6 @@
       } else {
         notice.textContent = err.message;
         notice.hidden = false;
-      }
-    }
-
-    // 最近の動き（通知）: ベルのバッジ・ホームの一覧を表示。全ログインユーザー対象
-    const ACTIVITY_DOT = { alert: '#dc2626', warning: '#b45309', info: '#1e40af' };
-    async function loadHomeActivity() {
-      try {
-        const { notifications, unread_count } = await api.get('/api/notifications?limit=6');
-        const bell = document.getElementById('notif-bell');
-        if (bell) bell.hidden = false;
-        const badgeText = unread_count > 99 ? '99+' : String(unread_count);
-        for (const id of ['notif-bell-badge', 'tile-notif-badge']) {
-          const b = document.getElementById(id);
-          if (!b) continue;
-          if (unread_count > 0) { b.textContent = badgeText; b.hidden = false; }
-          else b.hidden = true;
-        }
-        if (!notifications || notifications.length === 0) return;
-        render(document.getElementById('home-activity-list'), notifications.map((n) =>
-          el('a', {
-            class: 'home-activity-item' + (n.acknowledged_at ? '' : ' is-unack'),
-            href: n.link_url || '/pages/notifications',
-          }, [
-            el('span', { class: 'home-activity-dot', style: `background:${ACTIVITY_DOT[n.level] || ACTIVITY_DOT.info}` }),
-            el('span', { class: 'home-activity-text' }, n.title),
-            el('span', { class: 'home-activity-time' }, formatDateTime(n.created_at)),
-          ])
-        ));
-        document.getElementById('home-activity').hidden = false;
-      } catch {
-        // 通知の取得失敗はホーム表示を妨げない
-      }
-    }
-
-    // 月末が近いとき、今月の未完了の保全予定（カレンダー表示の予定）を一覧で知らせる。
-    // どの予定が未完了かを直接わかるよう、件名・日付つきで各予定の詳細へリンクする。
-    async function showMonthEndPlanAlert() {
-      try {
-        const today = new Date();
-        const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-        const daysLeft = daysInMonth - today.getDate();
-        if (daysLeft > 7) return; // 月末1週間以内のみ
-        const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-        const { plans } = await api.get(`/api/plans?month=${monthStr}`);
-        const pending = (plans || []).filter((p) => p.status !== 'done');
-        if (pending.length === 0) return;
-        pending.sort((a, b) => String(a.planned_date).localeCompare(String(b.planned_date)));
-        const top = pending.slice(0, 8);
-        const mmdd = (d) => (d || '').slice(5, 10).replace('-', '/');
-        const alert = document.getElementById('planend-alert');
-        render(alert, [
-          el('div', { style: 'font-weight:600;margin-bottom:4px' },
-            `⚠ 今月の保全予定で未完了が ${pending.length} 件あります（月末まであと${daysLeft}日）`),
-          el('ul', { style: 'margin:4px 0;padding-left:20px' }, top.map((p) =>
-            el('li', {}, el('a', { href: `/pages/plan?id=${p.id}` },
-              `${mmdd(p.planned_date)} ${p.title}${p.status === 'overdue' ? '（期限超過）' : ''}`)))),
-          pending.length > top.length
-            ? el('div', { class: 'hint', style: 'margin-bottom:4px' }, `…ほか ${pending.length - top.length} 件`)
-            : null,
-          el('a', { href: '/pages/plan', style: 'font-weight:600' }, 'カレンダーで確認 ›'),
-        ]);
-        alert.hidden = false;
-      } catch {
-        // 予定の取得失敗はホーム表示を妨げない
       }
     }
 
