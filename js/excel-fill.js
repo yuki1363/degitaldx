@@ -12,6 +12,7 @@
 
 import { api } from '/js/api.js';
 import { el, formatDate, formatDateTime } from '/js/util.js';
+import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const PLAN_TYPE_LABELS = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
@@ -110,6 +111,33 @@ function replaceTags(xml, values) {
   });
 }
 
+// 1つの文字列項目（共有文字列 <si> / インライン文字列 <is>）の中身を、タグ置換した
+// テキストに作り直す。タグを含まなければ null を返す（＝その項目は一切変更しない）。
+//   ・ふりがな <rPh> を取り除いてから本文 <t> を連結する。連結することで Excel が
+//     {{会社名}} を複数の run に分割保存していても確実に置換できる。
+//   ・<rPh> を残したままテキスト長が変わると、ふりがなの文字オフセットが範囲外になり
+//     Excel が「内容に問題が見つかりました（修復）」を出す原因になるため、置換した
+//     項目では <rPh> を捨てて単一の <t> に作り直す。
+function fillStringItemInner(inner, values) {
+  const noPh = inner.replace(/<rPh\b[^>]*>[\s\S]*?<\/rPh>/g, '');
+  let text = '';
+  const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+  let m;
+  while ((m = tRe.exec(noPh)) !== null) text += m[1];
+  if (text.indexOf('{{') === -1) return null; // タグ無し → 変更しない（書式・ふりがな保持）
+  return replaceTags(text, values);
+}
+
+// sharedStrings/worksheet の文字列項目（si または is）ごとにタグ置換する。
+// 置換した項目だけを単一<t>に作り直し、それ以外の項目はそのまま残す。
+function fillStringItems(xml, tagName, values) {
+  const re = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, 'g');
+  return xml.replace(re, (whole, inner) => {
+    const replaced = fillStringItemInner(inner, values);
+    return replaced === null ? whole : `<${tagName}><t xml:space="preserve">${replaced}</t></${tagName}>`;
+  });
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -200,10 +228,14 @@ async function fillAndDownload(template, type, record, inputValues) {
     throw new Error('Excel(.xlsx) として読み取れませんでした。管理画面で Excel を登録し直してください。');
   }
 
-  // 自動タグ → 定義済み入力項目の「空」既定 → 実際の入力値、の順でマージする。
+  // 自動タグ → 標準/定義済み入力項目の「空」既定 → 実際の入力値、の順でマージする。
   // これで未入力の入力項目も {{タグ}} を残さず空欄になる（自動タグと同名のものは除外）。
   const auto = buildValues(type, record);
   const base = { '開始時間': '', '終了時間': '' };
+  // 工事連絡書は、テンプレートに入力項目(fields_json)が無くても標準項目を空既定に含める
+  if (type === 'construction_notice') {
+    for (const f of CONSTRUCTION_NOTICE_FIELDS) if (!(f.tag in auto)) base[f.tag] = '';
+  }
   try {
     const fields = JSON.parse(template.fields_json || '[]');
     if (Array.isArray(fields)) {
@@ -211,12 +243,17 @@ async function fillAndDownload(template, type, record, inputValues) {
     }
   } catch { /* テンプレ定義が壊れていても続行 */ }
   const values = { ...auto, ...base, ...(inputValues || {}) };
-  const targets = Object.keys(zip.files).filter(
-    (p) => p === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(p)
-  );
-  for (const path of targets) {
+
+  // 文字列セル単位（共有文字列 <si> / インライン文字列 <is>）で置換する。
+  // run 分割やふりがなの影響を受けず、置換したセルだけを作り直す（他セルは無変更）。
+  if (zip.file('xl/sharedStrings.xml')) {
+    const xml = await zip.file('xl/sharedStrings.xml').async('string');
+    zip.file('xl/sharedStrings.xml', fillStringItems(xml, 'si', values));
+  }
+  for (const path of Object.keys(zip.files)) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(path)) continue;
     const xml = await zip.file(path).async('string');
-    zip.file(path, replaceTags(xml, values));
+    zip.file(path, fillStringItems(xml, 'is', values));
   }
 
   const outBlob = await zip.generateAsync({ type: 'blob', mimeType: XLSX_MIME });
