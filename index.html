@@ -203,7 +203,8 @@
       }
     }
 
-    // 月末が近いとき、今月の未完了の保全予定（年間計画表）を知らせて完了チェックを促す
+    // 月末が近いとき、今月の未完了の保全予定（カレンダー表示の予定）を一覧で知らせる。
+    // どの予定が未完了かを直接わかるよう、件名・日付つきで各予定の詳細へリンクする。
     async function showMonthEndPlanAlert() {
       try {
         const today = new Date();
@@ -214,10 +215,20 @@
         const { plans } = await api.get(`/api/plans?month=${monthStr}`);
         const pending = (plans || []).filter((p) => p.status !== 'done');
         if (pending.length === 0) return;
+        pending.sort((a, b) => String(a.planned_date).localeCompare(String(b.planned_date)));
+        const top = pending.slice(0, 8);
+        const mmdd = (d) => (d || '').slice(5, 10).replace('-', '/');
         const alert = document.getElementById('planend-alert');
         render(alert, [
-          el('span', {}, `⚠ 今月の保全予定で未完了が ${pending.length} 件あります（月末まであと${daysLeft}日）。`),
-          el('a', { href: '/pages/plan-annual', style: 'margin-left:6px;font-weight:600' }, '年間計画表で確認 ›'),
+          el('div', { style: 'font-weight:600;margin-bottom:4px' },
+            `⚠ 今月の保全予定で未完了が ${pending.length} 件あります（月末まであと${daysLeft}日）`),
+          el('ul', { style: 'margin:4px 0;padding-left:20px' }, top.map((p) =>
+            el('li', {}, el('a', { href: `/pages/plan?id=${p.id}` },
+              `${mmdd(p.planned_date)} ${p.title}${p.status === 'overdue' ? '（期限超過）' : ''}`)))),
+          pending.length > top.length
+            ? el('div', { class: 'hint', style: 'margin-bottom:4px' }, `…ほか ${pending.length - top.length} 件`)
+            : null,
+          el('a', { href: '/pages/plan', style: 'font-weight:600' }, 'カレンダーで確認 ›'),
         ]);
         alert.hidden = false;
       } catch {
