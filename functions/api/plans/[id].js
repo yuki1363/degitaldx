@@ -132,6 +132,24 @@ export async function onRequestPut({ request, params, env, data }) {
     }
   }
 
+  // 年間計画タスクの完了は「年ごと」に記録する（毎年共通テンプレートの当年の実施状況）。
+  // status を変更したとき、annual_only の予定なら annual_plan_status にも反映する。
+  // 対象年は annual_year（年間計画表の表示年）。未指定なら現在の年。
+  if ('status' in body && existing.annual_only) {
+    const yr = Number.isInteger(Number(body.annual_year)) ? Number(body.annual_year) : new Date().getUTCFullYear();
+    const st = STATUSES.includes(body.status) ? body.status : 'pending';
+    try {
+      await db.prepare(
+        `INSERT INTO annual_plan_status (plan_id, year, status, updated_by, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(plan_id, year) DO UPDATE SET status = ?3, updated_by = ?4, updated_at = ?5`
+      ).bind(id, yr, st, userEmail, now).run();
+      diff['annual_status'] = { year: yr, to: st };
+    } catch (err) {
+      if (!/no such table/i.test(String(err?.message || ''))) throw err;
+    }
+  }
+
   if (Object.keys(diff).length > 0) {
     await writeAuditLog(db, {
       tableName: 'maintenance_plan',

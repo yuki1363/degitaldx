@@ -92,9 +92,10 @@ function openPlanSheet(plan, monthLabel) {
     openSheet(`${monthLabel}: ${plan.title}（繰り返し予定）`, actions);
     return;
   }
+  // 完了は年ごとに記録（annual_year=表示年）。新年は自動で未実施から始まる
   actions.push(plan.status === 'done'
-    ? { label: '未完了に戻す', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'pending' })) }
-    : { label: '✓ 完了にする', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'done' })) });
+    ? { label: `未完了に戻す（${year}年）`, onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'pending', annual_year: year })) }
+    : { label: `✓ 完了にする（${year}年）`, onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'done', annual_year: year })) });
   actions.push({ label: '👤 点検者を変更', onClick: () => {
     const name = prompt('点検者名を入力', plan.inspector_name || '');
     if (name === null) return; // キャンセル
@@ -448,7 +449,8 @@ function exportCsv(rows, enc) {
 
 function monthEndAlert() {
   const today = new Date();
-  // 年間計画表は毎年共通。年に関係なく「今月」で判定する
+  // 月末アラートは「今年」を表示しているときだけ（過去年・来年の表示中は出さない）
+  if (year !== today.getFullYear()) return null;
   const curMonth = today.getMonth() + 1;
   const daysInMonth = new Date(today.getFullYear(), curMonth, 0).getDate();
   const daysLeft = daysInMonth - today.getDate();
@@ -501,11 +503,17 @@ function toolbar() {
   ]);
 }
 
-// 年間計画表は毎年共通のため年の切り替えは無し（カレンダーへ戻るリンクのみ）
+// 年ナビ: タスクは毎年共通だが、完了状況は年ごと。表示年を切り替えられる
 function yearNav() {
+  const thisYear = new Date().getFullYear();
   return el('div', { class: 'cal-nav no-print', style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' }, [
     el('a', { class: 'btn btn-sm', href: '/pages/plan' }, '‹ カレンダー'),
-    el('span', { style: 'flex:1;text-align:center;font-weight:600' }, '年間計画表（毎年共通）'),
+    el('div', { style: 'flex:1;display:flex;align-items:center;justify-content:center;gap:6px' }, [
+      el('button', { class: 'btn btn-sm', title: '前の年', onclick: () => { year -= 1; renderYear().catch(showError); } }, '‹'),
+      el('span', { style: 'font-weight:600;min-width:96px;text-align:center' },
+        `${year}年${year === thisYear ? '（今年）' : ''}`),
+      el('button', { class: 'btn btn-sm', title: '次の年', onclick: () => { year += 1; renderYear().catch(showError); } }, '›'),
+    ]),
   ]);
 }
 
@@ -550,7 +558,7 @@ function renderView() {
 // 同時に当年の点検実績も取得し、年間計画グリッドとの突合に使う
 async function renderYear() {
   const [{ plans }, equipData, inspData] = await Promise.all([
-    api.get('/api/plans?annual_only=1'),
+    api.get(`/api/plans?annual_only=1&year=${year}`),
     api.get('/api/equipment').catch(() => ({ equipment: [] })),
     api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31`).catch(() => ({ inspections: [] })),
   ]);

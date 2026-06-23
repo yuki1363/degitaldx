@@ -743,3 +743,23 @@ ALTER TABLE maintenance_plan ADD COLUMN source_plan_id INTEGER;
 --   1=表示する。年間計画タスクに実施日(planned_date)を入れて on_calendar=1 にすると、
 --   年間計画表に残したまま、その日付でカレンダーにも表示される（同一レコードを両ビューで表示）。
 ALTER TABLE maintenance_plan ADD COLUMN on_calendar INTEGER;
+
+-- annual_plan_status — 年間計画タスクの「年ごとの実施状況」
+--   年間計画表は毎年共通のテンプレート（同じ予定レコードを毎年表示）。完了状況は
+--   予定レコードの status 列だと年をまたいで残ってしまうため、年ごとにここで記録する。
+--   行が無い (plan_id, year) は未実施。新年は自動的に未実施から始まり、過去年の記録も残る。
+CREATE TABLE IF NOT EXISTS annual_plan_status (
+  plan_id    INTEGER NOT NULL,
+  year       INTEGER NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'done'
+  updated_by TEXT,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (plan_id, year)
+);
+
+-- 既存データ移行: これまで status 列に入っていた年間計画の完了を、その予定の
+--   planned_date の年の実施状況として annual_plan_status に取り込む（再完了の手間を防ぐ）。
+INSERT OR IGNORE INTO annual_plan_status (plan_id, year, status)
+SELECT id, CAST(substr(planned_date, 1, 4) AS INTEGER), 'done'
+  FROM maintenance_plan
+ WHERE annual_only = 1 AND status = 'done' AND deleted_at IS NULL AND planned_date IS NOT NULL;
