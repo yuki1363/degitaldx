@@ -9,8 +9,6 @@ import { uploadFile, resizeImageFile } from '/js/files.js';
 
 const chatList = document.getElementById('chat-list');
 const chatForm = document.getElementById('chat-form');
-const aiBotPanel = document.getElementById('ai-bot-panel');
-const aiBotBtn = document.getElementById('ai-bot-btn');
 
 let currentUser = null;
 let lastTimestamp = null;
@@ -209,69 +207,11 @@ function renderForm() {
   textarea.focus();
 }
 
-// ---- AI ボット ----
-
-function renderAiBot() {
-  if (!aiBotPanel || !aiBotBtn) return;
-  let history = [];
-  let isOpen = false;
-
-  const toggle = () => {
-    isOpen = !isOpen;
-    aiBotPanel.style.display = isOpen ? 'block' : 'none';
-    aiBotBtn.textContent = isOpen ? '✕ AI' : '🤖 AI';
-    if (isOpen) botInput.focus();
-  };
-  aiBotBtn.addEventListener('click', toggle);
-
-  const botLog = el('div', { class: 'ai-bot-log' }, [
-    el('p', { class: 'hint', style: 'margin:8px 12px' }, '保全業務に関する質問を入力してください。AI が回答します（参考情報のため、重要な判断は現場担当者が行ってください）。'),
-  ]);
-  const botInput = el('input', { type: 'text', placeholder: '例: モーターが過熱する場合の原因は？', style: 'flex:1' });
-  const askBtn = el('button', { class: 'btn btn-primary btn-sm', onclick: askAI }, '送信');
-
-  botInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); askAI(); } });
-
-  async function askAI() {
-    const msg = botInput.value.trim();
-    if (!msg) return;
-    botInput.value = '';
-    askBtn.disabled = true;
-
-    botLog.appendChild(el('div', { class: 'ai-bot-q' }, ['🙋 ', msg]));
-    const thinking = el('div', { class: 'ai-bot-a' }, ['🤖 考え中…']);
-    botLog.appendChild(thinking);
-    botLog.scrollTop = botLog.scrollHeight;
-
-    try {
-      const { reply } = await api.post('/api/ai/chat', { message: msg, history });
-      thinking.textContent = '';
-      thinking.appendChild(document.createTextNode('🤖 '));
-      thinking.appendChild(el('span', { style: 'white-space:pre-wrap' }, reply));
-      history.push({ role: 'user', content: msg }, { role: 'ai', content: reply });
-      if (history.length > 20) history = history.slice(-20);
-    } catch (err) {
-      thinking.textContent = `❌ ${err.message}`;
-    }
-    askBtn.disabled = false;
-    botLog.scrollTop = botLog.scrollHeight;
-    botInput.focus();
-  }
-
-  render(aiBotPanel, [
-    el('div', { class: 'ai-bot-wrap' }, [
-      botLog,
-      el('div', { class: 'chat-input-row', style: 'padding:6px 8px' }, [botInput, askBtn]),
-    ]),
-  ]);
-}
-
 (async () => {
   try {
     currentUser = await getCurrentUser();
     await loadInitial();
     renderForm();
-    renderAiBot();
     pollTimer = setInterval(poll, 30000);
     window.addEventListener('pagehide', () => clearInterval(pollTimer));
   } catch (err) {

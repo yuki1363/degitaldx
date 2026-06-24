@@ -1615,6 +1615,61 @@ input.is-abnormal {
   line-height: 1.6;
 }
 
+/* ---- 全ページ共通のAIアシスタント（FAB＋パネル） ---- */
+.ai-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+  cursor: pointer;
+}
+.ai-fab:active {
+  transform: scale(0.94);
+}
+.ai-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 210;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.ai-panel-sheet {
+  background: #fff;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.ai-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.ai-panel-sheet .ai-bot-wrap {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
 /* ---- 横断検索（11） ---- */
 .search-box-wrap {
   margin-bottom: 4px;
