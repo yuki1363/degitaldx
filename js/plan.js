@@ -152,14 +152,11 @@ async function renderMonthCalendar(year, month) {
     const fullDate = `${year}-${String(month).padStart(2, '0')}-${dayStr}`;
     const dayPlans = plans.filter((p) => inRange(p, fullDate));
     const isToday = fullDate === todayStr;
-    const handleDayClick = dayPlans.length > 0
-      ? () => showDaySheet(fullDate, `${month}月${d}日`, dayPlans)
-      : null;
+    // 予定の有無に関わらず日付をクリックでき、その日のシート（＋この日に予定を追加）を開く
+    const handleDayClick = () => showDaySheet(fullDate, `${month}月${d}日`, dayPlans);
     cells.push(
       el('div', { class: `cal-cell${isToday ? ' is-today' : ''}` }, [
-        handleDayClick
-          ? el('button', { class: 'cal-day-num is-clickable', onclick: handleDayClick }, String(d))
-          : el('div', { class: 'cal-day-num' }, String(d)),
+        el('button', { class: 'cal-day-num is-clickable', onclick: handleDayClick }, String(d)),
         ...dayPlans.slice(0, 3).map((p) =>
           el('a', {
             class: 'cal-event',
@@ -251,7 +248,10 @@ async function renderWeekCalendar(weekStart) {
     }, [
       el('div', { class: 'cal-week-header' }, [
         el('span', { class: 'cal-weekday-short', style: isWeekend ? 'color:#6b7280' : '' }, WEEKDAYS[i]),
-        el('div', { class: `cal-day-num${isToday ? ' is-today' : ''}` }, String(day.getDate())),
+        el('button', {
+          class: `cal-day-num is-clickable${isToday ? ' is-today' : ''}`,
+          onclick: () => showDaySheet(dayStr, `${day.getMonth() + 1}月${day.getDate()}日`, dayPlans),
+        }, String(day.getDate())),
       ]),
       ...dayPlans.map((p) =>
         el('a', {
