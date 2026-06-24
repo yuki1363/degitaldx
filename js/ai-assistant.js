@@ -5,6 +5,15 @@
 
 import { api } from '/js/api.js';
 import { el, render } from '/js/util.js';
+import '/js/nav.js';
+
+// AIボタンは「レコード詳細（?id=N）」を開いているページだけに表示する。
+// （サーバー buildPageContext が実データを返す詳細ルートと一致。それ以外は文脈が無く意味が薄い）
+const DETAIL_PATHS = ['/pages/trouble', '/pages/inspection', '/pages/repair', '/pages/ledger', '/pages/plan', '/pages/report'];
+function isRecordDetailPage() {
+  const id = Number(new URLSearchParams(location.search).get('id'));
+  return DETAIL_PATHS.includes(location.pathname) && Number.isInteger(id) && id > 0;
+}
 
 let history = [];
 
@@ -53,6 +62,7 @@ function buildPanelBody() {
 
 function init() {
   if (document.getElementById('ai-fab')) return; // 二重初期化を防ぐ
+  if (!isRecordDetailPage()) return;             // 詳細ページ以外ではAIボタンを出さない
 
   const { body, input } = buildPanelBody();
 

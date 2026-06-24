@@ -111,6 +111,15 @@ async function renderList(presetEquipmentId) {
 async function renderEntry({ equipmentId, existing, planId, plannedDate, assigneeName }) {
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
+  // 未保存ガード: 実際のユーザー入力があったら、ページ離脱時に「内容が消える」旨を警告する
+  // （‹=前ページ / 🏠=ホーム / ブラウザ戻る / 再読込 / タブ閉じ すべてに有効）
+  let dirty = false;
+  const markDirty = (e) => { if (e.isTrusted) dirty = true; };
+  app.addEventListener('input', markDirty);
+  app.addEventListener('change', markDirty);
+  app.addEventListener('click', (e) => { if (e.isTrusted && e.target.closest?.('.okng-btn')) dirty = true; });
+  window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
   const [{ equipment }, { users }] = await Promise.all([
     api.get('/api/equipment'),
     api.get('/api/users'),
@@ -258,6 +267,7 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
       if (result.has_abnormal) {
         alert('⚠ 異常値を含む記録として保存しました。必要に応じて修理依頼・トラブル記録を起票してください。');
       }
+      dirty = false; // 保存済みなので離脱警告を出さない
       go(`?id=${existing ? existing.id : result.id}`);
     } catch (err) {
       alert(err.message);
