@@ -6,10 +6,16 @@ let pdfjsLibPromise = null;
 
 function loadPdfjs() {
   if (!pdfjsLibPromise) {
-    pdfjsLibPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs').then((lib) => {
-      lib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
-      return lib;
-    });
+    pdfjsLibPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs')
+      .then((lib) => {
+        lib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
+        return lib;
+      })
+      .catch((err) => {
+        // 読み込み失敗（ネットワーク断など）はキャッシュをリセットして次回リトライ可能にする
+        pdfjsLibPromise = null;
+        throw err;
+      });
   }
   return pdfjsLibPromise;
 }
