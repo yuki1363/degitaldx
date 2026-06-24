@@ -4,6 +4,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 
 const app = document.getElementById('app');
 
@@ -163,10 +164,11 @@ async function renderSearch() {
   const fromIn = el('input', { type: 'date', value: params.from, onchange: triggerSearch });
   const toIn   = el('input', { type: 'date', value: params.to,   onchange: triggerSearch });
 
-  const equipSel = el('select', { onchange: triggerSearch }, [
-    el('option', { value: '' }, '全設備'),
-    ...equipment.map((e) => el('option', { value: e.id, selected: params.equipment_id === String(e.id) }, `${e.code} ${e.name}`)),
-  ]);
+  const equipSel = buildEquipSelect(equipment, {
+    value: params.equipment_id || '',
+    allLabel: '全設備',
+    onchange: triggerSearch,
+  });
 
   const catSel = el('select', { onchange: triggerSearch }, [
     el('option', { value: '' }, 'ジャンル指定なし'),

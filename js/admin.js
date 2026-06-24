@@ -6,6 +6,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 import { renderPrintTemplates } from '/js/print-templates.js';
 import { renderFileManager } from '/js/admin-files.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -327,10 +328,10 @@ function customFieldSection() {
 async function renderManage() {
   const { equipment } = await api.get('/api/equipment');
 
-  const equipSel = el('select', {}, [
-    el('option', { value: '' }, '— 設備を選択'),
-    ...equipment.map((e) => el('option', { value: e.id }, `${e.code} ${e.name}`)),
-  ]);
+  const equipSel = buildEquipSelect(equipment, {
+    allLabel: '設備を選択',
+    placeholder: '設備を選択（入力で絞り込み）',
+  });
 
   render(tabContent, [
     categorySection('トラブルジャンル', '/api/troubles/categories', '使用中のジャンルは削除できません（先に該当トラブル記録のジャンルを変更してください）。'),

@@ -655,6 +655,76 @@ label {
   margin-top: 2px;
 }
 
+/* 設備の検索可能ピッカー（単一選択） */
+.equip-picker-wrap {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.equip-picker {
+  width: 100%;
+}
+.equip-picker.is-unmatched {
+  border-color: var(--color-danger);
+}
+
+/* 設備の複数選択ピッカー */
+.equip-multi {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.equip-multi-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--color-bg-subtle, #f5f5f5);
+  border-bottom: 1px solid var(--color-border);
+}
+.equip-multi-filter {
+  flex: 1;
+  min-width: 0;
+}
+.equip-multi-count {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.equip-multi-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.equip-multi-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  background: var(--color-bg-subtle, #f5f5f5);
+  position: sticky;
+  top: 0;
+}
+.equip-multi-grouptoggle {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+.equip-multi-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 14px;
+  cursor: pointer;
+}
+.equip-multi-item input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
 input.is-abnormal {
   border-color: var(--color-danger);
   background: var(--color-danger-bg);

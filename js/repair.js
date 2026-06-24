@@ -10,6 +10,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 
 const STATUS = {
@@ -358,12 +359,10 @@ async function renderForm(existing, prefill = null) {
   const init = existing || prefill || {};
   const f = {
     title: el('input', { type: 'text', value: init.title || '', placeholder: '例: 3号機 ポンプ異音' }),
-    equipment_id: el('select', {},
-      [el('option', { value: '' }, '— 設備を選択（任意）'),
-      ...equipment.map((e) =>
-        el('option', { value: e.id, selected: init.equipment_id === e.id }, `${e.code} ${e.name}`)
-      )]
-    ),
+    equipment_id: buildEquipSelect(equipment, {
+      value: init.equipment_id || '',
+      allLabel: '設備を選択（任意）',
+    }),
     assignee_name: el('input', {
       type: 'text',
       value: init.assignee_name || '',

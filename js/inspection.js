@@ -15,6 +15,7 @@ import {
 } from '/js/util.js';
 import { buildCommentsCard } from '/js/comments.js';
 import { openQrScanner } from '/js/qr-scan.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 
 const INPUT_TYPE_LABELS = { ok_ng: 'OK / NG', number: '数値', select: '選択式', text: '自由記述' };
 
@@ -37,12 +38,10 @@ function abnBadge(isAbnormal) {
 
 async function renderList(presetEquipmentId) {
   const { equipment } = await api.get('/api/equipment');
-  const equipmentSelect = el('select', {}, [
-    el('option', { value: '' }, 'すべての設備'),
-    equipment.map((eq) =>
-      el('option', { value: eq.id, selected: presetEquipmentId === eq.id }, `${eq.code} ${eq.name}`)
-    ),
-  ]);
+  const equipmentSelect = buildEquipSelect(equipment, {
+    value: presetEquipmentId || '',
+    allLabel: 'すべての設備',
+  });
   const fromInput = el('input', { type: 'date' });
   const toInput = el('input', { type: 'date' });
   const listBox = el('div', { class: 'row-list' }, []);
@@ -242,17 +241,20 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
   const checklistBox = el('div', {}, []);
   let itemInputs = [];
 
-  const equipmentSelect = el('select', { disabled: Boolean(existing) },
-    equipment.map((eq) =>
-      el('option', {
-        value: eq.id,
-        selected: existing ? eq.id === existing.equipment_id : eq.id === equipmentId,
-      }, `${eq.code} ${eq.name}`)
-    )
-  );
+  const equipmentSelect = buildEquipSelect(equipment, {
+    value: existing ? existing.equipment_id : (equipmentId || ''),
+    allLabel: '設備を選択',
+    placeholder: '設備を選択（入力で絞り込み）',
+    disabled: Boolean(existing),
+  });
 
   const loadChecklist = async () => {
     const eqId = Number(equipmentSelect.value);
+    if (!eqId) {
+      itemInputs = [];
+      render(checklistBox, el('p', { class: 'hint' }, '設備を選択すると点検項目が表示されます。'));
+      return;
+    }
     render(checklistBox, el('p', { class: 'loading' }, '点検項目を読み込み中…'));
     const { masters } = await api.get(`/api/inspections/masters?equipment_id=${eqId}`);
     if (masters.length === 0) {
@@ -391,7 +393,7 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
           equipmentSelect,
           el('button', {
             type: 'button', class: 'btn btn-sm',
-            onclick: () => openQrScanner((eqId) => { equipmentSelect.value = String(eqId); }),
+            onclick: () => openQrScanner((eqId) => { equipmentSelect.value = String(eqId); loadChecklist().catch(showError); }),
           }, '📷 QR'),
         ]),
       ]),

@@ -8,6 +8,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 
 const app = document.getElementById('app');
 
@@ -389,10 +390,7 @@ async function runLoad() {
 
 async function renderPage() {
   ({ equipment } = await api.get('/api/equipment'));
-  equipSelect = el('select', {}, [
-    el('option', { value: '' }, '全設備'),
-    ...equipment.map((e) => el('option', { value: e.id }, `${e.code} ${e.name}`)),
-  ]);
+  equipSelect = buildEquipSelect(equipment, { allLabel: '全設備' });
 
   render(app, [
     el('div', { class: 'card no-print' }, [

@@ -5,6 +5,7 @@ import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { loadPlanStatusInto } from '/js/plan-summary.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 
 const app = document.getElementById('app');
 
@@ -304,10 +305,11 @@ async function renderExtract(fromStr, toStr) {
   const fromInput = el('input', { type: 'date', value: currentFrom, onchange: (e) => { currentFrom = e.target.value; fetchAndRender().catch(() => {}); }});
   const toInput   = el('input', { type: 'date', value: currentTo,   onchange: (e) => { currentTo   = e.target.value; fetchAndRender().catch(() => {}); }});
 
-  const equipSel = el('select', { onchange: (e) => { equipId = e.target.value; fetchAndRender().catch(() => {}); }}, [
-    el('option', { value: '' }, '全設備'),
-    ...equipment.map((e) => el('option', { value: e.id }, `${e.code} ${e.name}`)),
-  ]);
+  const equipSel = buildEquipSelect(equipment, {
+    value: equipId || '',
+    allLabel: '全設備',
+    onchange: (e) => { equipId = e.target.value; fetchAndRender().catch(() => {}); },
+  });
 
   const allCats = [
     ...categories.map((c) => ({ ...c, _type: 'trouble' })),

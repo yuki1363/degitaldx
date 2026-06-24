@@ -12,6 +12,7 @@ import { buildCommentsCard } from '/js/comments.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 
 // CSV出力の列定義（トラブル履歴）
 const CSV_COLUMNS = [
@@ -102,10 +103,11 @@ async function renderList(equipmentId) {
     el('option', { value: '' }, '全ジャンル'),
     ...cats.map((c) => el('option', { value: c.id }, c.name)),
   ]);
-  const eqSel = el('select', { onchange: (e) => { filterEquipment = e.target.value; } }, [
-    el('option', { value: '' }, '全設備'),
-    ...equipment.map((e) => el('option', { value: e.id, selected: String(e.id) === filterEquipment }, `${e.code} ${e.name}`)),
-  ]);
+  const eqSel = buildEquipSelect(equipment, {
+    value: filterEquipment || '',
+    allLabel: '全設備',
+    onchange: (e) => { filterEquipment = e.target.value; },
+  });
   const fromInput = el('input', { type: 'date', onchange: (e) => { filterFrom = e.target.value; } });
   const toInput   = el('input', { type: 'date', onchange: (e) => { filterTo   = e.target.value; } });
   const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
@@ -354,12 +356,10 @@ async function renderForm(existing, prefill = null) {
         el('option', { value: c.id, selected: existing?.category_id === c.id }, c.name)
       )]
     ),
-    equipment_id: el('select', {},
-      [el('option', { value: '' }, '— 設備を選択（任意）'),
-      ...equipment.map((e) =>
-        el('option', { value: e.id, selected: init.equipment_id === e.id }, `${e.code} ${e.name}`)
-      )]
-    ),
+    equipment_id: buildEquipSelect(equipment, {
+      value: init.equipment_id || '',
+      allLabel: '設備を選択（任意）',
+    }),
     phenomenon: el('textarea', { placeholder: '例: 異音が発生した' }, init.phenomenon || ''),
     cause: el('textarea', { placeholder: '例: ベルトの摩耗' }, existing?.cause || ''),
     countermeasure: el('textarea', { placeholder: '例: ベルト交換' }, existing?.countermeasure || ''),

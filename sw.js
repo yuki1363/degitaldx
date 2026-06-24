@@ -25,6 +25,7 @@ const PRECACHE_URLS = [
   '/js/util.js',
   '/js/csv.js',
   '/js/equip-names.js',
+  '/js/equip-picker.js',
   '/js/qr-scan.js',
   '/js/ledger.js',
   '/js/labels.js',
