@@ -11,7 +11,6 @@ import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import {
   el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS,
 } from '/js/util.js';
-import { buildCommentsCard } from '/js/comments.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import qrcode from '/js/vendor/qrcode.mjs';
 
@@ -532,7 +531,6 @@ async function renderDetail(id) {
             )
           ),
     ]),
-    buildCommentsCard('equipment_ledger', eq.id, currentUser),
   ]);
 }
 
