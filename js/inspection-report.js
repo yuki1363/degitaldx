@@ -392,6 +392,12 @@ async function renderPage() {
   ({ equipment } = await api.get('/api/equipment'));
   equipSelect = buildEquipSelect(equipment, { allLabel: '全設備' });
 
+  // URLクエリ（例: まとめ入力の保存後リンク ?from=&to=&equipment_id=）で初期フィルタを指定できる
+  const qp = new URLSearchParams(window.location.search);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qp.get('from') || '')) fromInput.value = qp.get('from');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qp.get('to') || '')) toInput.value = qp.get('to');
+  if (qp.get('equipment_id')) equipSelect.value = qp.get('equipment_id');
+
   render(app, [
     el('div', { class: 'card no-print' }, [
       el('h2', { class: 'card-title' }, '点検レポート出力'),
