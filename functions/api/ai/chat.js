@@ -1,11 +1,10 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
+import { textModel } from '../_lib/ai-models.js';
 
 // AIチャットボット — Cloudflare Workers AI（無料枠）
-//   モデル: @cf/meta/llama-3.1-8b-instruct（無料）
+//   モデル: ai-models.js の textModel()（env AI_TEXT_MODEL で上書き可）
 //   用途: 保全業務に関する質問への回答（設備、点検、故障対応など）
 //   注意: AI が生成したコンテンツは参考情報です。実際の判断は現場担当者が行ってください。
-
-const MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
 const SYSTEM_PROMPT = `あなたは工場の設備保全業務を支援するアシスタントです。
 以下の業務に関する質問に日本語で簡潔・的確に回答してください:
@@ -39,7 +38,7 @@ export async function onRequestPost({ request, env, data }) {
   ];
 
   try {
-    const result = await ai.run(MODEL, { messages, max_tokens: 512 });
+    const result = await ai.run(textModel(env), { messages, max_tokens: 512 });
     const reply = result?.response || result?.result?.response || '回答を生成できませんでした。';
     return json({ reply });
   } catch (err) {

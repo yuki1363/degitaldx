@@ -1,11 +1,11 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
+import { visionModel } from '../_lib/ai-models.js';
 
 // 計器写真から数値を自動読み取り（Cloudflare Workers AI Vision）
 //   POST /api/ai/read-meter
 //   Body: { file_id, item_name, unit, min_value, max_value }
 //   Returns: { value: number|null, raw: string, note: string }
-
-const MODEL = '@cf/llava-hf/llava-1.5-7b-hf';
+//   モデル: ai-models.js の visionModel()（env AI_VISION_MODEL で上書き可）
 
 export async function onRequestPost({ request, env, data }) {
   if (!data.user) return jsonError(401, '認証が必要です');
@@ -60,7 +60,7 @@ export async function onRequestPost({ request, env, data }) {
 読み取れない場合は「不明」と返してください。`;
 
   try {
-    const result = await ai.run(MODEL, {
+    const result = await ai.run(visionModel(env), {
       image: imageData,
       prompt,
       max_tokens: 64,

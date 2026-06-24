@@ -30,10 +30,19 @@ binding = "FILES"
 bucket_name = "mainte-files"
 
 # ---------------------------------------------------------------------
-# Workers AI（AIチャットボット）
-#   無料枠: 10,000 neurons/日（Llama 3.1 8B 相当で約1,000〜5,000リクエスト/日）
+# Workers AI（AIチャットボット・画像読み取り）
+#   無料枠: 10,000 neurons/日（約1,000〜5,000リクエスト/日）
 #   Cloudflare ダッシュボード → Workers AI → バインディングを追加
 #   ローカルではモックとして動作（wrangler pages dev --ai）
+#
+#   使用モデル（functions/api/_lib/ai-models.js のデフォルト）:
+#     テキスト: @cf/meta/llama-4-scout-17b-16e-instruct
+#     画像    : @cf/meta/llama-3.2-11b-vision-instruct
+#   ※ Cloudflare がモデルを廃止したら（例: 5028 deprecated エラー）、
+#     ダッシュボード → Pages → 設定 → 環境変数 に下記を設定すれば
+#     再デプロイ不要で差し替えられる:
+#       AI_TEXT_MODEL   = <現行のテキスト生成モデルID>
+#       AI_VISION_MODEL = <現行の画像→テキストモデルID>
 # ---------------------------------------------------------------------
 [ai]
 binding = "AI"

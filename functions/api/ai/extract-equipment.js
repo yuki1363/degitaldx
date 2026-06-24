@@ -1,11 +1,11 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
+import { visionModel } from '../_lib/ai-models.js';
 
 // 設備銘板写真からデータを自動抽出（Cloudflare Workers AI Vision）
 //   POST /api/ai/extract-equipment
 //   Body: { file_id: number }（R2にアップロード済みの画像ファイルIDを指定）
 //   Returns: { equipment_name, model, serial_no, manufacturer, year, note }
-
-const MODEL = '@cf/llava-hf/llava-1.5-7b-hf';
+//   モデル: ai-models.js の visionModel()（env AI_VISION_MODEL で上書き可）
 
 export async function onRequestPost({ request, env, data }) {
   if (!data.user) return jsonError(401, '認証が必要です');
@@ -54,7 +54,7 @@ export async function onRequestPost({ request, env, data }) {
 JSONのみを返し、説明文は不要です。`;
 
   try {
-    const result = await ai.run(MODEL, {
+    const result = await ai.run(visionModel(env), {
       image: imageData,
       prompt,
       max_tokens: 256,
