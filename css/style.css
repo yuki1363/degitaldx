@@ -2491,3 +2491,56 @@ input.is-abnormal {
   color: var(--color-danger);
   font-weight: 700;
 }
+
+
+/* ---- AIサジェスト（トラブル入力） ---- */
+.ai-suggest-wrap {
+  margin: 0 0 8px;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ai-suggest-result {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.ai-suggest-head {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-primary);
+  margin-bottom: 8px;
+}
+.ai-suggest-text {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+}
+.ai-similar-cases {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.ai-similar-cases summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  padding: 4px 0;
+}
+.ai-case-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.ai-case-row:last-child { border-bottom: none; }
+.ai-case-phenomenon {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.ai-case-sub {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

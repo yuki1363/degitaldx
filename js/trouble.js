@@ -457,6 +457,111 @@ async function renderForm(existing, prefill = null) {
     }
   };
 
+  // AIサジェスト（現象→原因・対策）
+  const aiSuggestStatus = el('span', { class: 'hint', style: 'margin-left:8px' }, '');
+  const aiSuggestCard = el('div', { class: 'ai-suggest-wrap', hidden: true }, []);
+  const aiSuggestBtn = el('button', {
+    type: 'button',
+    class: 'btn btn-sm',
+    style: 'margin-top:4px',
+    onclick: async () => {
+      const phenomenon = f.phenomenon.value.trim();
+      if (!phenomenon) { alert('現象を入力してください。'); return; }
+      aiSuggestBtn.disabled = true;
+      aiSuggestStatus.textContent = 'AI解析中…';
+      render(aiSuggestCard, []);
+      aiSuggestCard.hidden = false;
+      try {
+        const { suggestion, similar_cases } = await api.post('/api/ai/suggest-trouble', { phenomenon });
+        const confLabel = { high: '（過去事例あり）', medium: '（類似事例あり）', low: '（一般知識から）' };
+        render(aiSuggestCard, [
+          el('div', { class: 'ai-suggest-result' }, [
+            el('div', { class: 'ai-suggest-head' }, [
+              '🤖 AI提案 ',
+              el('span', { class: 'hint' }, confLabel[suggestion.confidence] || ''),
+            ]),
+            suggestion.cause ? el('div', { class: 'field' }, [
+              el('label', {}, '提案：原因'),
+              el('div', { class: 'ai-suggest-text' }, suggestion.cause),
+              el('button', {
+                type: 'button', class: 'btn btn-sm',
+                onclick: () => { if (!f.cause.value || confirm('現在の入力を上書きしますか？')) f.cause.value = suggestion.cause; },
+              }, '原因に使う'),
+            ]) : null,
+            suggestion.countermeasure ? el('div', { class: 'field' }, [
+              el('label', {}, '提案：対策'),
+              el('div', { class: 'ai-suggest-text' }, suggestion.countermeasure),
+              el('button', {
+                type: 'button', class: 'btn btn-sm',
+                onclick: () => { if (!f.countermeasure.value || confirm('現在の入力を上書きしますか？')) f.countermeasure.value = suggestion.countermeasure; },
+              }, '対策に使う'),
+            ]) : null,
+            similar_cases.length > 0 ? el('details', { class: 'ai-similar-cases' }, [
+              el('summary', {}, `過去の類似事例（${similar_cases.length}件）`),
+              el('div', { class: 'row-list' },
+                similar_cases.map((c) => el('div', { class: 'ai-case-row' }, [
+                  el('div', { class: 'ai-case-phenomenon' }, c.phenomenon),
+                  c.cause ? el('div', { class: 'ai-case-sub' }, `原因: ${c.cause}`) : null,
+                  c.countermeasure ? el('div', { class: 'ai-case-sub' }, `対策: ${c.countermeasure}`) : null,
+                  el('div', { class: 'list-item-sub' }, [c.equipment_name, c.category_name].filter(Boolean).join(' / ')),
+                ]))
+              ),
+            ]) : null,
+          ]),
+        ]);
+        aiSuggestStatus.textContent = '';
+      } catch (err) {
+        aiSuggestStatus.textContent = err.message;
+        render(aiSuggestCard, []);
+        aiSuggestCard.hidden = true;
+      } finally {
+        aiSuggestBtn.disabled = false;
+      }
+    },
+  }, '🤖 AIサジェスト（過去事例から提案）');
+
+  // PDFから自動入力
+  const pdfStatusMsg = el('span', { class: 'hint', style: 'display:block;margin-top:4px' }, '');
+  const pdfFileInput = el('input', {
+    type: 'file', accept: 'application/pdf', hidden: true,
+    onchange: async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      pdfStatusMsg.textContent = 'PDF読み込み中…';
+      try {
+        const pdfjsLib = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
+        const buffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        let text = '';
+        for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map((item) => item.str).join(' ') + '\n';
+        }
+        if (!text.trim()) {
+          pdfStatusMsg.textContent = 'テキストを抽出できませんでした（スキャンPDFの場合は手動入力してください）。';
+          return;
+        }
+        pdfStatusMsg.textContent = 'AI解析中…';
+        const { extracted } = await api.post('/api/ai/parse-trouble-pdf', { text });
+        let filled = 0;
+        if (extracted.occurred_at) { f.occurred_at.value = extracted.occurred_at; filled++; }
+        if (extracted.phenomenon && !f.phenomenon.value) { f.phenomenon.value = extracted.phenomenon; filled++; }
+        if (extracted.cause && !f.cause.value) { f.cause.value = extracted.cause; filled++; }
+        if (extracted.countermeasure && !f.countermeasure.value) { f.countermeasure.value = extracted.countermeasure; filled++; }
+        if (extracted.reporter_name && !f.reporter_name.value) { f.reporter_name.value = extracted.reporter_name; filled++; }
+        pdfStatusMsg.textContent = filled > 0
+          ? `✓ ${filled}項目を自動入力しました。内容を確認・修正してください。`
+          : '項目を抽出できませんでした。手動で入力してください。';
+      } catch (err) {
+        pdfStatusMsg.textContent = `エラー: ${err.message}`;
+      } finally {
+        e.target.value = '';
+      }
+    },
+  });
+
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? 'トラブル記録を編集' : 'トラブルを記録'),
@@ -473,6 +578,8 @@ async function renderForm(existing, prefill = null) {
         ]),
       ]),
       field('現象（必須）', f.phenomenon),
+      el('div', { class: 'field' }, [aiSuggestBtn, aiSuggestStatus]),
+      aiSuggestCard,
       field('原因', f.cause),
       field('対策', f.countermeasure),
       field('記録者', f.reporter_name),
@@ -480,7 +587,12 @@ async function renderForm(existing, prefill = null) {
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
       el('div', { class: 'field' }, [
         el('label', {}, '写真・動画・PDF'),
-        el('button', { type: 'button', class: 'btn btn-sm', onclick: () => fileInput.click() }, '📷 写真・動画・PDFを追加'),
+        el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px' }, [
+          el('button', { type: 'button', class: 'btn btn-sm', onclick: () => fileInput.click() }, '📷 写真・動画・PDFを追加'),
+          el('button', { type: 'button', class: 'btn btn-sm', onclick: () => pdfFileInput.click() }, '📄 PDFから自動入力'),
+          pdfFileInput,
+        ]),
+        pdfStatusMsg,
         fileInput,
         fileListBox,
       ]),

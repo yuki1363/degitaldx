@@ -184,8 +184,50 @@ async function renderSearch() {
     category_id:  catSel.value,
   });
 
+  // AI自然言語解析ボタン — 日本語で入力した検索語をAIが期間・設備・種別に変換する
+  const aiParseStatus = el('span', { class: 'hint', style: 'margin-left:8px' }, '');
+  const aiParseBtn = el('button', {
+    type: 'button',
+    class: 'btn btn-sm',
+    style: 'flex-shrink:0',
+    onclick: async () => {
+      const query = searchInput.value.trim();
+      if (!query) { alert('検索語を入力してください（例: 先月コンプレッサで油漏れ）。'); return; }
+      aiParseBtn.disabled = true;
+      aiParseStatus.textContent = 'AI解析中…';
+      try {
+        const { parsed } = await api.post('/api/ai/parse-search', { query });
+        if (parsed.keywords != null) searchInput.value = parsed.keywords;
+        if (parsed.from) fromIn.value = parsed.from;
+        if (parsed.to) toIn.value = parsed.to;
+        if (Array.isArray(parsed.types) && parsed.types.length > 0) {
+          for (const type of ALL_TYPES) {
+            const cb = document.getElementById(`type-${type}`);
+            if (cb) cb.checked = parsed.types.includes(type);
+          }
+        }
+        if (parsed.equipment) {
+          const found = equipment.find((eq) =>
+            (eq.equipment_name || '').includes(parsed.equipment) ||
+            (eq.equipment_code || '').includes(parsed.equipment)
+          );
+          if (found) equipSel.value = String(found.id);
+        }
+        aiParseStatus.textContent = '';
+        triggerSearch();
+      } catch (err) {
+        aiParseStatus.textContent = err.message;
+      } finally {
+        aiParseBtn.disabled = false;
+      }
+    },
+  }, '🤖 AI解析');
+
   render(app, [
-    el('div', { class: 'search-box-wrap' }, [searchInput]),
+    el('div', { class: 'search-box-wrap' }, [
+      el('div', { style: 'display:flex;gap:6px;align-items:center' }, [searchInput, aiParseBtn]),
+      aiParseStatus,
+    ]),
     el('div', { class: 'filter-bar', style: 'margin-top:8px' }, typeChecks),
     el('div', { class: 'filter-bar' }, [
       el('label', { class: 'filter-label' }, ['FROM ', fromIn]),
