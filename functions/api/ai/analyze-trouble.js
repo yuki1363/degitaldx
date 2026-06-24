@@ -26,7 +26,7 @@ export async function onRequestPost({ request, env, data }) {
   try {
     if (env.DB && keyword) {
       const rows = await env.DB.prepare(
-        `SELECT tc.name AS category_name, el.equipment_name,
+        `SELECT tc.name AS category_name, el.name AS equipment_name,
                 tr.phenomenon, tr.cause, tr.countermeasure
          FROM trouble_record tr
          LEFT JOIN trouble_category tc ON tc.id = tr.category_id

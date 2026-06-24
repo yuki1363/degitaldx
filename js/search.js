@@ -208,8 +208,8 @@ async function renderSearch() {
         }
         if (parsed.equipment) {
           const found = equipment.find((eq) =>
-            (eq.equipment_name || '').includes(parsed.equipment) ||
-            (eq.equipment_code || '').includes(parsed.equipment)
+            (eq.name || '').includes(parsed.equipment) ||
+            (eq.code || '').includes(parsed.equipment)
           );
           if (found) equipSel.value = String(found.id);
         }

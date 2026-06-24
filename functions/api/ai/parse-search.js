@@ -20,9 +20,10 @@ export async function onRequestPost({ request, env, data }) {
       content: `あなたは工場設備保全アプリの検索アシスタントです。ユーザーの日本語クエリを解析し、検索条件をJSONで返してください。
 今日の日付（JST）: ${today}
 対応する種別: trouble（トラブル）/ repair（業務依頼）/ inspection（点検）/ report（日報）/ equipment（設備台帳）/ parts（部品在庫）/ plan（保全計画）
+「先月」「今週」「今年」などの相対表現は、今日の日付から計算して必ず実際の YYYY-MM-DD 形式に変換してください（日本語の日付表現をそのまま返さない）。
 回答は以下のJSON形式のみで返してください（他のテキストは不要）:
 {"keywords":"検索キーワード（スペース区切り、設備名は除く）","from":"YYYY-MM-DD or null","to":"YYYY-MM-DD or null","equipment":"設備名の一部 or null","types":["trouble","repair"] or null（全種別の場合はnull）}
-例1: 「先月コンプレッサで油漏れ」→ {"keywords":"油漏れ","from":"先月1日","to":"先月末日","equipment":"コンプレッサ","types":["trouble","repair"]}
+例1（今日が2026-06-24の場合）: 「先月コンプレッサで油漏れ」→ {"keywords":"油漏れ","from":"2026-05-01","to":"2026-05-31","equipment":"コンプレッサ","types":["trouble","repair"]}
 例2: 「3号機の点検履歴」→ {"keywords":"","from":null,"to":null,"equipment":"3号機","types":["inspection"]}`,
     },
     { role: 'user', content: query },

@@ -651,7 +651,7 @@ async function renderForm(existing, prefill = null) {
           phenomenon,
           cause: f.cause.value.trim(),
           countermeasure: f.countermeasure.value.trim(),
-          equipment_name: eq ? eq.equipment_name : '',
+          equipment_name: eq ? eq.name : '',
           category_name: catOpt && catOpt.value ? catOpt.text : '',
           pdf_text: extractedPdfText,
         });
