@@ -311,7 +311,8 @@ label {
 }
 
 /* ---- ページ共通（戻るリンク・カード・一覧） ---- */
-.back-link {
+.back-link,
+.home-link {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
@@ -324,7 +325,12 @@ label {
   font-size: 20px;
 }
 
-.back-link:active {
+.home-link {
+  font-size: 18px;
+}
+
+.back-link:active,
+.home-link:active {
   background: rgba(255, 255, 255, 0.2);
 }
 
