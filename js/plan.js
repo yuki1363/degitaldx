@@ -361,7 +361,7 @@ async function renderDetail(id, fromAnnual = false) {
   const permitStatusEl = (() => {
     if (permitTotal === 0) return null;
     let label, color, bg;
-    if (permitFilled === 0) { label = '未入力'; color = '#b45309'; bg = '#fffbeb'; }
+    if (permitFilled === 0) { label = '未入力'; color = '#64748b'; bg = '#f1f5f9'; }
     else if (permitFilled < permitTotal) { label = `一部入力（${permitFilled}/${permitTotal}項目）`; color = '#1e40af'; bg = '#eff6ff'; }
     else { label = `入力済み（${permitFilled}/${permitTotal}項目）`; color = '#15803d'; bg = '#f0fdf4'; }
     return el('span', { class: 'status-badge', style: `background:${bg};color:${color}` }, label);
