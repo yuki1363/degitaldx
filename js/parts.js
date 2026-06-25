@@ -43,8 +43,6 @@ function buildOrderEmail(part, orderQty) {
   if (part.model_no) lines.push(`型式: ${part.model_no}`);
   if (part.supplier) lines.push(`メーカー名: ${part.supplier}`);
   lines.push(
-    `現在庫: ${part.quantity}`,
-    `必要数: ${part.safety_stock}`,
     `希望発注数量: ${orderQty}`,
     '',
     'よろしくお願いいたします。',
