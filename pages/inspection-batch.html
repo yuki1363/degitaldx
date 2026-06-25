@@ -14,9 +14,12 @@
 </head>
 <body>
   <header class="app-header">
-    <a class="back-link" href="/pages/inspection" aria-label="点検へ戻る">‹</a>
+    <div class="nav-left">
+      <a class="back-link" href="/pages/inspection" aria-label="点検へ戻る">← 戻る</a>
+      <a class="home-link" href="/" aria-label="ホームへ戻る">🏠</a>
+    </div>
     <h1 class="app-title">点検まとめ入力</h1>
-    <a class="home-link" href="/" aria-label="ホームへ戻る">🏠</a>
+    <div class="header-spacer"></div>
   </header>
   <main class="container" id="app"></main>
   <script type="module" src="/js/inspection-batch.js"></script>

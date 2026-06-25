@@ -311,31 +311,49 @@ label {
 }
 
 /* ---- ページ共通（戻るリンク・カード・一覧） ---- */
-.back-link,
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.back-link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .home-link {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
   color: #fff;
   text-decoration: none;
-  font-size: 20px;
-}
-
-.home-link {
   font-size: 18px;
 }
 
 .back-link:active,
 .home-link:active {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .header-spacer {
-  width: 36px;
+  flex: 1;
 }
 
 .loading,
