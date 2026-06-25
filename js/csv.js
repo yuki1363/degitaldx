@@ -15,6 +15,15 @@ export function escCsv(v) {
     ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// Excel の自動変換よけ。設備番号「3-25」や品番「0012」などを Excel が
+// 日付（3月25日）や数値（先頭0が消える）に勝手に変換するのを防ぐ。
+//   ="値" の数式形式にすると Excel はその中身を文字列として保持する。
+//   （CSVエスケープは buildCsvText 側の escCsv が行うため、ここでは数式文字列のみ作る）
+export function excelText(v) {
+  if (v == null || v === '') return '';
+  return `="${String(v).replace(/"/g, '""')}"`;
+}
+
 export function buildCsvText(rows, columns) {
   const header = columns.map((c) => escCsv(c.label)).join(',');
   const body   = rows.map((r) => columns.map((c) => escCsv(c.value(r))).join(',')).join('\n');
