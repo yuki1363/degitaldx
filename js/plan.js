@@ -302,10 +302,83 @@ function infoRow(label, value) {
   ]);
 }
 
+// 工事連絡書テンプレートの「入力項目」をまとめる（同じタグは1つに）。
+// テンプレート未登録時は標準項目にフォールバック。詳細(renderDetail)と編集(renderForm)で共有。
+function buildPermitFields(templates) {
+  const seen = new Set();
+  const fields = [];
+  for (const t of (templates || [])) {
+    if (t.template_type !== 'construction_notice') continue;
+    let fs = [];
+    try { fs = JSON.parse(t.fields_json || '[]'); } catch { fs = []; }
+    for (const f of (Array.isArray(fs) ? fs : [])) {
+      if (f && f.tag && !seen.has(f.tag)) {
+        seen.add(f.tag);
+        fields.push({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' });
+      }
+    }
+  }
+  if (fields.length === 0) {
+    return CONSTRUCTION_NOTICE_FIELDS.map((f) => ({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' }));
+  }
+  return fields;
+}
+
+// plan.form_values_json を安全にパース
+function parseFormValues(jsonStr) {
+  try { return jsonStr ? (JSON.parse(jsonStr) || {}) : {}; }
+  catch { return {}; }
+}
+
 async function renderDetail(id, fromAnnual = false) {
-  const { plan } = await api.get(`/api/plans/${id}`);
+  // 計画と工事連絡書テンプレートを並行取得（テンプレートは入力状態の総数算出に使う）
+  const [{ plan }, tmplRes] = await Promise.all([
+    api.get(`/api/plans/${id}`),
+    api.get('/api/print-templates').catch(() => ({ templates: [] })),
+  ]);
   const canEdit = hasRole(currentUser, 'editor');
   const type = PLAN_TYPES[plan.plan_type] || PLAN_TYPES.other;
+
+  // 時間帯・工事連絡書（帳票）の入力状態を form_values_json から算出
+  const formValues = parseFormValues(plan.form_values_json);
+  const timeStart = formValues['開始時間'] ? String(formValues['開始時間']) : '';
+  const timeEnd = formValues['終了時間'] ? String(formValues['終了時間']) : '';
+  const timeText = timeStart || timeEnd
+    ? `${timeStart || '—'} 〜 ${timeEnd || '—'}`
+    : '';
+
+  // 帳票入力欄（開始/終了時間は時間帯で表示済みなので集計から除外）
+  const permitFields = buildPermitFields(tmplRes.templates)
+    .filter((f) => f.tag !== '開始時間' && f.tag !== '終了時間');
+  const isFilled = (v) => v != null && String(v).trim() !== '';
+  const filledFields = permitFields.filter((f) => isFilled(formValues[f.tag]));
+  const permitTotal = permitFields.length;
+  const permitFilled = filledFields.length;
+  // 種別=工事、または時間帯/帳票に入力があるときだけ関連行を表示する
+  const showConstructionInfo = plan.plan_type === 'construction' || timeText || permitFilled > 0;
+
+  // 工事連絡書の入力状態バッジ（未入力/一部入力/入力済み）
+  const permitStatusEl = (() => {
+    if (permitTotal === 0) return null;
+    let label, color, bg;
+    if (permitFilled === 0) { label = '未入力'; color = '#b45309'; bg = '#fffbeb'; }
+    else if (permitFilled < permitTotal) { label = `一部入力（${permitFilled}/${permitTotal}項目）`; color = '#1e40af'; bg = '#eff6ff'; }
+    else { label = `入力済み（${permitFilled}/${permitTotal}項目）`; color = '#15803d'; bg = '#f0fdf4'; }
+    return el('span', { class: 'status-badge', style: `background:${bg};color:${color}` }, label);
+  })();
+
+  // 入力済みの帳票内容（チェックは ✓、それ以外は値）を折りたたみ表示
+  const permitDetailsEl = filledFields.length > 0
+    ? el('details', { class: 'permit-detail' }, [
+        el('summary', {}, `工事連絡書の入力内容（${permitFilled}件）`),
+        el('div', { class: 'permit-detail-list' },
+          filledFields.map((f) => el('div', { class: 'permit-detail-row' }, [
+            el('span', { class: 'permit-detail-label' }, f.label),
+            el('span', { class: 'permit-detail-value' }, f.type === 'check' ? '✓' : String(formValues[f.tag])),
+          ]))
+        ),
+      ])
+    : null;
 
   render(app, [
     el('div', { class: 'card' }, [
@@ -327,6 +400,14 @@ async function renderDetail(id, fromAnnual = false) {
       infoRow('機器名', plan.equipment_name),
       infoRow('点検者', plan.inspector_name),
       infoRow('担当者', plan.assignee_name),
+      showConstructionInfo ? infoRow('時間帯', timeText) : null,
+      showConstructionInfo && permitStatusEl
+        ? el('div', { class: 'info-row' }, [
+            el('span', { class: 'info-label' }, '工事連絡書'),
+            el('span', { class: 'info-value' }, [permitStatusEl]),
+          ])
+        : null,
+      showConstructionInfo ? permitDetailsEl : null,
       infoRow('備考', plan.note),
     ]),
     canEdit
@@ -377,31 +458,9 @@ async function renderForm(existing, fromAnnual = false) {
     fetchEquipNames(),
     api.get('/api/print-templates').catch(() => ({ templates: [] })),
   ]);
-  // 工事連絡書テンプレートの「入力項目」をまとめる（同じタグは1つに）。計画ページで入力する欄
-  let permitFields = [];
-  {
-    const seen = new Set();
-    for (const t of (tmplRes.templates || [])) {
-      if (t.template_type !== 'construction_notice') continue;
-      let fs = [];
-      try { fs = JSON.parse(t.fields_json || '[]'); } catch { fs = []; }
-      for (const f of (Array.isArray(fs) ? fs : [])) {
-        if (f && f.tag && !seen.has(f.tag)) {
-          seen.add(f.tag);
-          permitFields.push({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' });
-        }
-      }
-    }
-  }
-  // テンプレート未登録／入力項目が未設定（古いテンプレート等）の場合は標準項目を使う。
-  // これで種別＝工事を選べば必ず帳票入力欄が表示される。
-  if (permitFields.length === 0) {
-    permitFields = CONSTRUCTION_NOTICE_FIELDS.map((f) => ({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' }));
-  }
-  const permitValues = (() => {
-    try { return existing?.form_values_json ? (JSON.parse(existing.form_values_json) || {}) : {}; }
-    catch { return {}; }
-  })();
+  // 工事連絡書テンプレートの「入力項目」（テンプレート未登録時は標準項目）。計画ページで入力する欄
+  const permitFields = buildPermitFields(tmplRes.templates);
+  const permitValues = parseFormValues(existing?.form_values_json);
 
   const cascade = buildEquipCascade(names, {
     line: existing?.line_name || '',

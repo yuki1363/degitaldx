@@ -2577,3 +2577,34 @@ input.is-abnormal {
   line-height: 1.6;
   white-space: pre-wrap;
 }
+
+/* ---- 保全計画: 工事連絡書の入力内容（折りたたみ） ---- */
+.permit-detail {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.permit-detail > summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  padding: 6px 0;
+}
+.permit-detail-list {
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+.permit-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--color-border);
+}
+.permit-detail-label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.permit-detail-value {
+  text-align: right;
+  word-break: break-word;
+}
