@@ -29,22 +29,27 @@ function showError(err) {
 
 // ---------------- 発注（Outlook メール作成） ----------------
 
-// 発注メールの件名・本文を自動生成する。
-//   件名「【発注依頼】部品名」／本文は部品名・現在庫・必要数・希望発注数量。
-//   （型番・仕入先・依頼者は本文に含めない方針）
 function buildOrderEmail(part, orderQty) {
   const subject = `【発注依頼】${part.name}`;
-  const body = [
+  const lines = [
+    '〇〇会社　〇〇様',
+    '',
+    'いつもお世話になっています。',
+    '',
     '下記の部品の発注をお願いいたします。',
     '',
     `部品名: ${part.name}`,
+  ];
+  if (part.model_no) lines.push(`型式: ${part.model_no}`);
+  if (part.supplier) lines.push(`メーカー名: ${part.supplier}`);
+  lines.push(
     `現在庫: ${part.quantity}`,
     `必要数: ${part.safety_stock}`,
     `希望発注数量: ${orderQty}`,
     '',
     'よろしくお願いいたします。',
-  ].join('\n');
-  return { subject, body };
+  );
+  return { subject, body: lines.join('\n') };
 }
 
 function isMobileDevice() {
@@ -70,12 +75,11 @@ function openInMailto(to, subject, body) {
     `mailto:${encodeURIComponent(to || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-// 発注ダイアログ（宛先・希望数量・自動生成された本文プレビュー）
+// 発注ダイアログ（希望数量・自動生成された本文プレビュー）宛先はメール起動後に入力
 function openOrderDialog(part) {
   const shortfall = Math.max((part.safety_stock || 0) - (part.quantity || 0), 1);
-  const toInput = el('input', { type: 'email', value: part.supplier_email || '', placeholder: '発注先のメールアドレス' });
   const qtyInput = el('input', { type: 'number', min: '1', value: String(shortfall), style: 'width:120px' });
-  const preview = el('textarea', { rows: '10', readonly: true });
+  const preview = el('textarea', { rows: '12', readonly: true });
 
   const refresh = () => {
     const qty = Math.max(parseInt(qtyInput.value, 10) || 1, 1);
@@ -91,13 +95,12 @@ function openOrderDialog(part) {
 
   const modal = el('div', { class: 'modal' }, [
     el('h3', { class: 'modal-title' }, `発注メールの作成: ${part.name}`),
-    el('div', { class: 'field' }, [el('label', {}, '宛先メール'), toInput]),
     el('div', { class: 'field' }, [el('label', {}, '希望発注数量'), qtyInput]),
     el('div', { class: 'field' }, [el('label', {}, '本文プレビュー（自動生成）'), preview]),
-    el('p', { class: 'hint' }, 'PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
+    el('p', { class: 'hint' }, '宛先はメール起動後に入力してください。PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
     el('div', { class: 'modal-actions' }, [
-      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook(toInput.value.trim(), m.subject, m.body); } }, '📧 Outlookで作成'),
-      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto(toInput.value.trim(), m.subject, m.body); } }, 'メールアプリで開く'),
+      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook('', m.subject, m.body); } }, '📧 Outlookで作成'),
+      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto('', m.subject, m.body); } }, 'メールアプリで開く'),
       el('button', { class: 'btn', onclick: close }, '閉じる'),
     ]),
   ]);
