@@ -13,7 +13,6 @@ import {
   el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso,
   ACTION_LABELS,
 } from '/js/util.js';
-import { buildCommentsCard } from '/js/comments.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
@@ -472,7 +471,6 @@ async function renderDetail(id) {
         )
       ),
     ]),
-    buildCommentsCard('inspection_result', inspection.id, currentUser),
   ]);
 }
 

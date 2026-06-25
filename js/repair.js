@@ -9,7 +9,6 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
-import { buildCommentsCard } from '/js/comments.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 
@@ -229,7 +228,7 @@ async function renderDetail(id) {
   renderFiles(files);
 
   const fileInput = el('input', {
-    type: 'file', accept: 'image/*,video/*,application/pdf', multiple: true, hidden: true,
+    type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true,
     onchange: async (e) => {
       for (const file of Array.from(e.target.files)) {
         try {
@@ -339,7 +338,6 @@ async function renderDetail(id) {
             })
           ),
     ]),
-    buildCommentsCard('repair_request', id, currentUser),
   ]);
 }
 
