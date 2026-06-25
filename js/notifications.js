@@ -26,6 +26,20 @@ const LEVEL_STYLE = {
 
 let currentType = '';     // トピック絞り込み
 let unreadOnly = false;   // 未確認のみ表示
+let currentMonth = '';    // 月別絞り込み（YYYY-MM・JST）
+let currentAssignee = ''; // 担当者別絞り込み（created_by のメール）
+
+// YYYY-MM → 「2026年6月」
+function monthLabel(ym) {
+  const [y, m] = ym.split('-');
+  return `${y}年${Number(m)}月`;
+}
+
+// 担当者ファセット1件 → 表示ラベル（氏名 > マスクメール、件数付き）
+function assigneeLabel(a) {
+  if (a.email === 'system') return `システム（${a.count}）`;
+  return `${a.name || maskEmail(a.email)}（${a.count}）`;
+}
 
 // ---------------- 1件の通知カード ----------------
 
@@ -78,6 +92,8 @@ async function load(ctx) {
   const sp = new URLSearchParams();
   if (currentType) sp.set('type', currentType);
   if (unreadOnly) sp.set('status', 'unread');
+  if (currentMonth) sp.set('month', currentMonth);
+  if (currentAssignee) sp.set('assignee', currentAssignee);
 
   let data;
   try {
@@ -87,13 +103,15 @@ async function load(ctx) {
     return;
   }
 
-  const { notifications, unread_count } = data;
+  const { notifications, unread_count, facets } = data;
+  if (facets) populateFilters(ctx, facets);
   render(summaryBox, el('p', { class: 'notif-summary' },
     unread_count > 0 ? `未確認の通知が ${unread_count} 件あります` : '未確認の通知はありません'));
 
   if (!notifications || notifications.length === 0) {
+    const hasFilter = currentType || unreadOnly || currentMonth || currentAssignee;
     render(listBox, el('p', { class: 'empty', style: 'text-align:center;margin-top:32px' },
-      unreadOnly ? '未確認の通知はありません。' : '通知はまだありません。'));
+      hasFilter ? '条件に一致する通知はありません。' : '通知はまだありません。'));
     return;
   }
 
@@ -101,12 +119,41 @@ async function load(ctx) {
   render(listBox, notifications.map((n) => notificationCard(n, reload)));
 }
 
+// ---------------- 月別・担当者別フィルタの選択肢を反映 ----------------
+//   facets（全件から集計した月・担当者）でドロップダウンを更新する。
+//   現在の選択は state（currentMonth / currentAssignee）から復元する。
+
+function populateFilters(ctx, facets) {
+  const { monthSel, assigneeSel } = ctx;
+  if (monthSel) {
+    monthSel.replaceChildren(
+      el('option', { value: '' }, 'すべての月'),
+      ...(facets.months || []).map((ym) =>
+        el('option', { value: ym, selected: ym === currentMonth }, monthLabel(ym))),
+    );
+  }
+  if (assigneeSel) {
+    assigneeSel.replaceChildren(
+      el('option', { value: '' }, 'すべての担当者'),
+      ...(facets.assignees || []).map((a) =>
+        el('option', { value: a.email, selected: a.email === currentAssignee }, assigneeLabel(a))),
+    );
+  }
+}
+
 // ---------------- 画面構築 ----------------
 
 async function renderPage() {
   const summaryBox = el('div', {});
   const listBox = el('div', { class: 'notif-list' });
-  const ctx = { summaryBox, listBox };
+
+  // 月別・担当者別フィルタ（選択肢は load() の facets で埋める）
+  const monthSel = el('select', { onchange: (e) => { currentMonth = e.target.value; load(ctx); } },
+    [el('option', { value: '' }, 'すべての月')]);
+  const assigneeSel = el('select', { onchange: (e) => { currentAssignee = e.target.value; load(ctx); } },
+    [el('option', { value: '' }, 'すべての担当者')]);
+
+  const ctx = { summaryBox, listBox, monthSel, assigneeSel };
 
   // トピックチップ
   const chipRow = el('div', { class: 'filter-bar chip-row' }, TOPICS.map((t) => {
@@ -153,6 +200,10 @@ async function renderPage() {
   render(app, [
     summaryBox,
     chipRow,
+    el('div', { class: 'filter-bar' }, [
+      el('label', { class: 'filter-label' }, ['月別 ', monthSel]),
+      el('label', { class: 'filter-label' }, ['担当者 ', assigneeSel]),
+    ]),
     el('div', { class: 'action-row' }, actions),
     listBox,
   ]);
