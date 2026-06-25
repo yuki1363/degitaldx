@@ -73,69 +73,47 @@ function planRow(p, over) {
   ]);
 }
 
-// 3件以上は折り畳み（最初の2件を表示し、残りを「もっと見る」で展開）
-function collapsiblePlanList(list, over) {
-  const SHOW = 2;
-  const rows = list.map((p) => planRow(p, over));
-  if (list.length < 3) return rows;
-
-  const hiddenWrap = el('div', { style: 'display:none' }, rows.slice(SHOW));
-  const btn = el('button', {
-    class: 'btn btn-sm',
-    style: 'font-size:12px;margin-top:4px',
-    onclick: () => { hiddenWrap.style.display = ''; btn.style.display = 'none'; },
-  }, `▼ あと ${list.length - SHOW} 件を表示`);
-  return [...rows.slice(0, SHOW), hiddenWrap, btn];
+// 1件だけ表示して保全計画ページへ誘導するセクション
+function planSection(list, over, label) {
+  if (!list.length) return null;
+  const total = list.length;
+  return el('div', { style: 'margin-bottom:6px' }, [
+    el('div', { class: 'plan-sum-head' + (over ? ' is-over' : '') }, label),
+    planRow(list[0], over),
+    total > 1
+      ? el('a', {
+          class: 'home-activity-more',
+          style: 'display:inline-block;margin-top:4px',
+          href: '/pages/plan',
+        }, `他 ${total - 1} 件 — 保全計画で確認 ›`)
+      : el('a', {
+          class: 'home-activity-more',
+          style: 'display:inline-block;margin-top:4px',
+          href: '/pages/plan',
+        }, '保全計画で確認 ›'),
+  ]);
 }
 
 // ─── タブコンテンツ: 期限超過（カレンダー ＋ 年間計画超過分） ────────────
 function overdueTabContent(calOverdue, annualOverdue) {
-  const hasC = calOverdue.length > 0;
-  const hasA = annualOverdue.length > 0;
-  if (!hasC && !hasA) return el('p', { class: 'home-tab-empty' }, '期限超過の予定はありません。');
-
-  const sections = [];
-
-  if (hasC) {
-    if (hasA) sections.push(el('div', { class: 'plan-sum-head is-over' }, '📅 カレンダー予定'));
-    sections.push(...calOverdue.slice(0, 8).map((p) => planRow(p, true)));
-    if (calOverdue.length > 8) sections.push(el('p', { class: 'hint', style: 'margin:4px 0' }, `…ほか ${calOverdue.length - 8} 件`));
+  if (!calOverdue.length && !annualOverdue.length) {
+    return el('p', { class: 'home-tab-empty' }, '期限超過の予定はありません。');
   }
-  if (hasA) {
-    sections.push(el('div', {
-      class: 'plan-sum-head is-over',
-      style: hasC ? 'margin-top:10px' : '',
-    }, `⚠ 年間計画 期限超過 ${annualOverdue.length}件`));
-    sections.push(...collapsiblePlanList(annualOverdue, true));
-  }
-
-  sections.push(el('a', { class: 'home-activity-more', style: 'display:inline-block;margin-top:8px', href: '/pages/plan' }, 'カレンダーで見る ›'));
-  return el('div', {}, sections);
+  return el('div', {}, [
+    planSection(calOverdue,   true,  '📅 カレンダー予定'),
+    planSection(annualOverdue, true, '⚠ 年間計画 期限超過'),
+  ].filter(Boolean));
 }
 
 // ─── タブコンテンツ: 直近（カレンダー7日 ＋ 年間計画の今月末まで） ────────
 function upcomingTabContent(calUpcoming, annualThisMonth) {
-  const hasC = calUpcoming.length > 0;
-  const hasA = annualThisMonth.length > 0;
-  if (!hasC && !hasA) return el('p', { class: 'home-tab-empty' }, '直近の予定はありません。');
-
-  const sections = [];
-
-  if (hasC) {
-    if (hasA) sections.push(el('div', { class: 'plan-sum-head' }, '📅 カレンダー予定（7日以内）'));
-    sections.push(...calUpcoming.slice(0, 8).map((p) => planRow(p, false)));
-    if (calUpcoming.length > 8) sections.push(el('p', { class: 'hint', style: 'margin:4px 0' }, `…ほか ${calUpcoming.length - 8} 件`));
+  if (!calUpcoming.length && !annualThisMonth.length) {
+    return el('p', { class: 'home-tab-empty' }, '直近の予定はありません。');
   }
-  if (hasA) {
-    sections.push(el('div', {
-      class: 'plan-sum-head',
-      style: hasC ? 'margin-top:10px' : '',
-    }, `⏰ 年間計画 今月末までの未完了 ${annualThisMonth.length}件`));
-    sections.push(...collapsiblePlanList(annualThisMonth, false));
-  }
-
-  sections.push(el('a', { class: 'home-activity-more', style: 'display:inline-block;margin-top:8px', href: '/pages/plan' }, 'カレンダーで見る ›'));
-  return el('div', {}, sections);
+  return el('div', {}, [
+    planSection(calUpcoming,    false, '📅 カレンダー予定（7日以内）'),
+    planSection(annualThisMonth, false, '⏰ 年間計画 今月末までの未完了'),
+  ].filter(Boolean));
 }
 
 // ─── 通知1行（確認ボタン付き） ──────────────────────────────────────────
