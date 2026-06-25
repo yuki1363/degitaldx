@@ -3,12 +3,43 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
-export async function onRequestGet({ request, env }) {
+export async function onRequestGet({ request, env, data }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
   const channel = sp.get('channel') || 'general';
   const since   = sp.get('since');
   const limit   = Math.min(Number(sp.get('limit')) || 50, 200);
+
+  // count_unread=1: 現ユーザーの未読数 + 最新メッセージの既読者数を返す（ホーム概要タブ用）
+  if (sp.get('count_unread') === '1') {
+    const userEmail = data?.user?.email;
+    let unreadCount = 0, readers = 0, totalUsers = 0;
+    try {
+      if (userEmail) {
+        const readRow = await db.prepare(
+          'SELECT last_read_at FROM chat_channel_reads WHERE channel = ? AND user_email = ?'
+        ).bind(channel, userEmail).first();
+        const since2 = readRow?.last_read_at || '1970-01-01T00:00:00.000Z';
+        const cntRow = await db.prepare(
+          'SELECT COUNT(*) AS n FROM chat_messages WHERE channel = ? AND deleted_at IS NULL AND created_at > ?'
+        ).bind(channel, since2).first();
+        unreadCount = cntRow?.n ?? 0;
+      }
+      // 最新メッセージを既読した人数（last_read_at >= latest message）
+      const latestRow = await db.prepare(
+        'SELECT MAX(created_at) AS latest FROM chat_messages WHERE channel = ? AND deleted_at IS NULL'
+      ).bind(channel).first();
+      if (latestRow?.latest) {
+        const rRow = await db.prepare(
+          'SELECT COUNT(*) AS n FROM chat_channel_reads WHERE channel = ? AND last_read_at >= ?'
+        ).bind(channel, latestRow.latest).first();
+        readers = rRow?.n ?? 0;
+      }
+      const tRow = await db.prepare('SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL').first();
+      totalUsers = tRow?.n ?? 0;
+    } catch { /* 未マイグレーション環境ではスキップ */ }
+    return json({ unread_count: unreadCount, readers, total_users: totalUsers });
+  }
 
   let sql = `
     SELECT cm.*, u.name AS author_name

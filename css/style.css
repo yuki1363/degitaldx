@@ -2190,6 +2190,21 @@ input.is-abnormal {
 .home-tabs-body { padding: 12px 14px; }
 .home-tab-empty { color: #9ca3af; font-size: 13px; margin: 6px 0; }
 
+/* ホーム通知タブ: チャット未読インジケーター */
+.home-chat-notice {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  border-left: 3px solid #1e40af;
+  border-radius: 0 6px 6px 0;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e40af;
+}
+
 /* 保全予定の状況（ホーム/ダッシュボード共通） */
 .plan-sum-head { font-weight: 700; font-size: 13px; color: #374151; }
 .plan-sum-head.is-over { color: #b91c1c; }
