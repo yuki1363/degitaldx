@@ -24,16 +24,11 @@ const LEVEL_STYLE = {
   info:    { bg: '#eff6ff',                  color: '#1e40af',              label: 'お知らせ', dot: '#1e40af' },
 };
 
-let currentType = '';     // トピック絞り込み
-let unreadOnly = false;   // 未確認のみ表示
-let currentMonth = '';    // 月別絞り込み（YYYY-MM・JST）
-let currentAssignee = ''; // 担当者別絞り込み（created_by のメール）
-
-// YYYY-MM → 「2026年6月」
-function monthLabel(ym) {
-  const [y, m] = ym.split('-');
-  return `${y}年${Number(m)}月`;
-}
+let currentType = '';      // トピック絞り込み
+let unreadOnly = false;    // 未確認のみ表示
+let currentFromMonth = ''; // 年月の範囲検索・開始（YYYY-MM・JST）
+let currentToMonth = '';   // 年月の範囲検索・終了（YYYY-MM・JST）
+let currentAssignee = '';  // 担当者別絞り込み（created_by のメール）
 
 // 担当者ファセット1件 → 表示ラベル（氏名 > マスクメール、件数付き）
 function assigneeLabel(a) {
@@ -92,7 +87,8 @@ async function load(ctx) {
   const sp = new URLSearchParams();
   if (currentType) sp.set('type', currentType);
   if (unreadOnly) sp.set('status', 'unread');
-  if (currentMonth) sp.set('month', currentMonth);
+  if (currentFromMonth) sp.set('from_month', currentFromMonth);
+  if (currentToMonth) sp.set('to_month', currentToMonth);
   if (currentAssignee) sp.set('assignee', currentAssignee);
 
   let data;
@@ -109,7 +105,7 @@ async function load(ctx) {
     unread_count > 0 ? `未確認の通知が ${unread_count} 件あります` : '未確認の通知はありません'));
 
   if (!notifications || notifications.length === 0) {
-    const hasFilter = currentType || unreadOnly || currentMonth || currentAssignee;
+    const hasFilter = currentType || unreadOnly || currentFromMonth || currentToMonth || currentAssignee;
     render(listBox, el('p', { class: 'empty', style: 'text-align:center;margin-top:32px' },
       hasFilter ? '条件に一致する通知はありません。' : '通知はまだありません。'));
     return;
@@ -119,18 +115,22 @@ async function load(ctx) {
   render(listBox, notifications.map((n) => notificationCard(n, reload)));
 }
 
-// ---------------- 月別・担当者別フィルタの選択肢を反映 ----------------
-//   facets（全件から集計した月・担当者）でドロップダウンを更新する。
-//   現在の選択は state（currentMonth / currentAssignee）から復元する。
+// ---------------- 年月範囲・担当者フィルタの選択肢を反映 ----------------
+//   facets（全件から集計した月・担当者）でUIを更新する。
+//   月入力は実データのある範囲（最古〜最新）を min/max に設定する。
+//   担当者セレクトは現在の選択（currentAssignee）を復元する。
 
 function populateFilters(ctx, facets) {
-  const { monthSel, assigneeSel } = ctx;
-  if (monthSel) {
-    monthSel.replaceChildren(
-      el('option', { value: '' }, 'すべての月'),
-      ...(facets.months || []).map((ym) =>
-        el('option', { value: ym, selected: ym === currentMonth }, monthLabel(ym))),
-    );
+  const { fromMonthInput, toMonthInput, assigneeSel } = ctx;
+  const months = facets.months || [];        // 新しい順（DESC）
+  if (months.length > 0) {
+    const newest = months[0];
+    const oldest = months[months.length - 1];
+    for (const input of [fromMonthInput, toMonthInput]) {
+      if (!input) continue;
+      input.min = oldest;
+      input.max = newest;
+    }
   }
   if (assigneeSel) {
     assigneeSel.replaceChildren(
@@ -147,13 +147,19 @@ async function renderPage() {
   const summaryBox = el('div', {});
   const listBox = el('div', { class: 'notif-list' });
 
-  // 月別・担当者別フィルタ（選択肢は load() の facets で埋める）
-  const monthSel = el('select', { onchange: (e) => { currentMonth = e.target.value; load(ctx); } },
-    [el('option', { value: '' }, 'すべての月')]);
+  // 年月の範囲検索（開始〜終了）と担当者フィルタ（min/max・担当者選択肢は load() の facets で埋める）
+  const fromMonthInput = el('input', {
+    type: 'month', value: currentFromMonth,
+    onchange: (e) => { currentFromMonth = e.target.value; load(ctx); },
+  });
+  const toMonthInput = el('input', {
+    type: 'month', value: currentToMonth,
+    onchange: (e) => { currentToMonth = e.target.value; load(ctx); },
+  });
   const assigneeSel = el('select', { onchange: (e) => { currentAssignee = e.target.value; load(ctx); } },
     [el('option', { value: '' }, 'すべての担当者')]);
 
-  const ctx = { summaryBox, listBox, monthSel, assigneeSel };
+  const ctx = { summaryBox, listBox, fromMonthInput, toMonthInput, assigneeSel };
 
   // トピックチップ
   const chipRow = el('div', { class: 'filter-bar chip-row' }, TOPICS.map((t) => {
@@ -201,7 +207,8 @@ async function renderPage() {
     summaryBox,
     chipRow,
     el('div', { class: 'filter-bar' }, [
-      el('label', { class: 'filter-label' }, ['月別 ', monthSel]),
+      el('label', { class: 'filter-label' }, ['年月 ', fromMonthInput]),
+      el('label', { class: 'filter-label' }, ['〜 ', toMonthInput]),
       el('label', { class: 'filter-label' }, ['担当者 ', assigneeSel]),
     ]),
     el('div', { class: 'action-row' }, actions),
