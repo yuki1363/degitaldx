@@ -1,6 +1,7 @@
-// ホーム概要タブ（期限超過 / 直近 / 年間計画 / 通知）
-//   通知タブ: チャット未読（ユーザー別既読数付き）＋システム通知を集約
-//   年間計画タブ: 今月の未完了・期限超過・直近14日を表示
+// ホーム概要タブ（期限超過 / 直近 / 通知）
+//   「期限超過」: カレンダー超過 ＋ 年間計画の超過分
+//   「直近」    : カレンダー7日以内 ＋ 年間計画の今月末までの未完了（超過しそう）
+//   「通知」    : チャット未読（ユーザー別既読数付き）＋ システム通知
 
 import { api } from '/js/api.js';
 import { el, render, formatDate, formatDateTime } from '/js/util.js';
@@ -14,33 +15,33 @@ const TYPE_BADGE = {
 };
 const LEVEL_DOT = { alert: '#dc2626', warning: '#b45309', info: '#1e40af' };
 
-// ─── 年間計画アラート取得 ────────────────────────────────────────────────
-// ・未定（unscheduled）は通知しない
-// ・期限超過 + 直近7日以内の未完了のみ表示
-// ・月末1週間前になると、その月の末日予定が自動的に「直近7日」に入ってくる
+// ─── 年間計画: 期限超過 ＋ 今月末までの未完了（超過しそう）────────────
 async function fetchAnnualAlerts() {
-  const today = new Date();
+  const today    = new Date();
   const todayStr = today.toISOString().slice(0, 10);
-  const soonStr  = new Date(today.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  const year     = today.getUTCFullYear();
+  const month    = today.getUTCMonth(); // 0-indexed
+  // 今月末（例: 2026-06-30）
+  const monthEndStr = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
 
   const { plans } = await api.get('/api/plans?annual_only=1');
-  const overdue = [], upcoming = [];
+  const overdue = [], thisMonth = [];
 
   for (const p of plans || []) {
     if (p.status === 'done') continue;
-    if (p.unscheduled) continue;         // 未定は通知しない
+    if (p.unscheduled) continue;          // 未定は表示しない
     const d = (p.planned_date || '').slice(0, 10);
     if (!d) continue;
     if (d < todayStr) {
       overdue.push(p);
-    } else if (d <= soonStr) {
-      upcoming.push(p);
+    } else if (d <= monthEndStr) {
+      thisMonth.push(p);                  // 今日〜月末 = 超過しそうな計画
     }
   }
   const byDate = (a, b) => a.planned_date.localeCompare(b.planned_date);
   overdue.sort(byDate);
-  upcoming.sort(byDate);
-  return { overdue, upcoming };
+  thisMonth.sort(byDate);
+  return { overdue, thisMonth };
 }
 
 // ─── チャット未読ステータス取得 ──────────────────────────────────────────
@@ -72,16 +73,6 @@ function planRow(p, over) {
   ]);
 }
 
-// ─── タブコンテンツ: 期限超過 / 直近 ────────────────────────────────────
-function planTabContent(list, over, emptyMsg) {
-  if (!list || list.length === 0) return el('p', { class: 'home-tab-empty' }, emptyMsg);
-  return el('div', {}, [
-    ...list.slice(0, 8).map((p) => planRow(p, over)),
-    list.length > 8 ? el('p', { class: 'hint', style: 'margin:4px 0' }, `…ほか ${list.length - 8} 件`) : null,
-    el('a', { class: 'home-activity-more', style: 'display:inline-block;margin-top:8px', href: '/pages/plan' }, 'カレンダーで見る ›'),
-  ]);
-}
-
 // 3件以上は折り畳み（最初の2件を表示し、残りを「もっと見る」で展開）
 function collapsiblePlanList(list, over) {
   const SHOW = 2;
@@ -97,34 +88,60 @@ function collapsiblePlanList(list, over) {
   return [...rows.slice(0, SHOW), hiddenWrap, btn];
 }
 
-// ─── タブコンテンツ: 年間計画 ────────────────────────────────────────────
-function annualTabContent({ overdue, upcoming }) {
-  const total = overdue.length + upcoming.length;
-  if (total === 0) return el('p', { class: 'home-tab-empty' }, '直近1週間・期限超過の未完了年間計画はありません。');
+// ─── タブコンテンツ: 期限超過（カレンダー ＋ 年間計画超過分） ────────────
+function overdueTabContent(calOverdue, annualOverdue) {
+  const hasC = calOverdue.length > 0;
+  const hasA = annualOverdue.length > 0;
+  if (!hasC && !hasA) return el('p', { class: 'home-tab-empty' }, '期限超過の予定はありません。');
 
   const sections = [];
-  const addSection = (list, label, over) => {
-    if (!list.length) return;
-    sections.push(el('div', {
-      class: 'plan-sum-head' + (over ? ' is-over' : ''),
-      style: sections.length ? 'margin-top:10px' : '',
-    }, label));
-    sections.push(...collapsiblePlanList(list, over));
-  };
 
-  addSection(overdue,  `⚠ 期限超過 ${overdue.length}件`,   true);
-  addSection(upcoming, `📅 直近1週間 ${upcoming.length}件`, false);
-  sections.push(el('a', {
-    class: 'home-activity-more', style: 'display:inline-block;margin-top:8px',
-    href: '/pages/plan-annual',
-  }, '年間計画表を見る ›'));
+  if (hasC) {
+    if (hasA) sections.push(el('div', { class: 'plan-sum-head is-over' }, '📅 カレンダー予定'));
+    sections.push(...calOverdue.slice(0, 8).map((p) => planRow(p, true)));
+    if (calOverdue.length > 8) sections.push(el('p', { class: 'hint', style: 'margin:4px 0' }, `…ほか ${calOverdue.length - 8} 件`));
+  }
+  if (hasA) {
+    sections.push(el('div', {
+      class: 'plan-sum-head is-over',
+      style: hasC ? 'margin-top:10px' : '',
+    }, `⚠ 年間計画 期限超過 ${annualOverdue.length}件`));
+    sections.push(...collapsiblePlanList(annualOverdue, true));
+  }
+
+  sections.push(el('a', { class: 'home-activity-more', style: 'display:inline-block;margin-top:8px', href: '/pages/plan' }, 'カレンダーで見る ›'));
+  return el('div', {}, sections);
+}
+
+// ─── タブコンテンツ: 直近（カレンダー7日 ＋ 年間計画の今月末まで） ────────
+function upcomingTabContent(calUpcoming, annualThisMonth) {
+  const hasC = calUpcoming.length > 0;
+  const hasA = annualThisMonth.length > 0;
+  if (!hasC && !hasA) return el('p', { class: 'home-tab-empty' }, '直近の予定はありません。');
+
+  const sections = [];
+
+  if (hasC) {
+    if (hasA) sections.push(el('div', { class: 'plan-sum-head' }, '📅 カレンダー予定（7日以内）'));
+    sections.push(...calUpcoming.slice(0, 8).map((p) => planRow(p, false)));
+    if (calUpcoming.length > 8) sections.push(el('p', { class: 'hint', style: 'margin:4px 0' }, `…ほか ${calUpcoming.length - 8} 件`));
+  }
+  if (hasA) {
+    sections.push(el('div', {
+      class: 'plan-sum-head',
+      style: hasC ? 'margin-top:10px' : '',
+    }, `⏰ 年間計画 今月末までの未完了 ${annualThisMonth.length}件`));
+    sections.push(...collapsiblePlanList(annualThisMonth, false));
+  }
+
+  sections.push(el('a', { class: 'home-activity-more', style: 'display:inline-block;margin-top:8px', href: '/pages/plan' }, 'カレンダーで見る ›'));
   return el('div', {}, sections);
 }
 
 // ─── 通知1行（確認ボタン付き） ──────────────────────────────────────────
 function notifRow(n, reload) {
   const isAck = !!n.acknowledged_at;
-  const dot = el('span', { class: 'home-activity-dot', style: `background:${LEVEL_DOT[n.level] || LEVEL_DOT.info}` });
+  const dot  = el('span', { class: 'home-activity-dot', style: `background:${LEVEL_DOT[n.level] || LEVEL_DOT.info}` });
   const text = el('span', { class: 'home-activity-text' }, n.title);
   const time = el('span', { class: 'home-activity-time' }, formatDateTime(n.created_at));
 
@@ -185,7 +202,6 @@ function activityTabContent(notifications, chatStatus, notifUnread) {
   };
   render(notifBox, notifications.map((n) => notifRow(n, reload)));
 
-  // 「すべて確認」ボタン（未読があるとき）
   let ackAllBtn = null;
   if (notifUnread > 0) {
     ackAllBtn = el('button', {
@@ -218,14 +234,14 @@ function activityTabContent(notifications, chatStatus, notifUnread) {
 // ─── メイン: ホームタブを描画 ────────────────────────────────────────────
 export async function loadHomeTabs(container) {
   let overdue = [], upcoming = [], notifications = [], notifUnread = 0;
-  let annualAlerts = { overdue: [], upcoming: [] };
+  let annualAlerts = { overdue: [], thisMonth: [] };
   let chatStatus = { unread_count: 0, readers: 0, total_users: 0 };
 
   try {
     const [status, notif, annual, chat] = await Promise.all([
       fetchPlanStatus(7).catch(() => ({ overdue: [], upcoming: [] })),
       api.get('/api/notifications?limit=8').catch(() => ({ notifications: [], unread_count: 0 })),
-      fetchAnnualAlerts().catch(() => ({ overdue: [], upcoming: [] })),
+      fetchAnnualAlerts().catch(() => ({ overdue: [], thisMonth: [] })),
       fetchChatStatus(),
     ]);
     overdue       = status.overdue || [];
@@ -238,26 +254,23 @@ export async function loadHomeTabs(container) {
 
   updateNotifBadges(notifUnread);
 
-  const annualCount   = annualAlerts.overdue.length + annualAlerts.upcoming.length;
-  const activityCount = notifUnread + (chatStatus.unread_count > 0 ? chatStatus.unread_count : 0);
+  const overdueCount  = overdue.length + annualAlerts.overdue.length;
+  const upcomingCount = upcoming.length + annualAlerts.thisMonth.length;
+  const activityCount = notifUnread + (chatStatus.unread_count || 0);
 
-  if (!overdue.length && !upcoming.length && !annualCount && !activityCount && !notifications.length) {
+  if (!overdueCount && !upcomingCount && !activityCount && !notifications.length) {
     render(container, []);
     return;
   }
 
   const tabs = [
     {
-      key: 'overdue', label: '期限超過', count: overdue.length, over: true,
-      content: () => planTabContent(overdue, true, '期限超過の予定はありません。'),
+      key: 'overdue', label: '期限超過', count: overdueCount, over: true,
+      content: () => overdueTabContent(overdue, annualAlerts.overdue),
     },
     {
-      key: 'upcoming', label: '直近', count: upcoming.length,
-      content: () => planTabContent(upcoming, false, '直近7日の予定はありません。'),
-    },
-    {
-      key: 'annual', label: '年間計画', count: annualCount,
-      content: () => annualTabContent(annualAlerts),
+      key: 'upcoming', label: '直近', count: upcomingCount,
+      content: () => upcomingTabContent(upcoming, annualAlerts.thisMonth),
     },
     {
       key: 'activity', label: '通知', count: activityCount,
@@ -265,11 +278,10 @@ export async function loadHomeTabs(container) {
     },
   ];
 
-  // 期限超過 → 年間計画（超過あり） → 直近 → 通知の順で優先タブを決定
+  // 期限超過 → 直近 → 通知 の順で優先タブを決定
   let active = 'activity';
-  if (upcoming.length) active = 'upcoming';
-  if (annualAlerts.overdue.length || annualAlerts.upcoming.length) active = 'annual';
-  if (overdue.length) active = 'overdue';
+  if (upcomingCount) active = 'upcoming';
+  if (overdueCount)  active = 'overdue';
 
   const bar  = el('div', { class: 'home-tabs-bar', role: 'tablist' });
   const body = el('div', { class: 'home-tabs-body' });
