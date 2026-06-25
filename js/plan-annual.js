@@ -610,25 +610,9 @@ function currentFiscalYear() {
   return d.getMonth() >= 9 ? d.getFullYear() : d.getFullYear() - 1;
 }
 
-// 年度末リセットが必要かチェックし、必要なら通知バナーを表示する
-async function checkAnnualReset() {
-  const fy = currentFiscalYear();
-  let logs = [];
-  try { ({ logs } = await api.get('/api/plans/annual-reset')); } catch { return; }
-  const alreadyReset = (logs || []).some((l) => l.fiscal_year === fy);
-  if (alreadyReset) return; // 今年度はリセット済み
-
-  // 10月以降で未リセットなら、管理者/editorにバナーを表示
-  if (!hasRole(currentUser, 'editor')) return;
-  const fyLabel = `FY${fy}（${fy}年10月〜${fy + 1}年9月）`;
-  const notice = el('div', { class: 'notice is-warning', id: 'annual-reset-notice', style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap' }, [
-    el('span', {}, `⚠ ${fyLabel} の年間計画がまだリセットされていません。`),
-    el('button', { class: 'btn btn-sm btn-danger', onclick: () => runAnnualReset(fy, notice) }, '🔁 年度リセット実行'),
-  ]);
-  app.insertBefore(notice, app.firstChild);
-}
-
 // 年度末リセット実行: CSV をダウンロードしてからサーバーにリセットを依頼
+//   ※ リセットは管理者が手動で行う（ツールバーの「🔁 年度リセット」ボタン）。
+//      未リセットを促す自動バナーは出さない。
 async function runAnnualReset(fy, noticeEl) {
   const fyLabel = `FY${fy}（${fy}年10月〜${fy + 1}年9月）`;
   if (!confirm(`${fyLabel} の年間計画をリセットします。\n・現在の完了状態をCSVに保存\n・全タスクを「未実施」に戻す\n\n続けますか？`)) return;
@@ -666,7 +650,6 @@ async function runAnnualReset(fy, noticeEl) {
     currentUser = await getCurrentUser();
     equipNames = await fetchEquipNames();
     await renderYear();
-    await checkAnnualReset();
   } catch (err) {
     showError(err);
   }
