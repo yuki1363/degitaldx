@@ -36,6 +36,11 @@ export async function onRequestPut({ request, env, data, params }) {
   return json({ ok: true });
 }
 
+// ユーザーは論理削除ではなく物理削除する（無効化ではなく完全削除）。
+//   ・各テーブルの created_by 等はメール文字列を保持しているため、users 行を消しても
+//     過去レコードは壊れない（履歴上のメールはそのまま残る）。
+//   ・物理削除すれば同じメールを後から再登録できる（無効化だと重複扱いで再登録不可だった）。
+//   ・誰を削除したかは audit_log に削除時点の情報を残す（行自体は消えるため diff に保存）。
 export async function onRequestDelete({ env, data, params }) {
   const denied = requireRole(data.user, 'admin');
   if (denied) return denied;
@@ -44,15 +49,17 @@ export async function onRequestDelete({ env, data, params }) {
   const id = Number(params.id);
   if (!id) return jsonError(400, '不正なIDです');
 
-  const existing = await db.prepare(`SELECT * FROM users WHERE id = ? AND deleted_at IS NULL`).bind(id).first();
+  const existing = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first();
   if (!existing) return jsonError(404, 'ユーザーが見つかりません');
 
   if (existing.email === data.user.email) return jsonError(400, '自分自身を削除することはできません');
 
-  const now = nowIso();
   const userEmail = data.user.email;
 
-  await db.prepare(`UPDATE users SET deleted_by=?, deleted_at=? WHERE id=?`).bind(userEmail, now, id).run();
-  await writeAuditLog(db, { tableName: 'users', recordId: id, action: 'delete', changedBy: userEmail, diff: null });
+  await db.prepare(`DELETE FROM users WHERE id=?`).bind(id).run();
+  await writeAuditLog(db, {
+    tableName: 'users', recordId: id, action: 'delete', changedBy: userEmail,
+    diff: { email: existing.email, name: existing.name, group_name: existing.group_name, role: existing.role },
+  });
   return json({ ok: true });
 }

@@ -123,10 +123,10 @@ async function renderUsers() {
                     ' ',
                     u.email !== currentUser.email
                       ? el('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
-                          if (!confirm(`${u.name} を無効化しますか？`)) return;
+                          if (!confirm(`${u.name} を削除しますか？\nこの操作は元に戻せません。`)) return;
                           await api.del(`/api/admin/users/${u.id}`);
                           await renderUsers();
-                        }}, '無効化')
+                        }}, '削除')
                       : null,
                   ]),
                 ])
@@ -137,6 +137,7 @@ async function renderUsers() {
     deleted.length > 0
       ? el('div', { class: 'card' }, [
           el('h3', { class: 'card-title' }, `無効化済みユーザー（${deleted.length}名）`),
+          el('p', { class: 'hint' }, '過去に無効化したユーザーです。再有効化するか、完全に削除できます。'),
           el('div', { style: 'overflow-x:auto' }, [
             el('table', { class: 'extract-table' }, [
               el('thead', {}, [el('tr', {}, ['メール', '氏名', '操作'].map((h) => el('th', {}, h)))]),
@@ -149,6 +150,12 @@ async function renderUsers() {
                       await api.put(`/api/admin/users/${u.id}`, { name: u.name, group_name: u.group_name, role: u.role });
                       await renderUsers();
                     }}, '再有効化'),
+                    ' ',
+                    el('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
+                      if (!confirm(`${u.name} を完全に削除しますか？\nこの操作は元に戻せません。`)) return;
+                      await api.del(`/api/admin/users/${u.id}`);
+                      await renderUsers();
+                    }}, '完全削除'),
                   ]),
                 ])
               )),
