@@ -50,7 +50,7 @@ export async function onRequestPost({ request, env, data }) {
 
   const db = env.DB;
   const body = await readJson(request);
-  const { report_date, body: bodyText, category_id, linked_records_json, reporter_name } = body ?? {};
+  const { report_date, body: bodyText, category_id, reporter_name } = body ?? {};
 
   if (!report_date) return jsonError(400, 'report_date は必須です');
   // 本文は任意（空でも保存可）。NOT NULL 制約のため空文字で格納する。
@@ -66,16 +66,15 @@ export async function onRequestPost({ request, env, data }) {
   // reporter_id は NOT NULL 制約のためログインユーザーIDで埋める（入力者の表示・検索は reporter_name）
   const result = await db.prepare(`
     INSERT INTO daily_report
-      (reporter_id, reporter_name, report_date, category_id, body, linked_records_json,
+      (reporter_id, reporter_name, report_date, category_id, body,
        created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     userRow.id,
     reporterName,
     report_date,
     category_id ?? null,
     bodyValue,
-    linked_records_json ? JSON.stringify(linked_records_json) : null,
     userEmail, now, userEmail, now
   ).run();
 

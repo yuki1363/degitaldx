@@ -39,7 +39,7 @@ export async function onRequestPut({ request, params, env, data }) {
   // 編集・削除できる（作成者/管理者の区別なし。変更は audit_log で追跡）。
 
   const body = await readJson(request);
-  const { report_date, body: bodyText, category_id, linked_records_json, reporter_name } = body ?? {};
+  const { report_date, body: bodyText, category_id, reporter_name } = body ?? {};
   if (!report_date) return jsonError(400, 'report_date は必須です');
   const bodyValue = bodyText ? String(bodyText).trim() : '';
   const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;
@@ -49,14 +49,13 @@ export async function onRequestPut({ request, params, env, data }) {
 
   await db.prepare(`
     UPDATE daily_report
-    SET report_date=?, category_id=?, body=?, reporter_name=?, linked_records_json=?, updated_by=?, updated_at=?
+    SET report_date=?, category_id=?, body=?, reporter_name=?, updated_by=?, updated_at=?
     WHERE id=?
   `).bind(
     report_date,
     category_id ?? null,
     bodyValue,
     reporterName,
-    linked_records_json ? JSON.stringify(linked_records_json) : null,
     userEmail, now, id
   ).run();
 

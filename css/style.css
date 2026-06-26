@@ -1207,24 +1207,6 @@ input.is-abnormal {
   background: var(--color-surface);
 }
 
-.link-check-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.link-check-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 2px 0;
-}
-
 /* ---- ダッシュボード（08） ---- */
 .period-bar {
   display: flex;
