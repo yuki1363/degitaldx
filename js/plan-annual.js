@@ -20,6 +20,7 @@ let equipNames = null;
 let year = new Date().getFullYear();
 let typeFilter = '';                       // '' = 全種別
 let nameFilter = '';                        // 名称あいまい検索
+let statusFilter = '';                      // 状態絞り込み: '' = 全部 | 'pending' = 未実施 | 'done' = 完了
 let sortKey = 'equipment';                  // 並び順: 'equipment'（設備順・既定）| 'inspector'（点検者順）
 let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
 let viewMonth = new Date().getMonth() + 1;  // 月別表示で見ている月
@@ -233,6 +234,20 @@ function summarizeMonth(list) {
   };
 }
 
+// 状態フィルタ: 1予定が現在の statusFilter に一致するか（未実施=完了以外＝pending/overdue）
+function matchesStatus(p) {
+  if (!statusFilter) return true;
+  if (statusFilter === 'done') return p.status === 'done';
+  return p.status !== 'done';
+}
+
+// 状態フィルタ: 集約行（年間グリッド用）が、年内のいずれかの予定で statusFilter に一致するか
+function matchesRowStatus(row) {
+  if (!statusFilter) return true;
+  const all = [...row.unscheduledList, ...[...row.months.values()].flat()];
+  return all.some(matchesStatus);
+}
+
 // 名称・設備・点検者・担当者(業者)・備考のどれかに含まれれば一致（複数語はスペース区切りでAND）
 function matchesName(p) {
   if (!nameFilter) return true;
@@ -307,21 +322,27 @@ function planRow(p, monthLabel) {
 }
 
 function buildMonthView() {
-  const inMonth = plansCache.filter((p) =>
+  // 種別・名称で絞った当月分（状態の集計はこの全体に対して出す）
+  const inMonthAll = plansCache.filter((p) =>
     !p.unscheduled && monthOf(p) === viewMonth && (!typeFilter || p.plan_type === typeFilter) && matchesName(p));
+  const doneCount = inMonthAll.filter((p) => p.status === 'done').length;
+  // 状態フィルタを適用した表示用リスト
+  const inMonth = inMonthAll.filter(matchesStatus);
   inMonth.sort(compareBySort);
 
-  const undecided = plansCache.filter((p) => p.unscheduled && (!typeFilter || p.plan_type === typeFilter) && matchesName(p));
-  const doneCount = inMonth.filter((p) => p.status === 'done').length;
+  const undecided = plansCache.filter((p) =>
+    p.unscheduled && (!typeFilter || p.plan_type === typeFilter) && matchesName(p) && matchesStatus(p));
 
+  const statusNote = statusFilter ? `（${statusFilter === 'done' ? '完了' : '未実施'}のみ）` : '';
   const list = inMonth.length === 0
-    ? el('p', { class: 'empty' }, `${viewMonth}月の予定はありません。`)
+    ? el('p', { class: 'empty' }, `${viewMonth}月の予定はありません${statusNote}。`)
     : el('div', { class: 'mplan-list' }, inMonth.map((p) => planRow(p, `${viewMonth}月`)));
 
   return el('div', {}, [
     monthNav(),
-    inMonth.length > 0
-      ? el('p', { class: 'hint no-print' }, `${viewMonth}月: ${inMonth.length}件（完了 ${doneCount} / 未完了 ${inMonth.length - doneCount}）`)
+    inMonthAll.length > 0
+      ? el('p', { class: 'hint no-print' },
+          `${viewMonth}月: ${inMonthAll.length}件（完了 ${doneCount} / 未完了 ${inMonthAll.length - doneCount}）${statusFilter ? ` ・表示中 ${inMonth.length}件${statusNote}` : ''}`)
       : null,
     list,
     undecided.length > 0
@@ -348,8 +369,9 @@ function monthNav() {
 function buildYearGrid(rows) {
   if (rows.length === 0) {
     return el('p', { class: 'empty' },
-      typeFilter ? `「${PLAN_TYPES[typeFilter].label}」の予定はありません。`
-                 : '予定はまだありません。上の「一括登録」から登録してください。');
+      (typeFilter || statusFilter || nameFilter)
+        ? '条件に一致する予定はありません。'
+        : '予定はまだありません。上の「一括登録」から登録してください。');
   }
   const canEdit = hasRole(currentUser, 'editor');
 
@@ -499,9 +521,18 @@ function toolbar() {
     el('option', { value: 'equipment', selected: sortKey === 'equipment' }, '設備順'),
     el('option', { value: 'inspector', selected: sortKey === 'inspector' }, '点検者順'),
   ]);
+  // 状態フィルタ（全部 / 未実施 / 完了）。月別・全月の両方に効く
+  const statusSel = el('select', {
+    onchange: (e) => { statusFilter = e.target.value; renderResults(); },
+  }, [
+    el('option', { value: '', selected: statusFilter === '' }, '全状態'),
+    el('option', { value: 'pending', selected: statusFilter === 'pending' }, '未実施'),
+    el('option', { value: 'done', selected: statusFilter === 'done' }, '完了'),
+  ]);
   return el('div', { class: 'annual-toolbar no-print' }, [
     el('div', { class: 'annual-filter-row' }, [
       el('label', { class: 'annual-filter' }, ['種別: ', sel]),
+      el('label', { class: 'annual-filter' }, ['状態: ', statusSel]),
       el('label', { class: 'annual-filter' }, ['並び: ', sortSel]),
       nameInput,
     ]),
@@ -539,8 +570,13 @@ let viewBox = el('div', {});
 
 // 絞り込み結果のみ再描画（入力欄・ツールバーは作り直さない）
 function renderResults() {
-  const rows = buildRows(plansCache);
-  render(viewBox, viewMode === 'month' ? buildMonthView() : buildYearGrid(rows));
+  if (viewMode === 'month') {
+    render(viewBox, buildMonthView());
+  } else {
+    // 全月グリッドは状態フィルタを行単位で適用（年内にその状態の予定がある行だけ表示）
+    const rows = buildRows(plansCache).filter(matchesRowStatus);
+    render(viewBox, buildYearGrid(rows));
+  }
 }
 
 // 取得済みデータ（plansCache）から画面全体を描画（再取得なし）
