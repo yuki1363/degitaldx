@@ -12,6 +12,7 @@
 
 const DEFAULT_HARD_LIMIT_BYTES = 9_000_000_000; // 9 GB
 const DEFAULT_WARN_BYTES = 8_000_000_000; // 8 GB
+const DEFAULT_FREE_TIER_BYTES = 10_000_000_000; // 10 GB（R2 無料枠。これを超えると課金）
 
 // 種別ごとの許可 Content-Type / 拡張子 / 1ファイルあたりのサイズ上限
 // （CLAUDE.md: 画像10MB・動画100MB目安。PDF はマニュアル・図面用に 20MB）
@@ -84,27 +85,37 @@ export function getLimits(env) {
   };
 }
 
-/** 現在の使用量と上限を返す（warning: 警告ライン超え） */
+/** 現在の使用量と上限を返す（warning: 警告ライン超え）
+ *   used_bytes    … R2 に存在する全オブジェクト合計（= 課金対象。論理削除でも R2 に残れば含む）
+ *   active_bytes  … 使用中（論理削除されていない）
+ *   deleted_bytes … 論理削除済みだが R2 に残存（「完全削除」で解放できる分）
+ *   free_tier_bytes … R2 無料枠（10GB）。warn/hard はこれを超えないためのアプリ側ガード。
+ */
 export async function getStorageUsage(env) {
   // 物理削除（purged_at）済みは R2 から実体を消しているため使用量から除外する。
   // purged_at 列が無い古い環境ではフォールバックして全件合計する（破綻させない）。
-  let usedBytes = 0;
+  const agg = `
+    COALESCE(SUM(size_bytes), 0) AS used_bytes,
+    COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN size_bytes ELSE 0 END), 0) AS active_bytes,
+    COALESCE(SUM(CASE WHEN deleted_at IS NOT NULL THEN size_bytes ELSE 0 END), 0) AS deleted_bytes,
+    COUNT(*) AS file_count`;
+  let row;
   try {
-    const row = await env.DB.prepare(
-      'SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM files WHERE purged_at IS NULL'
-    ).first();
-    usedBytes = row ? row.used_bytes : 0;
+    row = await env.DB.prepare(`SELECT ${agg} FROM files WHERE purged_at IS NULL`).first();
   } catch {
-    const row = await env.DB.prepare(
-      'SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM files'
-    ).first();
-    usedBytes = row ? row.used_bytes : 0;
+    row = await env.DB.prepare(`SELECT ${agg} FROM files`).first();
   }
+  const usedBytes = row ? row.used_bytes : 0;
   const { hardLimitBytes, warnBytes } = getLimits(env);
+  const freeTierBytes = Number(env.R2_FREE_TIER_BYTES) || DEFAULT_FREE_TIER_BYTES;
   return {
     used_bytes: usedBytes,
+    active_bytes: row ? row.active_bytes : 0,
+    deleted_bytes: row ? row.deleted_bytes : 0,
+    file_count: row ? row.file_count : 0,
     hard_limit_bytes: hardLimitBytes,
     warn_bytes: warnBytes,
+    free_tier_bytes: freeTierBytes,
     used_percent: Math.round((usedBytes / hardLimitBytes) * 1000) / 10,
     warning: usedBytes >= warnBytes,
   };
