@@ -12,9 +12,15 @@
 
 import { api } from '/js/api.js';
 import { el, formatDate, formatDateTime } from '/js/util.js';
-import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
+import { CONSTRUCTION_NOTICE_FIELDS, TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { makeHankoPngBase64 } from '/js/hanko.js';
 import { embedHankos } from '/js/xlsx-image.js';
+
+// 種別ごとの標準入力項目（テンプレートの fields_json が不完全でも choice(○)/hanko 等を認識するため）
+const STANDARD_FIELDS = {
+  construction_notice: CONSTRUCTION_NOTICE_FIELDS,
+  trouble_report: TROUBLE_REPORT_FIELDS,
+};
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const PLAN_TYPE_LABELS = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
@@ -267,15 +273,24 @@ async function fillAndDownload(template, type, record, inputValues) {
   // これで未入力の入力項目も {{タグ}} を残さず空欄になる（自動タグと同名のものは除外）。
   const auto = buildValues(type, record);
   const base = { '開始時間': '', '終了時間': '' };
-  // 工事連絡書は、テンプレートに入力項目(fields_json)が無くても標準項目を空既定に含める
-  if (type === 'construction_notice') {
-    for (const f of CONSTRUCTION_NOTICE_FIELDS) if (!(f.tag in auto)) base[f.tag] = '';
-  }
-  let parsedFields = [];
+
+  // テンプレートの入力項目(fields_json)と、種別の標準項目をマージする。
+  // テンプレ定義を優先しつつ、choice の options 等が欠けていれば標準項目から補う。
+  // これでテンプレ定義が不完全でも、休止区分(○)・ハンコ等が正しく差し込まれる。
+  let templateFields = [];
   try {
     const fields = JSON.parse(template.fields_json || '[]');
-    if (Array.isArray(fields)) parsedFields = fields.filter(Boolean);
+    if (Array.isArray(fields)) templateFields = fields.filter(Boolean);
   } catch { /* テンプレ定義が壊れていても続行 */ }
+  const byTag = new Map();
+  for (const f of (STANDARD_FIELDS[type] || [])) if (f && f.tag) byTag.set(f.tag, { ...f });
+  for (const f of templateFields) {
+    if (!f || !f.tag) continue;
+    const std = byTag.get(f.tag);
+    byTag.set(f.tag, std ? { ...std, ...f, options: f.options || std.options } : { ...f });
+  }
+  const parsedFields = [...byTag.values()];
+
   for (const f of parsedFields) {
     // choice は選択肢名そのものがセルのタグ。未選択でも {{選択肢}} を残さないよう空既定にする
     if (f.type === 'choice' && Array.isArray(f.options)) {
