@@ -5,6 +5,28 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
+// trouble_record へ INSERT する。form_values_json 等の列が無い旧DBでは、該当列を外して再試行する
+// （未マイグレーション環境でもトラブル登録が壊れないようにする）。
+export async function insertTroubleRecord(db, cols, vals) {
+  let c = [...cols];
+  let v = [...vals];
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const placeholders = c.map(() => '?').join(', ');
+    try {
+      return await db.prepare(
+        `INSERT INTO trouble_record (${c.join(', ')}) VALUES (${placeholders})`
+      ).bind(...v).run();
+    } catch (err) {
+      const m = /(?:has no column named|no such column):?\s*([A-Za-z_]\w*)/i.exec(String(err?.message || ''));
+      const idx = m ? c.indexOf(m[1]) : -1;
+      if (idx === -1) throw err;
+      c.splice(idx, 1);
+      v.splice(idx, 1);
+    }
+  }
+  throw new Error('トラブル記録の登録に失敗しました（列の不一致）。');
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
@@ -60,7 +82,7 @@ export async function onRequestPost({ request, env, data }) {
   const db = env.DB;
   const body = await readJson(request);
 
-  const { occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, file_ids, reporter_name } = body;
+  const { occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, form_values_json, file_ids, reporter_name } = body;
 
   if (!occurred_at) return jsonError(400, 'occurred_at は必須です');
   if (!phenomenon || !phenomenon.trim()) return jsonError(400, 'phenomenon（現象）は必須です');
@@ -69,12 +91,10 @@ export async function onRequestPost({ request, env, data }) {
   const userEmail = data.user.email;
   const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;
 
-  const result = await db.prepare(`
-    INSERT INTO trouble_record
-      (occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json,
-       reporter_name, created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
+  // 列ごとの cols/vals。form_values_json 列が無い旧DBでは insertTroubleRecord が外して再試行する。
+  const cols = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure',
+    'custom_fields_json', 'form_values_json', 'reporter_name', 'created_by', 'created_at', 'updated_by', 'updated_at'];
+  const vals = [
     occurred_at,
     phenomenon.trim(),
     equipment_id ?? null,
@@ -82,12 +102,14 @@ export async function onRequestPost({ request, env, data }) {
     cause ?? null,
     countermeasure ?? null,
     custom_fields_json ? JSON.stringify(custom_fields_json) : null,
+    form_values_json ? JSON.stringify(form_values_json) : null,
     reporterName,
     userEmail,
     now,
     userEmail,
-    now
-  ).run();
+    now,
+  ];
+  const result = await insertTroubleRecord(db, cols, vals);
 
   const id = result.meta?.last_row_id;
 

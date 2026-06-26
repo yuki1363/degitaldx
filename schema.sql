@@ -755,6 +755,12 @@ ALTER TABLE maintenance_plan ADD COLUMN source_plan_id INTEGER;
 --   年間計画表に残したまま、その日付でカレンダーにも表示される（同一レコードを両ビューで表示）。
 ALTER TABLE maintenance_plan ADD COLUMN on_calendar INTEGER;
 
+-- trouble_record: 帳票（トラブル報告書）の入力値をトラブル記録に保存する
+--   {タグ名: 値} の JSON。調査対象・トラブル名・休止時間・休止区分(○選択)・処置・
+--   有効性の確認・特記事項・担当者印(苗字) などをトラブル編集で入力して保存し、
+--   帳票出力（js/excel-fill.js）で Excel に差し込む（出力時の再入力が不要になる）。
+ALTER TABLE trouble_record ADD COLUMN form_values_json TEXT;
+
 -- annual_plan_status — 年間計画タスクの「年ごとの実施状況」
 --   年間計画表は毎年共通のテンプレート（同じ予定レコードを毎年表示）。完了状況は
 --   予定レコードの status 列だと年をまたいで残ってしまうため、年ごとにここで記録する。

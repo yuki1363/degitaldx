@@ -115,8 +115,8 @@
 - カスタマイズ可能なトラブル記録帳票（管理者が入力項目を追加・削除できるフォームビルダー。定義変更は `master_history` で復元可能）
 - 設備台帳（06）・点検結果（02）との紐づけ
 - 記録の登録・編集・削除と監査記録（共通設計）
-- **帳票出力（トラブル報告書）**: 記録詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（後述「帳票テンプレート」）
-**テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, +監査列）、`trouble_category`（ジャンルマスタ）
+- **帳票出力（トラブル報告書）**: 記録詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（後述「帳票テンプレート」）。トラブル編集ページに「トラブル報告書（帳票）の入力」欄があり、調査対象・休止時間・休止区分(○選択)・処置・有効性の確認・特記事項・担当者印(苗字)などを入力して `form_values_json` に保存→出力時に自動差込（出力時の再入力不要。標準項目は `js/permit-fields.js` の `TROUBLE_REPORT_FIELDS`）
+**テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, form_values_json, +監査列）、`trouble_category`（ジャンルマスタ）
 ### 05. 部品在庫管理（PowerAppsからのデータ移行あり）
 - 使用部品を記録すると在庫に自動反映。+/−ボタンでワンタップ更新
 - 発注アラート（安全在庫割れで通知）、発注 → 入庫 → 利用の一元管理

@@ -11,6 +11,7 @@ import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_
 import { buildCsvText, downloadCsv, excelText } from '/js/csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
+import { TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 
 // CSV出力の列定義（トラブル履歴）
@@ -331,17 +332,49 @@ function parseCustomValues(jsonStr) {
   }
 }
 
+// トラブル報告書テンプレートの「入力項目」を集める（未登録時は標準項目 TROUBLE_REPORT_FIELDS）
+function buildReportFields(templates) {
+  const seen = new Set();
+  const fields = [];
+  for (const t of (templates || [])) {
+    if (t.template_type !== 'trouble_report') continue;
+    let fs = [];
+    try { fs = JSON.parse(t.fields_json || '[]'); } catch { fs = []; }
+    for (const f of (Array.isArray(fs) ? fs : [])) {
+      if (f && f.tag && !seen.has(f.tag)) {
+        seen.add(f.tag);
+        fields.push({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text', ...(Array.isArray(f.options) ? { options: f.options } : {}) });
+      }
+    }
+  }
+  if (fields.length === 0) return TROUBLE_REPORT_FIELDS.map((f) => ({ ...f }));
+  return fields;
+}
+
+// form_values_json を安全にパース
+function parseFormValues(jsonStr) {
+  try { return jsonStr ? (JSON.parse(jsonStr) || {}) : {}; }
+  catch { return {}; }
+}
+
 async function renderForm(existing, prefill = null) {
   // existing = 本物の編集（PUT）。prefill = 点検異常などからの新規プリフィル（POST のまま）。
   const init = existing || prefill || {};
-  const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes] = await Promise.all([
+  const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes, templatesRes] = await Promise.all([
     api.get('/api/troubles/categories'),
     api.get('/api/equipment'),
     // カスタム項目テーブル未作成の環境でもフォーム自体は使えるようにする
     api.get('/api/troubles/fields').catch(() => ({ fields: [] })),
     api.get('/api/users').catch(() => ({ users: [] })),
+    // トラブル報告書テンプレートの入力項目（帳票入力欄に使う。未登録時は標準項目）
+    api.get('/api/print-templates').catch(() => ({ templates: [] })),
   ]);
   const users = usersRes.users || [];
+
+  // トラブル報告書（帳票）の入力欄。ここで入力した値を form_values_json に保存し、
+  // 帳票出力時に Excel へ自動差込する（出力時の再入力が不要になる）。
+  const reportFields = buildReportFields(templatesRes.templates);
+  const reportValues = parseFormValues(existing?.form_values_json);
 
   const f = {
     occurred_at: el('input', {
@@ -418,10 +451,55 @@ async function renderForm(existing, prefill = null) {
     },
   });
 
+  // トラブル報告書（帳票）の入力欄を1項目ぶん作る（reportValues に値をバインド）
+  const reportInput = (fld) => {
+    const tag = fld.tag;
+    const cur = reportValues[tag] != null ? String(reportValues[tag]) : '';
+    if (fld.type === 'check') {
+      const cb = el('input', { type: 'checkbox' });
+      cb.checked = cur === '✓';
+      cb.addEventListener('change', () => { reportValues[tag] = cb.checked ? '✓' : ''; });
+      return el('label', { class: 'pf-input-check' }, [cb, ` ${fld.label || tag}`]);
+    }
+    if (fld.type === 'choice' && Array.isArray(fld.options)) {
+      const name = `trb-choice-${tag}`;
+      const radios = fld.options.map((o) => {
+        const rb = el('input', { type: 'radio', name, value: o });
+        rb.checked = (cur === o);
+        rb.addEventListener('change', () => { if (rb.checked) reportValues[tag] = o; });
+        return el('label', { class: 'pf-input-check' }, [rb, ` ${o}`]);
+      });
+      return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), el('div', { class: 'pf-choice-row' }, radios)]);
+    }
+    if (fld.type === 'hanko') {
+      const input = el('input', { type: 'text', value: cur, placeholder: '苗字（例: 田中）' });
+      input.addEventListener('input', () => { reportValues[tag] = input.value; });
+      return el('div', { class: 'field' }, [el('label', {}, `${fld.label || tag}（ハンコ）`), input]);
+    }
+    let input;
+    if (fld.type === 'textarea') input = el('textarea', { rows: '2', value: cur });
+    else if (fld.type === 'date') input = el('input', { type: 'date', value: cur });
+    else if (fld.type === 'time') input = el('input', { type: 'time', value: cur });
+    else input = el('input', { type: 'text', value: cur });
+    input.addEventListener('input', () => { reportValues[tag] = input.value; });
+    return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
+  };
+  const reportSection = reportFields.length === 0 ? null
+    : el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
+        el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, 'トラブル報告書（帳票）の入力'),
+        el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます（出力時に入力し直す必要はありません）。'),
+        ...reportFields.map(reportInput),
+      ]);
+
   const save = async () => {
     const customValues = customInputs
       .map(({ fld, input }) => ({ field_id: fld.id, name: fld.name, value: String(input.value).trim() }))
       .filter((v) => v.value !== '');
+    // 帳票入力値は空でないものだけ保存（空文字は除外）
+    const reportClean = {};
+    for (const [k, v] of Object.entries(reportValues)) {
+      if (v != null && String(v) !== '') reportClean[k] = v;
+    }
     const body = {
       occurred_at: localInputToIso(f.occurred_at.value),
       category_id: f.category_id.value ? Number(f.category_id.value) : null,
@@ -431,6 +509,7 @@ async function renderForm(existing, prefill = null) {
       countermeasure: f.countermeasure.value.trim() || null,
       reporter_name: f.reporter_name.value.trim() || null,
       custom_fields_json: customValues.length > 0 ? customValues : null,
+      form_values_json: Object.keys(reportClean).length > 0 ? reportClean : null,
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }
@@ -476,6 +555,7 @@ async function renderForm(existing, prefill = null) {
       field('記録者', f.reporter_name),
       reporterOptions,
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
+      reportSection,
       el('div', { class: 'field' }, [
         el('label', {}, '写真・動画'),
         el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px' }, [

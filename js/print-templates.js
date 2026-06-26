@@ -10,7 +10,7 @@
 import { api } from '/js/api.js';
 import { el, render } from '/js/util.js';
 import { uploadFile } from '/js/files.js';
-import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
+import { CONSTRUCTION_NOTICE_FIELDS, TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -20,19 +20,9 @@ const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', tim
 // 工事連絡書の標準項目は plan.js（計画ページの入力欄）と共有する（permit-fields.js）
 const DEFAULT_FIELDS = {
   construction_notice: CONSTRUCTION_NOTICE_FIELDS,
-  // トラブル報告書（設備関係修理報告書）の、記録に無い項目を出力時に入力するための標準セット。
+  // トラブル報告書（設備関係修理報告書）の標準項目。trouble.js（記録編集の帳票入力欄）と共有。
   // 設備名・発生年月日・現象・原因・対策はトラブル記録から自動で入る（AUTO_TAGS 参照）。
-  trouble_report: [
-    { tag: '整理NO', label: '整理NO.', type: 'text' },
-    { tag: '調査対象', label: '調査対象', type: 'text' },
-    { tag: 'トラブル名', label: 'トラブル名', type: 'text' },
-    { tag: '休止時間', label: '休止時間（分）', type: 'text' },
-    { tag: '休止種別', label: '休止区分（1つ選び○）', type: 'choice', options: ['故障休止', '点検休止', '調整休止'] },
-    { tag: '処置', label: '処置', type: 'textarea' },
-    { tag: '有効性の確認', label: '有効性の確認', type: 'textarea' },
-    { tag: '特記事項', label: '特記事項', type: 'textarea' },
-    { tag: '担当者印', label: '担当者（ハンコ・苗字）', type: 'hanko' },
-  ],
+  trouble_report: TROUBLE_REPORT_FIELDS,
 };
 const cloneDefaults = (type) =>
   (DEFAULT_FIELDS[type] || []).map((f) => ({ ...f, ...(f.options ? { options: [...f.options] } : {}) }));

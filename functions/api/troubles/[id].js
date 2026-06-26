@@ -4,6 +4,26 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
+// trouble_record を UPDATE する。form_values_json 等の列が無い旧DBでは、該当の SET 句を外して再試行する。
+async function updateTroubleRecord(db, fieldClauses, fieldBinds, id, userEmail, now) {
+  let clauses = [...fieldClauses];
+  let binds = [...fieldBinds];
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (clauses.length === 0) return null; // 残る更新列が無ければ何もしない
+    const sql = `UPDATE trouble_record SET ${[...clauses, 'updated_by = ?', 'updated_at = ?'].join(', ')} WHERE id = ?`;
+    try {
+      return await db.prepare(sql).bind(...binds, userEmail, now, id).run();
+    } catch (err) {
+      const m = /(?:has no column named|no such column):?\s*([A-Za-z_]\w*)/i.exec(String(err?.message || ''));
+      const ci = m ? clauses.findIndex((c) => c.startsWith(`${m[1]} `)) : -1;
+      if (ci === -1) throw err;
+      clauses.splice(ci, 1);
+      binds.splice(ci, 1);
+    }
+  }
+  throw new Error('トラブル記録の更新に失敗しました（列の不一致）。');
+}
+
 async function getTrouble(db, id) {
   return db.prepare(`
     SELECT
@@ -59,7 +79,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, 'トラブル記録が見つかりません');
 
   const body = await readJson(request);
-  const UPDATABLE = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json', 'reporter_name'];
+  const UPDATABLE = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json', 'form_values_json', 'reporter_name'];
 
   const setClauses = [];
   const binds = [];
@@ -80,7 +100,7 @@ export async function onRequestPut({ request, params, env, data }) {
     let storedValue;
     if (field === 'phenomenon') {
       storedValue = value.trim();
-    } else if (field === 'custom_fields_json') {
+    } else if (field === 'custom_fields_json' || field === 'form_values_json') {
       storedValue = value ? JSON.stringify(value) : null;
     } else {
       storedValue = value ?? null;
@@ -106,12 +126,8 @@ export async function onRequestPut({ request, params, env, data }) {
   }
 
   if (setClauses.length > 0) {
-    setClauses.push('updated_by = ?', 'updated_at = ?');
-    binds.push(userEmail, now, id);
-
-    await db.prepare(`
-      UPDATE trouble_record SET ${setClauses.join(', ')} WHERE id = ?
-    `).bind(...binds).run();
+    // form_values_json 等の列が無い旧DBでは、該当列を外して再試行する
+    await updateTroubleRecord(db, setClauses, binds, id, userEmail, now);
   }
 
   if (Object.keys(diff).length > 0) {

@@ -201,11 +201,14 @@ function collectInputs(title, inputFields) {
           input,
         ]);
       }
-      // ○で1つ選択。選んだ選択肢のタグ（=選択肢名）だけ ○ になり、他は空になる。
+      // ○で1つ選択。値は「群タグ→選んだ選択肢名」で持つ（○展開は fillAndDownload 側）。
       if (f.type === 'choice' && Array.isArray(f.options) && f.options.length) {
         const name = `pf-choice-${idx}`;
         const radios = f.options.map((o) => el('input', { type: 'radio', name, value: o }));
-        getters.push(() => f.options.map((o, k) => [o, radios[k].checked ? '○' : '']));
+        getters.push(() => {
+          const sel = f.options.find((o, k) => radios[k].checked);
+          return [tag, sel || ''];
+        });
         return el('div', { class: 'field' }, [
           el('label', {}, f.label || tag),
           el('div', { class: 'pf-choice-row' },
@@ -233,12 +236,7 @@ function collectInputs(title, inputFields) {
           class: 'btn btn-primary',
           onclick: () => {
             const values = {};
-            for (const get of getters) {
-              const out = get();
-              // choice は [[tag,値],…] の配列、その他は [tag,値] の単一ペア
-              if (Array.isArray(out[0])) { for (const [t, v] of out) values[t] = v; }
-              else { const [t, v] = out; values[t] = v; }
-            }
+            for (const get of getters) { const [t, v] = get(); values[t] = v; }
             done(values);
           },
         }, '出力'),
@@ -288,6 +286,14 @@ async function fillAndDownload(template, type, record, inputValues) {
     }
   }
   const values = { ...auto, ...base, ...(inputValues || {}) };
+
+  // ○で1つ選択: 群タグ（例 休止種別）→選んだ選択肢名。各選択肢セル（例 {{故障休止}}）に
+  // 選択時 ○ を入れ、未選択は空にする。群タグ自体には選択肢名が残る（任意で使える）。
+  for (const f of parsedFields) {
+    if (f.type !== 'choice' || !Array.isArray(f.options)) continue;
+    const sel = values[f.tag] != null ? String(values[f.tag]) : '';
+    for (const opt of f.options) values[opt] = (opt && opt === sel) ? '○' : '';
+  }
 
   // ハンコ（赤丸印）: 苗字 → 印影画像を該当セルに埋め込み、タグ文字は空にして消す（画像で表現）。
   // セル特定のため、文字列置換より前に実行する（タグがまだ残っている状態で位置を探す）。
