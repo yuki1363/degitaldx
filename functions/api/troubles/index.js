@@ -5,6 +5,17 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
+// 後から追加した列を、未マイグレーションのDBに対しても自動で用意する（自己修復マイグレーション）。
+//   schema.sql の ALTER TABLE を手動適用しなくても、保存時にこの列を使えるようにする。
+//   既に存在する場合は "duplicate column name" で失敗するため握りつぶす。1プロセス内では1回だけ実行。
+let troubleColsEnsured = false;
+export async function ensureTroubleColumns(db) {
+  if (troubleColsEnsured) return;
+  try { await db.prepare('ALTER TABLE trouble_record ADD COLUMN form_values_json TEXT').run(); }
+  catch { /* 既に存在（duplicate column name）等は無視 */ }
+  troubleColsEnsured = true;
+}
+
 // trouble_record へ INSERT する。form_values_json 等の列が無い旧DBでは、該当列を外して再試行する
 // （未マイグレーション環境でもトラブル登録が壊れないようにする）。
 export async function insertTroubleRecord(db, cols, vals) {
@@ -80,6 +91,7 @@ export async function onRequestPost({ request, env, data }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
   const db = env.DB;
+  await ensureTroubleColumns(db); // form_values_json 列を自動で用意（未マイグレーション対応）
   const body = await readJson(request);
 
   const { occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, form_values_json, file_ids, reporter_name } = body;

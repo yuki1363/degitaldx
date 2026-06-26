@@ -348,11 +348,12 @@ export async function openExcelExport(type, record) {
   if (!template) return;
 
   let inputValues = {};
-  // 計画に保存済みの帳票入力値があれば、それを使う（出力時フォームは出さない）
+  // 記録/計画ページで入力・保存済みの帳票入力値があれば、それを使う（出力時フォームは出さない）
   if (record && typeof record.form_values_json === 'string' && record.form_values_json) {
     try { inputValues = JSON.parse(record.form_values_json) || {}; } catch { inputValues = {}; }
-  } else {
-    // 保存値が無い場合（トラブル報告書・旧データ）は、テンプレートの入力項目をフォームで集める
+  } else if (type !== 'trouble_report' && type !== 'construction_notice') {
+    // トラブル報告書・工事連絡書は記録/計画ページで入力するため、出力時フォームは出さない。
+    // それ以外で保存値が無い場合のみ、テンプレートの入力項目をフォームで集める（後方互換）。
     let inputFields = [];
     try {
       const parsed = JSON.parse(template.fields_json || '[]');

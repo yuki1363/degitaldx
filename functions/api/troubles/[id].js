@@ -3,6 +3,7 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
+import { ensureTroubleColumns } from './index.js';
 
 // trouble_record を UPDATE する。form_values_json 等の列が無い旧DBでは、該当の SET 句を外して再試行する。
 async function updateTroubleRecord(db, fieldClauses, fieldBinds, id, userEmail, now) {
@@ -71,6 +72,7 @@ export async function onRequestPut({ request, params, env, data }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
   const db = env.DB;
+  await ensureTroubleColumns(db); // form_values_json 列を自動で用意（未マイグレーション対応）
   const id = params.id;
   const userEmail = data.user.email;
   const now = nowIso();
