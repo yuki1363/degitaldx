@@ -14,7 +14,7 @@ import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', time: '時刻', check: 'チェック(レ点)', choice: '○で1つ選択' };
+const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', time: '時刻', check: 'チェック(レ点)', choice: '○で1つ選択', hanko: 'ハンコ(赤丸印)' };
 
 // 種別ごとの標準入力項目（「標準項目を読み込む」で一括投入。後から1つずつ編集・削除できる）
 // 工事連絡書の標準項目は plan.js（計画ページの入力欄）と共有する（permit-fields.js）
@@ -31,6 +31,7 @@ const DEFAULT_FIELDS = {
     { tag: '処置', label: '処置', type: 'textarea' },
     { tag: '有効性の確認', label: '有効性の確認', type: 'textarea' },
     { tag: '特記事項', label: '特記事項', type: 'textarea' },
+    { tag: '担当者印', label: '担当者（ハンコ・苗字）', type: 'hanko' },
   ],
 };
 const cloneDefaults = (type) =>
@@ -241,7 +242,7 @@ function showForm(container, existing) {
     autoBox,
     el('div', { class: 'field', style: 'margin-top:8px' }, [
       el('label', {}, '画面で入力する項目（Excelのセルに {{タグ名}} を置く）'),
-      el('p', { class: 'hint', style: 'margin:2px 0 6px' }, '会社名・TEL・許可作業のレ点（チェック）・備考など、計画にない項目をここで定義します。種類「チェック(レ点)」はチェックすると Excel に ✓ が入ります。種類「○で1つ選択」は選択肢から1つ選ぶと、その選択肢名のセル（例 故障休止 のセルに {{故障休止}}）に ○ が入ります。'),
+      el('p', { class: 'hint', style: 'margin:2px 0 6px' }, '会社名・TEL・許可作業のレ点（チェック）・備考など、計画にない項目をここで定義します。種類「チェック(レ点)」はチェックすると Excel に ✓ が入ります。種類「○で1つ選択」は選択肢から1つ選ぶと、その選択肢名のセル（例 故障休止 のセルに {{故障休止}}）に ○ が入ります。種類「ハンコ(赤丸印)」は苗字を入力すると、そのタグのセル（例 {{担当者印}}）に赤丸の印影画像が入ります。'),
       fieldsBox,
       el('div', { class: 'action-row', style: 'margin-top:6px' }, [
         el('button', { class: 'btn btn-sm', onclick: addField }, '＋ 入力項目を追加'),

@@ -13,6 +13,8 @@
 import { api } from '/js/api.js';
 import { el, formatDate, formatDateTime } from '/js/util.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
+import { makeHankoPngBase64 } from '/js/hanko.js';
+import { embedHankos } from '/js/xlsx-image.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const PLAN_TYPE_LABELS = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
@@ -190,6 +192,15 @@ function collectInputs(title, inputFields) {
         getters.push(() => [tag, cb.checked ? CHECK_MARK : '']);
         return el('label', { class: 'pf-input-check' }, [cb, ` ${f.label || tag}（レ点）`]);
       }
+      // ハンコ（赤丸印）。苗字を入力すると、該当セルに印影画像が入る（テキストは出ない）。
+      if (f.type === 'hanko') {
+        const input = el('input', { type: 'text', placeholder: '苗字（例: 田中）' });
+        getters.push(() => [tag, input.value || '']);
+        return el('div', { class: 'field' }, [
+          el('label', {}, `${f.label || tag}（ハンコ）`),
+          input,
+        ]);
+      }
       // ○で1つ選択。選んだ選択肢のタグ（=選択肢名）だけ ○ になり、他は空になる。
       if (f.type === 'choice' && Array.isArray(f.options) && f.options.length) {
         const name = `pf-choice-${idx}`;
@@ -262,22 +273,35 @@ async function fillAndDownload(template, type, record, inputValues) {
   if (type === 'construction_notice') {
     for (const f of CONSTRUCTION_NOTICE_FIELDS) if (!(f.tag in auto)) base[f.tag] = '';
   }
+  let parsedFields = [];
   try {
     const fields = JSON.parse(template.fields_json || '[]');
-    if (Array.isArray(fields)) {
-      for (const f of fields) {
-        if (!f) continue;
-        // choice は選択肢名そのものがセルのタグ。未選択でも {{選択肢}} を残さないよう空既定にする
-        if (f.type === 'choice' && Array.isArray(f.options)) {
-          if (f.tag && !(f.tag in auto)) base[f.tag] = '';
-          for (const opt of f.options) if (opt && !(opt in auto)) base[opt] = '';
-        } else if (f.tag && !(f.tag in auto)) {
-          base[f.tag] = '';
-        }
-      }
-    }
+    if (Array.isArray(fields)) parsedFields = fields.filter(Boolean);
   } catch { /* テンプレ定義が壊れていても続行 */ }
+  for (const f of parsedFields) {
+    // choice は選択肢名そのものがセルのタグ。未選択でも {{選択肢}} を残さないよう空既定にする
+    if (f.type === 'choice' && Array.isArray(f.options)) {
+      if (f.tag && !(f.tag in auto)) base[f.tag] = '';
+      for (const opt of f.options) if (opt && !(opt in auto)) base[opt] = '';
+    } else if (f.tag && !(f.tag in auto)) {
+      base[f.tag] = '';
+    }
+  }
   const values = { ...auto, ...base, ...(inputValues || {}) };
+
+  // ハンコ（赤丸印）: 苗字 → 印影画像を該当セルに埋め込み、タグ文字は空にして消す（画像で表現）。
+  // セル特定のため、文字列置換より前に実行する（タグがまだ残っている状態で位置を探す）。
+  const hankoItems = [];
+  for (const f of parsedFields) {
+    if (f.type !== 'hanko' || !f.tag) continue;
+    const surname = String((inputValues && inputValues[f.tag]) || '').trim();
+    values[f.tag] = '';
+    if (surname) hankoItems.push({ tag: f.tag, base64: makeHankoPngBase64(surname) });
+  }
+  if (hankoItems.length) {
+    try { await embedHankos(zip, hankoItems); }
+    catch (e) { console.error('ハンコ画像の埋め込みに失敗しました:', e); }
+  }
 
   // 文字列セル単位（共有文字列 <si> / インライン文字列 <is>）で置換する。
   // run 分割やふりがなの影響を受けず、置換したセルだけを作り直す（他セルは無変更）。
