@@ -42,6 +42,13 @@ function datePart(d) {
   if (!mt) return { y: '', mo: '', da: '' };
   return { y: mt[1], mo: String(Number(mt[2])), da: String(Number(mt[3])) };
 }
+// 日付('YYYY-MM-DD') でも ISO日時でも JST の { y, mo, da } に分解（月日は先頭ゼロなし）
+//   トラブルの occurred_at は UTC 日時なので、JST に変換してから分解する（日付ズレ防止）。
+function datePartJst(v) {
+  const mt = /^(\d{4})\/(\d{2})\/(\d{2})/.exec(formatDate(v) || '');
+  if (!mt) return { y: '', mo: '', da: '' };
+  return { y: mt[1], mo: String(Number(mt[2])), da: String(Number(mt[3])) };
+}
 // 開始〜終了の日数（両端含む）。終了が無ければ1日
 function daysBetween(start, end) {
   if (!start) return '';
@@ -75,8 +82,11 @@ function buildValues(type, r) {
       '印刷日': today,
     };
   }
+  const od = datePartJst(r.occurred_at);
   return {
     '発生日時': formatDateTime(r.occurred_at),
+    '発生年月日': formatDate(r.occurred_at),
+    '発生年': od.y, '発生月': od.mo, '発生日': od.da,
     '設備番号': r.equipment_code || '',
     '設備名': r.equipment_name || '',
     'ジャンル': r.category_name || '',
@@ -173,12 +183,23 @@ function chooseTemplate(templates) {
 function collectInputs(title, inputFields) {
   return new Promise((resolve) => {
     const getters = [];
-    const rows = inputFields.map((f) => {
+    const rows = inputFields.map((f, idx) => {
       const tag = f.tag;
       if (f.type === 'check') {
         const cb = el('input', { type: 'checkbox' });
         getters.push(() => [tag, cb.checked ? CHECK_MARK : '']);
         return el('label', { class: 'pf-input-check' }, [cb, ` ${f.label || tag}（レ点）`]);
+      }
+      // ○で1つ選択。選んだ選択肢のタグ（=選択肢名）だけ ○ になり、他は空になる。
+      if (f.type === 'choice' && Array.isArray(f.options) && f.options.length) {
+        const name = `pf-choice-${idx}`;
+        const radios = f.options.map((o) => el('input', { type: 'radio', name, value: o }));
+        getters.push(() => f.options.map((o, k) => [o, radios[k].checked ? '○' : '']));
+        return el('div', { class: 'field' }, [
+          el('label', {}, f.label || tag),
+          el('div', { class: 'pf-choice-row' },
+            f.options.map((o, k) => el('label', { class: 'pf-input-check' }, [radios[k], ` ${o}`]))),
+        ]);
       }
       let input;
       if (f.type === 'textarea') input = el('textarea', { rows: '2' });
@@ -201,7 +222,12 @@ function collectInputs(title, inputFields) {
           class: 'btn btn-primary',
           onclick: () => {
             const values = {};
-            for (const get of getters) { const [t, v] = get(); values[t] = v; }
+            for (const get of getters) {
+              const out = get();
+              // choice は [[tag,値],…] の配列、その他は [tag,値] の単一ペア
+              if (Array.isArray(out[0])) { for (const [t, v] of out) values[t] = v; }
+              else { const [t, v] = out; values[t] = v; }
+            }
             done(values);
           },
         }, '出力'),
@@ -239,7 +265,16 @@ async function fillAndDownload(template, type, record, inputValues) {
   try {
     const fields = JSON.parse(template.fields_json || '[]');
     if (Array.isArray(fields)) {
-      for (const f of fields) if (f && f.tag && !(f.tag in auto)) base[f.tag] = '';
+      for (const f of fields) {
+        if (!f) continue;
+        // choice は選択肢名そのものがセルのタグ。未選択でも {{選択肢}} を残さないよう空既定にする
+        if (f.type === 'choice' && Array.isArray(f.options)) {
+          if (f.tag && !(f.tag in auto)) base[f.tag] = '';
+          for (const opt of f.options) if (opt && !(opt in auto)) base[opt] = '';
+        } else if (f.tag && !(f.tag in auto)) {
+          base[f.tag] = '';
+        }
+      }
     }
   } catch { /* テンプレ定義が壊れていても続行 */ }
   const values = { ...auto, ...base, ...(inputValues || {}) };

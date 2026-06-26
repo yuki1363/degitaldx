@@ -14,24 +14,32 @@ import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', time: '時刻', check: 'チェック(レ点)' };
+const FIELD_TYPES = { text: '文字', textarea: '複数行', date: '日付', time: '時刻', check: 'チェック(レ点)', choice: '○で1つ選択' };
 
 // 種別ごとの標準入力項目（「標準項目を読み込む」で一括投入。後から1つずつ編集・削除できる）
 // 工事連絡書の標準項目は plan.js（計画ページの入力欄）と共有する（permit-fields.js）
 const DEFAULT_FIELDS = {
   construction_notice: CONSTRUCTION_NOTICE_FIELDS,
+  // トラブル報告書（設備関係修理報告書）の、記録に無い項目を出力時に入力するための標準セット。
+  // 設備名・発生年月日・現象・原因・対策はトラブル記録から自動で入る（AUTO_TAGS 参照）。
   trouble_report: [
-    { tag: '確認者', label: '確認者', type: 'text' },
-    { tag: '承認者', label: '承認者', type: 'text' },
-    { tag: '備考', label: '備考', type: 'textarea' },
+    { tag: '整理NO', label: '整理NO.', type: 'text' },
+    { tag: '調査対象', label: '調査対象', type: 'text' },
+    { tag: 'トラブル名', label: 'トラブル名', type: 'text' },
+    { tag: '休止時間', label: '休止時間（分）', type: 'text' },
+    { tag: '休止種別', label: '休止区分（1つ選び○）', type: 'choice', options: ['故障休止', '点検休止', '調整休止'] },
+    { tag: '処置', label: '処置', type: 'textarea' },
+    { tag: '有効性の確認', label: '有効性の確認', type: 'textarea' },
+    { tag: '特記事項', label: '特記事項', type: 'textarea' },
   ],
 };
-const cloneDefaults = (type) => (DEFAULT_FIELDS[type] || []).map((f) => ({ ...f }));
+const cloneDefaults = (type) =>
+  (DEFAULT_FIELDS[type] || []).map((f) => ({ ...f, ...(f.options ? { options: [...f.options] } : {}) }));
 
 // 計画/記録から自動で入る差込タグ（種別別）。excel-fill.js の buildValues と対応させる
 const AUTO_TAGS = {
   construction_notice: ['タイトル', '工事作業名称', '種別', '予定日', '期間終了日', '開始年', '開始月', '開始日', '終了年', '終了月', '終了日', '開始時間', '終了時間', '日間', '設備名', '機器名', '点検者', '担当者', '状態', '備考', '印刷日'],
-  trouble_report: ['発生日時', '設備番号', '設備名', 'ジャンル', '現象', '原因', '対策', '記録者', '印刷日'],
+  trouble_report: ['発生年月日', '発生年', '発生月', '発生日', '発生日時', '設備番号', '設備名', 'ジャンル', '現象', '原因', '対策', '記録者', '印刷日'],
 };
 
 function autoTagHelp(type) {
@@ -104,7 +112,10 @@ function showForm(container, existing) {
   let inputFields = [];
   try {
     const parsed = existing ? JSON.parse(existing.fields_json || '[]') : cloneDefaults(templateType);
-    if (Array.isArray(parsed)) inputFields = parsed.map((f) => ({ tag: f.tag || '', label: f.label || '', type: f.type || 'text' }));
+    if (Array.isArray(parsed)) inputFields = parsed.map((f) => ({
+      tag: f.tag || '', label: f.label || '', type: f.type || 'text',
+      ...(Array.isArray(f.options) ? { options: [...f.options] } : {}),
+    }));
   } catch { inputFields = []; }
 
   const nameInput = el('input', { type: 'text', value: existing?.name || '', placeholder: '例: 工事連絡書（標準）' });
@@ -136,7 +147,7 @@ function showForm(container, existing) {
   function fieldRow(f, i) {
     const tagIn = el('input', { type: 'text', value: f.tag, placeholder: 'タグ名 例: 会社名', style: 'width:140px', oninput: (e) => { f.tag = e.target.value; } });
     const labelIn = el('input', { type: 'text', value: f.label, placeholder: 'ラベル 例: 工事業者会社名', style: 'flex:1;min-width:120px', oninput: (e) => { f.label = e.target.value; } });
-    const typeSel = el('select', { onchange: (e) => { f.type = e.target.value; } },
+    const typeSel = el('select', { onchange: (e) => { f.type = e.target.value; renderFields(); } },
       Object.entries(FIELD_TYPES).map(([v, l]) => el('option', { value: v }, l)));
     typeSel.value = f.type;
     const move = (d) => {
@@ -145,7 +156,7 @@ function showForm(container, existing) {
       [inputFields[i], inputFields[j]] = [inputFields[j], inputFields[i]];
       renderFields();
     };
-    return el('div', { class: 'pt-field-row' }, [
+    const row = el('div', { class: 'pt-field-row' }, [
       el('span', { class: 'pt-field-num' }, String(i + 1)),
       el('span', { class: 'pt-tag-brace' }, '{{'), tagIn, el('span', { class: 'pt-tag-brace' }, '}}'),
       labelIn,
@@ -154,6 +165,24 @@ function showForm(container, existing) {
       el('button', { class: 'btn btn-sm', disabled: i === inputFields.length - 1, title: '下へ', onclick: () => move(1) }, '↓'),
       el('button', { class: 'btn btn-sm btn-danger', title: '削除', onclick: () => { inputFields.splice(i, 1); renderFields(); } }, '×'),
     ]);
+    // ○で1つ選択：選択肢を入力（選択肢名がそのままセルのタグ {{故障休止}} 等になる）
+    if (f.type === 'choice') {
+      const optsIn = el('input', {
+        type: 'text', value: (f.options || []).join(' / '),
+        placeholder: '選択肢（/ 区切り）例: 故障休止 / 点検休止 / 調整休止',
+        style: 'flex:1;min-width:200px',
+        oninput: (e) => { f.options = e.target.value.split(/[\/、,]/).map((s) => s.trim()).filter(Boolean); },
+      });
+      return el('div', {}, [
+        row,
+        el('div', { class: 'pt-field-row', style: 'margin-top:2px' }, [
+          el('span', { class: 'pt-field-num' }, ''),
+          el('span', { class: 'hint', style: 'white-space:nowrap' }, '選択肢:'),
+          optsIn,
+        ]),
+      ]);
+    }
+    return row;
   }
   const addField = () => { inputFields.push({ tag: '', label: '', type: 'text' }); renderFields(); };
   const loadDefaults = () => {
@@ -187,7 +216,10 @@ function showForm(container, existing) {
     const name = nameInput.value.trim();
     if (!name) { alert('テンプレート名は必須です。'); return; }
     const fields = inputFields
-      .map((f) => ({ tag: (f.tag || '').trim(), label: f.label || '', type: f.type || 'text' }))
+      .map((f) => ({
+        tag: (f.tag || '').trim(), label: f.label || '', type: f.type || 'text',
+        ...(f.type === 'choice' && Array.isArray(f.options) ? { options: f.options.filter(Boolean) } : {}),
+      }))
       .filter((f) => f.tag);
     if (!fileId && !confirm('Excelファイルが未設定です。あとで設定する場合はこのまま保存できます。続けますか？')) return;
     const payload = { name, template_type: templateType, image_file_id: fileId, fields_json: JSON.stringify(fields) };
@@ -209,7 +241,7 @@ function showForm(container, existing) {
     autoBox,
     el('div', { class: 'field', style: 'margin-top:8px' }, [
       el('label', {}, '画面で入力する項目（Excelのセルに {{タグ名}} を置く）'),
-      el('p', { class: 'hint', style: 'margin:2px 0 6px' }, '会社名・TEL・許可作業のレ点（チェック）・備考など、計画にない項目をここで定義します。種類「チェック(レ点)」はチェックすると Excel に ✓ が入ります。'),
+      el('p', { class: 'hint', style: 'margin:2px 0 6px' }, '会社名・TEL・許可作業のレ点（チェック）・備考など、計画にない項目をここで定義します。種類「チェック(レ点)」はチェックすると Excel に ✓ が入ります。種類「○で1つ選択」は選択肢から1つ選ぶと、その選択肢名のセル（例 故障休止 のセルに {{故障休止}}）に ○ が入ります。'),
       fieldsBox,
       el('div', { class: 'action-row', style: 'margin-top:6px' }, [
         el('button', { class: 'btn btn-sm', onclick: addField }, '＋ 入力項目を追加'),

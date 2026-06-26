@@ -2077,6 +2077,13 @@ input.is-abnormal {
   padding: 6px 0;
 }
 .pf-input-check input { width: 18px; height: 18px; }
+/* ○で1つ選択（休止区分など）: 選択肢を横並びにする */
+.pf-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.pf-choice-row .pf-input-check { padding: 3px 0; }
 
 /* 帳票入力欄: テキスト系は2列、許可作業はチェックリストでまとめる */
 .pf-grid {
