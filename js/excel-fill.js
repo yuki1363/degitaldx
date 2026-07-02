@@ -28,7 +28,7 @@ const STATUS_LABELS = { pending: '未実施', done: '完了', overdue: '期限�
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const CHECK_MARK = '✓';
 
-const JSZIP_SRC = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+const JSZIP_SRC = '/js/vendor/jszip.min.js'; // 同梱版（CDN不通・オフラインでも動作）
 let jszipPromise = null;
 function loadJSZip() {
   if (window.JSZip) return Promise.resolve(window.JSZip);
