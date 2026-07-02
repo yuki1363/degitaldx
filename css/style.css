@@ -2059,6 +2059,25 @@ input.is-abnormal {
   padding: 6px 0;
 }
 .pf-input-check input { width: 18px; height: 18px; }
+
+/* 新バージョン通知トースト（nav.js） */
+.sw-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 13px;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
 /* ○で1つ選択（休止区分など）: 選択肢を横並びにする */
 .pf-choice-row {
   display: flex;

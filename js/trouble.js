@@ -556,14 +556,18 @@ async function renderForm(existing, prefill = null) {
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
     try {
       // 添付（画像はリサイズしてEXIF除去、動画はそのまま）を先に送って file_ids を集める
       const fileIds = [];
       for (const file of pendingFiles) {
+        saveBtn.textContent = `写真を送信中… (${fileIds.length + 1}/${pendingFiles.length})`;
         const prepared = await resizeImageFile(file);
         const meta = await uploadFile(prepared, {});
         fileIds.push(meta.id);
       }
+      saveBtn.textContent = '保存中…';
       body.file_ids = fileIds;
       if (existing) {
         await api.put(`/api/troubles/${existing.id}`, body);
@@ -577,8 +581,11 @@ async function renderForm(existing, prefill = null) {
       }
     } catch (err) {
       alert(saveErrorMessage(err));
+      saveBtn.disabled = false;
+      saveBtn.textContent = '保存';
     }
   };
+  const saveBtn = el('button', { class: 'btn btn-primary', onclick: () => save() }, '保存');
 
   render(app, [
     draftBanner,
@@ -612,7 +619,7 @@ async function renderForm(existing, prefill = null) {
         fileListBox,
       ]),
       el('div', { class: 'action-row' }, [
-        el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
+        saveBtn,
         el('button', {
           class: 'btn',
           // 明示的なキャンセルでは未保存警告を出さない（新規の下書きは残る＝次回復元できる）

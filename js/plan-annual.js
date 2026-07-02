@@ -63,15 +63,35 @@ function openSheet(titleText, actions) {
   document.body.appendChild(backdrop);
 }
 
+// 1つの値を入力してもらうシート（prompt() の代わり。スマホで押しやすい・日付は日付ピッカーが出る）
+//   キャンセル時は null を返す
+function openInputSheet(titleText, { type = 'text', value = '', placeholder = '' } = {}) {
+  return new Promise((resolve) => {
+    const input = el('input', { type, value, placeholder, style: 'width:100%;box-sizing:border-box;font-size:16px;padding:10px' });
+    const backdrop = el('div', { class: 'sheet-backdrop' });
+    const done = (v) => { backdrop.remove(); resolve(v); };
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) done(null); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(input.value); });
+    backdrop.appendChild(el('div', { class: 'sheet' }, [
+      el('div', { class: 'sheet-title' }, titleText),
+      el('div', { style: 'padding:4px 8px 8px' }, [input]),
+      el('button', { class: 'sheet-btn', onclick: () => done(input.value) }, '決定'),
+      el('button', { class: 'sheet-btn sheet-cancel', onclick: () => done(null) }, 'キャンセル'),
+    ]));
+    document.body.appendChild(backdrop);
+    input.focus();
+  });
+}
+
 // 年間計画のタスクを、指定日付でカレンダーにも表示する（on_calendar=1）。
 // 別レコードは作らず同じ予定の planned_date を指定日にして on_calendar を立てるだけなので、
 // 年間計画表にそのまま残りつつ、同じ予定がカレンダーにも出る（完了状態も常に一致する）。
 async function registerToCalendar(plan) {
   const defaultDate = (plan.planned_date || '').slice(0, 10) || `${year}-01-01`;
-  const date = prompt('カレンダーに表示する日付（YYYY-MM-DD）', defaultDate);
+  const date = await openInputSheet('カレンダーに表示する日付', { type: 'date', value: defaultDate });
   if (date === null) return;
-  const d = date.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { alert('日付は YYYY-MM-DD の形式で入力してください。'); return; }
+  const d = String(date).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { alert('日付を選択してください。'); return; }
   await mutate(() => api.put(`/api/plans/${plan.id}`, { planned_date: d, on_calendar: 1 }));
 }
 
@@ -97,13 +117,13 @@ function openPlanSheet(plan, monthLabel) {
   actions.push(plan.status === 'done'
     ? { label: '未完了に戻す', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'pending' })) }
     : { label: '✓ 完了にする', onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { status: 'done' })) });
-  actions.push({ label: '👤 点検者を変更', onClick: () => {
-    const name = prompt('点検者名を入力', plan.inspector_name || '');
+  actions.push({ label: '👤 点検者を変更', onClick: async () => {
+    const name = await openInputSheet('点検者名を入力', { value: plan.inspector_name || '', placeholder: '点検者名（空で未設定に）' });
     if (name === null) return; // キャンセル
     return mutate(() => api.put(`/api/plans/${plan.id}`, { inspector_name: name.trim() || null }));
   } });
-  actions.push({ label: '👥 担当者を変更', onClick: () => {
-    const name = prompt('担当者名を入力', plan.assignee_name || '');
+  actions.push({ label: '👥 担当者を変更', onClick: async () => {
+    const name = await openInputSheet('担当者名を入力', { value: plan.assignee_name || '', placeholder: '担当者名（空で未設定に）' });
     if (name === null) return; // キャンセル
     return mutate(() => api.put(`/api/plans/${plan.id}`, { assignee_name: name.trim() || null }));
   } });

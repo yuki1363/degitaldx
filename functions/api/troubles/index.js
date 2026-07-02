@@ -4,16 +4,14 @@ import { createNotification } from '../_lib/notify.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
+import { ensureColumns } from '../_lib/db-compat.js';
 
 // 後から追加した列を、未マイグレーションのDBに対しても自動で用意する（自己修復マイグレーション）。
-//   schema.sql の ALTER TABLE を手動適用しなくても、保存時にこの列を使えるようにする。
-//   既に存在する場合は "duplicate column name" で失敗するため握りつぶす。1プロセス内では1回だけ実行。
-let troubleColsEnsured = false;
+//   新しい列を trouble_record に足すときは schema.sql への追記と合わせてここに ALTER 文を1行足す。
 export async function ensureTroubleColumns(db) {
-  if (troubleColsEnsured) return;
-  try { await db.prepare('ALTER TABLE trouble_record ADD COLUMN form_values_json TEXT').run(); }
-  catch { /* 既に存在（duplicate column name）等は無視 */ }
-  troubleColsEnsured = true;
+  await ensureColumns(db, 'trouble_record', [
+    'ALTER TABLE trouble_record ADD COLUMN form_values_json TEXT',
+  ]);
 }
 
 // trouble_record へ INSERT する。form_values_json 等の列が無い旧DBでは、該当列を外して再試行する

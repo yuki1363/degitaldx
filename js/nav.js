@@ -20,8 +20,37 @@ function setupBackNav() {
   });
 }
 
+// 新バージョン検知: Service Worker が更新されたら「更新する」トーストを出す。
+//   本アプリはキャッシュ優先表示のため、更新直後の1回は旧画面が出る。
+//   新SWの有効化（controllerchange）を検知したら再読み込みを促し、
+//   「再読み込みしてください」と口頭で案内する運用を不要にする。
+function setupUpdateToast() {
+  if (!('serviceWorker' in navigator)) return;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return;                        // 初回インストール時は出さない
+    if (document.getElementById('sw-update-toast')) return;
+    const toast = document.createElement('div');
+    toast.id = 'sw-update-toast';
+    toast.className = 'sw-toast';
+    const msg = document.createElement('span');
+    msg.textContent = '新しいバージョンがあります';
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm btn-primary';
+    btn.textContent = '更新する';
+    btn.addEventListener('click', () => window.location.reload());
+    const close = document.createElement('button');
+    close.className = 'btn btn-sm';
+    close.textContent = 'あとで';
+    close.addEventListener('click', () => toast.remove());
+    toast.append(msg, btn, close);
+    document.body.appendChild(toast);
+  });
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', setupBackNav);
+  document.addEventListener('DOMContentLoaded', () => { setupBackNav(); setupUpdateToast(); });
 } else {
   setupBackNav();
+  setupUpdateToast();
 }
