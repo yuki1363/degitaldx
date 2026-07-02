@@ -31,9 +31,10 @@ async function renderList() {
     api.get('/api/reports/categories'),
   ]);
 
+  // 開いた時点で直近30日分を自動表示する（期間は入力で変更可）
   let filterCategory = '';
   let filterReporter = '';
-  let filterFrom     = todayStr();
+  let filterFrom     = new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE');
   let filterTo       = todayStr();
   let reporterTimer  = null;
   const listBox = el('div', { class: 'row-list' }, []);
@@ -117,7 +118,8 @@ async function renderList() {
     listBox,
   ]);
   updateWriteLabel();
-  render(listBox, el('p', { class: 'empty' }, '🔍 条件を選んで「検索」を押してください。'));
+  // 開いた時点で直近30日分を自動表示（条件を変えたら「検索」で再絞り込み）
+  await load();
 }
 
 // ---------------- 詳細 ----------------
@@ -189,7 +191,8 @@ async function renderForm(existing) {
     date: el('input', { type: 'date', value: initDate }),
     reporter: el('input', {
       type: 'text',
-      value: existing ? (existing.reporter_name || '') : '',
+      // 新規はログインユーザー名を初期値にする（毎回の手入力を省く。変更可）
+      value: existing ? (existing.reporter_name || '') : (currentUser?.name || ''),
       placeholder: '入力者名（自由入力）',
       list: 'report-reporter-options',
     }),

@@ -52,9 +52,10 @@ async function renderList(equipmentId) {
   categories = cats;
 
   // フィルタ状態（設備台帳の「すべて見る」から来た場合は設備で初期絞り込み）
+  // 開いた時点で直近30日分を自動表示する（期間は入力で変更可）
   let filterCategory = '';
   let filterEquipment = equipmentId ? String(equipmentId) : '';
-  let filterFrom = '';
+  let filterFrom = new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE');
   let filterTo = '';
   let currentTroubles = []; // 現在表示中の絞り込み結果（CSV出力用）
 
@@ -108,7 +109,7 @@ async function renderList(equipmentId) {
     allLabel: '全設備',
     onchange: (e) => { filterEquipment = e.target.value; },
   });
-  const fromInput = el('input', { type: 'date', onchange: (e) => { filterFrom = e.target.value; } });
+  const fromInput = el('input', { type: 'date', value: filterFrom, onchange: (e) => { filterFrom = e.target.value; } });
   const toInput   = el('input', { type: 'date', onchange: (e) => { filterTo   = e.target.value; } });
   const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
 
@@ -145,11 +146,8 @@ async function renderList(equipmentId) {
     ]),
     listBox,
   ]);
-  if (equipmentId) {
-    await load();
-  } else {
-    render(listBox, el('p', { class: 'empty' }, '🔍 絞り込み条件を選んで「検索」を押してください。'));
-  }
+  // 開いた時点で直近30日分を自動表示（条件を変えたら「検索」で再絞り込み）
+  await load();
 }
 
 // ---------------- 詳細 ----------------
@@ -396,8 +394,9 @@ async function renderForm(existing, prefill = null) {
     countermeasure: el('textarea', { placeholder: '例: ベルト交換' }, existing?.countermeasure || ''),
     reporter_name: el('input', {
       type: 'text',
-      // 記録者は自由入力。編集時は保存済みの値（旧データは作成者名で補完）、新規は空欄（候補から選択）
-      value: existing ? (existing.reporter_name || existing.creator_name || '') : '',
+      // 記録者は自由入力。編集時は保存済みの値（旧データは作成者名で補完）、
+      // 新規はログインユーザー名を初期値にする（毎回の手入力を省く。変更可）
+      value: existing ? (existing.reporter_name || existing.creator_name || '') : (currentUser?.name || ''),
       placeholder: '記録者名（自由入力）',
       list: 'trouble-reporter-options',
     }),

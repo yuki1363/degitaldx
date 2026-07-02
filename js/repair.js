@@ -105,11 +105,8 @@ async function renderList(equipmentId) {
     ]),
     listBox,
   ]);
-  if (equipmentId) {
-    await load();
-  } else {
-    render(listBox, el('p', { class: 'empty' }, '🔍 ステータスを選んで「検索」を押してください。'));
-  }
+  // 開いた時点で全ステータスの一覧を自動表示（ステータスを変えたら「検索」で再絞り込み）
+  await load();
 }
 
 // ---------------- 詳細 ----------------
