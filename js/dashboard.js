@@ -338,6 +338,181 @@ const LINKED_TYPE_URLS = {
   report:     '/pages/report?id=',
 };
 
+// ---------------- カスタムグラフタブ ----------------
+//   CLAUDE.md 08: 集計軸・期間・対象設備を選択できるカスタムグラフ。
+//   データはトラブル/点検/業務依頼を取得してクライアント側で集計する（抽出レポートと同じ取り方）。
+//   単一系列のため凡例は出さない（円グラフのみカテゴリ凡例）。色は既存のチャート配色に合わせる。
+
+const CUSTOM_DATA_TYPES = {
+  trouble:    { label: 'トラブル件数' },
+  inspection: { label: '点検実施数' },
+  repair:     { label: '業務依頼件数' },
+};
+const CUSTOM_AXES = {
+  month:     { label: '月別' },
+  category:  { label: 'ジャンル別' },   // トラブルのみ
+  equipment: { label: '設備別' },
+  person:    { label: '担当者・記録者別' },
+};
+const CUSTOM_KINDS = { bar: '棒グラフ', line: '折れ線', doughnut: '円グラフ' };
+
+// from〜to の各月（YYYY-MM）を順に返す（最大36ヶ月で打ち切り）
+function monthKeys(fromStr, toStr) {
+  const keys = [];
+  let cur = fromStr.slice(0, 7);
+  const end = toStr.slice(0, 7);
+  while (cur <= end && keys.length < 36) {
+    keys.push(cur);
+    const [y, m] = cur.split('-').map(Number);
+    cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  }
+  return keys;
+}
+
+// rows: { date:'YYYY-MM-DD', category, equipment, person } の配列 → 軸ごとの集計
+function aggregateRows(rows, axis, fromStr, toStr) {
+  if (axis === 'month') {
+    const keys = monthKeys(fromStr, toStr);
+    const counts = new Map(keys.map((k) => [k, 0]));
+    for (const r of rows) {
+      const k = (r.date || '').slice(0, 7);
+      if (counts.has(k)) counts.set(k, counts.get(k) + 1);
+    }
+    return { labels: keys.map((k) => k.replace('-', '/')), data: keys.map((k) => counts.get(k)) };
+  }
+  const counts = new Map();
+  for (const r of rows) {
+    const k = r[axis] || '未設定';
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15); // 上位15件
+  return { labels: sorted.map((x) => x[0]), data: sorted.map((x) => x[1]) };
+}
+
+async function renderCustom(fromStr, toStr) {
+  const contentEl = app.querySelector('#tab-content');
+  render(contentEl, el('p', { class: 'loading' }, '読み込み中…'));
+  const { equipment } = await api.get('/api/equipment');
+
+  let dataType = 'trouble';
+  let axis = 'month';
+  let chartKind = 'bar';
+  let equipId = '';
+
+  const chartBox = el('div', { class: 'chart-wrap' });
+  const countNote = el('p', { class: 'hint', style: 'margin:4px 0 0' }, '');
+
+  const fetchRows = async () => {
+    if (dataType === 'trouble') {
+      const p = new URLSearchParams({ from: fromStr, to: toStr });
+      if (equipId) p.set('equipment_id', equipId);
+      const { troubles } = await api.get(`/api/troubles?${p}`);
+      return (troubles || []).map((t) => ({
+        date: (t.occurred_at || '').slice(0, 10),
+        category: t.category_name || '未設定',
+        equipment: t.equipment_name || '設備未指定',
+        person: t.reporter_name || t.creator_name || '未設定',
+      }));
+    }
+    if (dataType === 'inspection') {
+      const p = new URLSearchParams();
+      if (equipId) p.set('equipment_id', equipId);
+      const { inspections } = await api.get(`/api/inspections${p.size ? '?' + p : ''}`);
+      return (inspections || [])
+        .filter((i) => { const d = (i.inspected_at || '').slice(0, 10); return d >= fromStr && d <= toStr; })
+        .map((i) => ({
+          date: (i.inspected_at || '').slice(0, 10),
+          category: '—',
+          equipment: i.equipment_name || '設備未指定',
+          person: i.assignee_name || '未設定',
+        }));
+    }
+    const p = new URLSearchParams();
+    if (equipId) p.set('equipment_id', equipId);
+    const { repairs } = await api.get(`/api/repairs${p.size ? '?' + p : ''}`);
+    return (repairs || [])
+      .filter((r) => { const d = (r.created_at || '').slice(0, 10); return d >= fromStr && d <= toStr; })
+      .map((r) => ({
+        date: (r.created_at || '').slice(0, 10),
+        category: '—',
+        equipment: r.equipment_name || '設備未指定',
+        person: r.assignee_name || '未設定',
+      }));
+  };
+
+  const draw = async () => {
+    render(chartBox, el('p', { class: 'loading' }, '集計中…'));
+    let rows;
+    try { rows = await fetchRows(); }
+    catch (err) { render(chartBox, el('p', { class: 'notice is-error' }, err.message)); return; }
+
+    const { labels, data } = aggregateRows(rows, axis, fromStr, toStr);
+    countNote.textContent = `対象 ${rows.length}件（${fromStr} 〜 ${toStr}）`;
+    if (rows.length === 0) {
+      render(chartBox, el('p', { class: 'empty' }, '該当データがありません。'));
+      return;
+    }
+    const canvas = makeCanvas('chart-custom');
+    render(chartBox, [
+      el('h3', { class: 'chart-title' }, `${CUSTOM_DATA_TYPES[dataType].label} × ${CUSTOM_AXES[axis].label}`),
+      canvas,
+    ]);
+    destroyChart('chart-custom');
+    new Chart(canvas, {
+      type: chartKind,
+      data: {
+        labels,
+        datasets: [{
+          label: CUSTOM_DATA_TYPES[dataType].label,
+          data,
+          backgroundColor: chartKind === 'doughnut' ? PALETTE.slice(0, labels.length) : CHART_COLORS.blue,
+          borderColor: chartKind === 'line' ? CHART_COLORS.blue : undefined,
+          fill: false,
+          tension: 0.2,
+        }],
+      },
+      options: {
+        responsive: true,
+        // 単一系列なので凡例は出さない（円グラフはカテゴリの識別に必要なため表示）
+        plugins: { legend: chartKind === 'doughnut' ? { position: 'bottom' } : { display: false } },
+        scales: chartKind === 'doughnut' ? {} : { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+        // カテゴリ系の棒グラフは横棒（設備名などの長いラベルが読みやすい）
+        indexAxis: chartKind === 'bar' && axis !== 'month' ? 'y' : 'x',
+      },
+    });
+  };
+
+  // 集計軸の選択肢はデータ種別に応じて組み替える（ジャンル別はトラブルのみ）
+  const axisSel = el('select', { onchange: (e) => { axis = e.target.value; draw(); } });
+  const rebuildAxisOptions = () => {
+    const axes = Object.entries(CUSTOM_AXES).filter(([k]) => k !== 'category' || dataType === 'trouble');
+    if (!axes.some(([k]) => k === axis)) axis = 'month';
+    axisSel.replaceChildren(...axes.map(([v, { label }]) => el('option', { value: v, selected: v === axis }, label)));
+  };
+  const dataSel = el('select', { onchange: (e) => { dataType = e.target.value; rebuildAxisOptions(); draw(); } },
+    Object.entries(CUSTOM_DATA_TYPES).map(([v, { label }]) => el('option', { value: v }, label)));
+  const kindSel = el('select', { onchange: (e) => { chartKind = e.target.value; draw(); } },
+    Object.entries(CUSTOM_KINDS).map(([v, label]) => el('option', { value: v }, label)));
+  const equipSel = buildEquipSelect(equipment, {
+    value: '',
+    allLabel: '全設備',
+    onchange: (e) => { equipId = e.target.value; draw(); },
+  });
+  rebuildAxisOptions();
+
+  render(contentEl, [
+    el('div', { class: 'filter-bar' }, [
+      el('label', { class: 'filter-label' }, ['データ ', dataSel]),
+      el('label', { class: 'filter-label' }, ['集計軸 ', axisSel]),
+      el('label', { class: 'filter-label' }, ['グラフ ', kindSel]),
+      equipSel,
+    ]),
+    countNote,
+    chartBox,
+  ]);
+  await draw();
+}
+
 // ---------------- タブ付きレイアウト ----------------
 
 async function renderDashboard() {
@@ -356,6 +531,7 @@ async function renderDashboard() {
 
   const tabs = [
     { id: 'summary',  label: 'サマリー/グラフ' },
+    { id: 'custom',   label: 'カスタムグラフ' },
     { id: 'extract',  label: '抽出レポート' },
   ];
   const tabBtns = tabs.map(({ id, label }) =>
@@ -375,6 +551,8 @@ async function renderDashboard() {
     const to   = toInput.value   || defaultTo;
     if (activeTab === 'summary') {
       await renderSummary(from, to);
+    } else if (activeTab === 'custom') {
+      await renderCustom(from, to);
     } else {
       await renderExtract(from, to);
     }
