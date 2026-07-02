@@ -17,6 +17,7 @@ import { openQrScanner } from '/js/qr-scan.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
 import { createDraft, saveErrorMessage } from '/js/draft.js';
+import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
 const INPUT_TYPE_LABELS = { ok_ng: 'OK / NG', number: '数値', select: '選択式', text: '自由記述' };
 
@@ -274,9 +275,17 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
 
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中…';
+    // 本文とアップロード済みIDは try の外に置く（オフライン失敗時のキュー投入で使う）
+    const baseBody = {
+      equipment_id: Number(equipmentSelect.value),
+      assignee_name: assigneeInput.value.trim() || null,
+      inspected_at: inspectedAt,
+      note: noteInput.value.trim(),
+      items,
+    };
+    const fileIds = [];
     try {
       // 写真・動画を先にアップロード（画像はリサイズ=EXIF除去）
-      const fileIds = [];
       for (const f of pendingFiles) {
         saveBtn.textContent = `写真を送信中… (${fileIds.length + 1}/${pendingFiles.length})`;
         const prepared = await resizeImageFile(f);
@@ -284,14 +293,7 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
         fileIds.push(meta.id);
       }
       saveBtn.textContent = '保存中…';
-      const body = {
-        equipment_id: Number(equipmentSelect.value),
-        assignee_name: assigneeInput.value.trim() || null,
-        inspected_at: inspectedAt,
-        note: noteInput.value.trim(),
-        items,
-        file_ids: fileIds,
-      };
+      const body = { ...baseBody, file_ids: fileIds };
       const result = existing
         ? await api.put(`/api/inspections/${existing.id}`, body)
         : await api.post('/api/inspections', body);
@@ -307,6 +309,23 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
       draft?.clear(); // 保存できたので下書きを消す
       go(`?id=${existing ? existing.id : result.id}`);
     } catch (err) {
+      // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する。
+      // 保全計画から開始した点検は planId も保存し、送信成功時に計画を完了化する。
+      const offline = err?.offline === true || navigator.onLine === false;
+      if (offline && !existing) {
+        try {
+          const remaining = [];
+          for (const f of pendingFiles.slice(fileIds.length)) {
+            remaining.push(await resizeImageFile(f));
+          }
+          await enqueueOffline('inspection', { ...baseBody, file_ids: fileIds }, remaining, planId ? { planId } : {});
+          dirty = false;
+          draft?.clear();
+          alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
+          go('');
+          return;
+        } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
+      }
       alert(saveErrorMessage(err));
       saveBtn.disabled = false;
       saveBtn.textContent = existing ? '更新する' : '保存する';

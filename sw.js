@@ -7,10 +7,11 @@
  *   - /cdn-cgi/* : Cloudflare（Access ログイン等）の領域のため一切関与しない
  *   - アプリを更新したら CACHE_VERSION を上げる（旧キャッシュは activate で削除）
  *
- * 将来拡張（CLAUDE.md）: 入力中データの IndexedDB 一時保存とオンライン復帰時の
- * 自動同期は、入力フォームを実装するフェーズで追加する。
+ * オフライン入力（CLAUDE.md のオフライン考慮）は js/offline-queue.js が担う:
+ *   点検・トラブルの新規保存がオフラインで失敗すると IndexedDB の送信キューに保存し、
+ *   オンライン復帰時に自動送信する（写真Blob含む）。
  */
-const CACHE_VERSION = 'v0.92.1';
+const CACHE_VERSION = 'v0.93.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -25,6 +26,7 @@ const PRECACHE_URLS = [
   '/js/util.js',
   '/js/csv.js',
   '/js/draft.js',
+  '/js/offline-queue.js',
   '/js/equip-names.js',
   '/js/equip-picker.js',
   '/js/qr-scan.js',

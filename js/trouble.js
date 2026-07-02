@@ -14,6 +14,7 @@ import { openExcelExport } from '/js/excel-fill.js';
 import { TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
+import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
 // CSV出力の列定義（トラブル履歴）
 const CSV_COLUMNS = [
@@ -558,9 +559,9 @@ async function renderForm(existing, prefill = null) {
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中…';
+    const fileIds = []; // アップロード済み分（オフライン失敗時のキュー投入で使うため try の外に置く）
     try {
       // 添付（画像はリサイズしてEXIF除去、動画はそのまま）を先に送って file_ids を集める
-      const fileIds = [];
       for (const file of pendingFiles) {
         saveBtn.textContent = `写真を送信中… (${fileIds.length + 1}/${pendingFiles.length})`;
         const prepared = await resizeImageFile(file);
@@ -580,6 +581,24 @@ async function renderForm(existing, prefill = null) {
         go(`?id=${id}`);
       }
     } catch (err) {
+      // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する。
+      // アップロード済みの写真IDは payload に、未送信の写真はリサイズ済みBlobでキューに入れる
+      // （二重アップロードも取り残しも発生しない）。
+      const offline = err?.offline === true || navigator.onLine === false;
+      if (offline && !existing) {
+        try {
+          const remaining = [];
+          for (const file of pendingFiles.slice(fileIds.length)) {
+            remaining.push(await resizeImageFile(file));
+          }
+          await enqueueOffline('trouble', { ...body, file_ids: fileIds }, remaining);
+          draft?.clear();
+          guard?.clear();
+          alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
+          go('');
+          return;
+        } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
+      }
       alert(saveErrorMessage(err));
       saveBtn.disabled = false;
       saveBtn.textContent = '保存';

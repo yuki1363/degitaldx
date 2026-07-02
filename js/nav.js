@@ -4,6 +4,9 @@
 //   ・履歴が無い（直接アクセス・新規タブ）場合: 元の href（一覧/親ページ）へフォールバック
 //   「ホーム（🏠 = .home-link）」は各HTMLのまま（/ へ遷移）。
 //   ai-assistant.js が全ページで import するため、全ページで有効になる。
+//   あわせて全ページ共通の「オフライン送信キューの自動同期」もここで起動する。
+
+import { setupAutoSync } from '/js/offline-queue.js';
 
 function setupBackNav() {
   const back = document.querySelector('.app-header .back-link');
@@ -49,8 +52,9 @@ function setupUpdateToast() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => { setupBackNav(); setupUpdateToast(); });
+  document.addEventListener('DOMContentLoaded', () => { setupBackNav(); setupUpdateToast(); setupAutoSync(); });
 } else {
   setupBackNav();
   setupUpdateToast();
+  setupAutoSync();
 }
