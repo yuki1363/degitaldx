@@ -19,7 +19,7 @@ import { uploadFile } from '/js/files.js';
 const DB_NAME = 'mainte-offline';
 const STORE = 'outbox';
 
-const KIND_LABELS = { trouble: 'トラブル記録', inspection: '点検記録' };
+const KIND_LABELS = { trouble: 'トラブル記録', inspection: '点検記録', repair: '業務依頼', report: '日報' };
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -106,6 +106,10 @@ async function sendOne(item) {
     if (item.extra && item.extra.planId) {
       try { await api.put(`/api/plans/${item.extra.planId}`, { status: 'done' }); } catch { /* ベストエフォート */ }
     }
+  } else if (item.kind === 'repair') {
+    await api.post('/api/repairs', item.payload); // 依頼はファイル添付なし（file_ids 不要）
+  } else if (item.kind === 'report') {
+    await api.post('/api/reports', item.payload);
   } else {
     throw new Error(`不明な送信種別: ${item.kind}`);
   }

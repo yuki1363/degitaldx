@@ -12,6 +12,7 @@ import { el, render, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoT
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
+import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
 const STATUS = {
   open:          { label: '受付',    color: '#1e40af', bg: '#dbeafe' },
@@ -398,7 +399,20 @@ async function renderForm(existing, prefill = null) {
         guard.clear();
         go(`?id=${id}`);
       }
-    } catch (err) { alert(saveErrorMessage(err)); }
+    } catch (err) {
+      // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する
+      const offline = err?.offline === true || navigator.onLine === false;
+      if (offline && !existing) {
+        try {
+          await enqueueOffline('repair', body);
+          guard.clear();
+          alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
+          go('');
+          return;
+        } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
+      }
+      alert(saveErrorMessage(err));
+    }
   };
 
   render(app, [

@@ -8,6 +8,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
+import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -236,7 +237,20 @@ async function renderForm(existing) {
         guard.clear();
         renderSaved(id);
       }
-    } catch (err) { alert(saveErrorMessage(err)); }
+    } catch (err) {
+      // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する
+      const offline = err?.offline === true || navigator.onLine === false;
+      if (offline && !existing) {
+        try {
+          await enqueueOffline('report', { report_date, body: bodyText, reporter_name, category_id });
+          guard.clear();
+          alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
+          go('');
+          return;
+        } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
+      }
+      alert(saveErrorMessage(err));
+    }
   };
 
   // カテゴリが未登録のときは入力欄の下に案内を出す（管理者は管理画面へのリンク付き）
