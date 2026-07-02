@@ -74,10 +74,13 @@ function openInMailto(to, subject, body) {
 }
 
 // 発注ダイアログ（希望数量・自動生成された本文プレビュー）宛先はメール起動後に入力
-function openOrderDialog(part) {
+//   メール作成ボタンを押すと「発注中」バッジを付ける（チェックで無効化可）。
+//   バッジは入庫（＋の入庫記録）で自動的に外れる。onOrdered は画面の再読込用コールバック。
+function openOrderDialog(part, onOrdered) {
   const shortfall = Math.max((part.safety_stock || 0) - (part.quantity || 0), 1);
   const qtyInput = el('input', { type: 'number', min: '1', value: String(shortfall), style: 'width:120px' });
   const preview = el('textarea', { rows: '12', readonly: true });
+  const orderedCheck = el('input', { type: 'checkbox', checked: !part.ordered_at });
 
   const refresh = () => {
     const qty = Math.max(parseInt(qtyInput.value, 10) || 1, 1);
@@ -87,18 +90,31 @@ function openOrderDialog(part) {
   };
   qtyInput.addEventListener('input', refresh);
 
+  // メール起動と同時に「発注中」を記録（失敗してもメール作成は妨げない）
+  const markOrdered = () => {
+    if (!orderedCheck.checked) return;
+    api.post(`/api/parts/${part.id}/order`, { ordered: true })
+      .then(() => { if (onOrdered) onOrdered(); })
+      .catch(() => { /* バッジ付与の失敗は致命的でないため無視 */ });
+  };
+
   const backdrop = el('div', { class: 'modal-backdrop' });
   const close = () => backdrop.remove();
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
 
   const modal = el('div', { class: 'modal' }, [
     el('h3', { class: 'modal-title' }, `発注メールの作成: ${part.name}`),
+    part.ordered_at
+      ? el('p', { class: 'notice is-warning', style: 'margin:0 0 8px' },
+          `📨 この部品は発注中です（${formatDateTime(part.ordered_at)}）。二重発注にご注意ください。`)
+      : null,
     el('div', { class: 'field' }, [el('label', {}, '希望発注数量'), qtyInput]),
     el('div', { class: 'field' }, [el('label', {}, '本文プレビュー（自動生成）'), preview]),
+    el('label', { class: 'pf-input-check' }, [orderedCheck, ' メール作成と同時に「発注中」バッジを付ける（入庫で自動解除）']),
     el('p', { class: 'hint' }, '宛先はメール起動後に入力してください。PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
     el('div', { class: 'modal-actions' }, [
-      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook('', m.subject, m.body); } }, '📧 Outlookで作成'),
-      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto('', m.subject, m.body); } }, 'メールアプリで開く'),
+      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook('', m.subject, m.body); markOrdered(); } }, '📧 Outlookで作成'),
+      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto('', m.subject, m.body); markOrdered(); } }, 'メールアプリで開く'),
       el('button', { class: 'btn', onclick: close }, '閉じる'),
     ]),
   ]);
@@ -149,7 +165,7 @@ async function renderList() {
       orderBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        openOrderDialog(p);
+        openOrderDialog(p, () => load().catch(showError)); // 発注中にしたら一覧を更新
       });
     }
     let editBtn = null;
@@ -185,6 +201,12 @@ async function renderList() {
         el('span', { class: 'parts-qty-num' }, String(p.quantity)),
         el('span', { class: 'parts-qty-unit' }, `/ 必要 ${p.safety_stock}`),
         isLow ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '要発注') : null,
+        // 発注中バッジ（入庫で自動解除）。二重発注の防止用
+        p.ordered_at ? el('span', {
+          class: 'status-badge',
+          style: 'font-size:10px;padding:1px 6px;background:#dbeafe;color:#1e40af',
+          title: `発注中（${formatDateTime(p.ordered_at)}）`,
+        }, '📨 発注中') : null,
       ]),
       orderBtn,
       editBtn,
@@ -409,10 +431,16 @@ async function renderDetail(id) {
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
         el('h2', { class: 'card-title' }, [part.name, importanceBadge(part.importance)]),
+        part.ordered_at
+          ? el('span', { class: 'status-badge', style: 'background:#dbeafe;color:#1e40af' }, '📨 発注中')
+          : null,
         isLow
           ? el('span', { class: 'abn-badge is-abn' }, '要発注')
           : el('span', { class: 'abn-badge' }, '在庫あり'),
       ]),
+      part.ordered_at
+        ? infoRow('発注状態', `発注中（${formatDateTime(part.ordered_at)}・${maskEmail(part.ordered_by) || '—'}）— 入庫で自動解除`)
+        : null,
       infoRow('設備名', part.line_name),
       infoRow('機器名', part.equipment_name),
       infoRow('型番', part.model_no),
@@ -438,7 +466,19 @@ async function renderDetail(id) {
       : null,
     canEdit
       ? el('div', { class: 'action-row' }, [
-          el('button', { class: isLow ? 'btn btn-primary' : 'btn', onclick: () => openOrderDialog(part) }, '📧 発注メールを作成'),
+          el('button', { class: isLow ? 'btn btn-primary' : 'btn', onclick: () => openOrderDialog(part, () => renderDetail(id).catch(showError)) }, '📧 発注メールを作成'),
+          part.ordered_at
+            ? el('button', {
+                class: 'btn',
+                onclick: async () => {
+                  if (!confirm('「発注中」を解除しますか？（入庫時は自動で解除されます）')) return;
+                  try {
+                    await api.post(`/api/parts/${id}/order`, { ordered: false });
+                    await renderDetail(id);
+                  } catch (err) { alert(err.message); }
+                },
+              }, '発注中を解除')
+            : null,
         ])
       : null,
     canEdit

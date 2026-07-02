@@ -93,6 +93,16 @@ export async function onRequestPost({ env, data, params, request }) {
     .bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now)
     .run();
 
+  // 入庫したら「発注中」バッジを自動解除する（発注→入庫の完了）。
+  // ordered_at 列が無い旧DBではエラーになるが、バッジ機能が無いだけなので握りつぶす。
+  if (type === 'in' && delta > 0) {
+    try {
+      await DB.prepare(
+        `UPDATE parts_inventory SET ordered_at = NULL, ordered_by = NULL WHERE id = ?1 AND ordered_at IS NOT NULL`
+      ).bind(id).run();
+    } catch { /* 列未追加の旧DBでは何もしない */ }
+  }
+
   await writeAuditLog(DB, {
     tableName: 'parts_inventory',
     recordId: id,

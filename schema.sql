@@ -599,6 +599,10 @@ ALTER TABLE parts_inventory ADD COLUMN importance TEXT;      -- 重要度（高/
 UPDATE parts_inventory SET model_no = part_no WHERE model_no IS NULL;
 -- 発注メール宛先（前回機能で追加済みの場合は duplicate column エラーを無視）
 ALTER TABLE parts_inventory ADD COLUMN supplier_email TEXT;
+-- 発注状態管理（発注中バッジ）: 発注メール作成時に記録し、入庫（type=in）で自動解除する。
+--   二重発注・発注漏れの防止用。列が無い旧DBでは API 側の自己修復（ensureColumns）が自動追加する。
+ALTER TABLE parts_inventory ADD COLUMN ordered_at TEXT;  -- 発注中にした日時（NULL=発注中でない）
+ALTER TABLE parts_inventory ADD COLUMN ordered_by TEXT;  -- 発注中にした人（メール）
 
 -- 保全計画（01）: 期間指定・設備名/担当者の自由入力化（繰り返しは廃止）
 --   planned_end_date が NULL の予定は「1日のみ」。設定があれば planned_date〜planned_end_date の期間。
