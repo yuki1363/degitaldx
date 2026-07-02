@@ -7,6 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
+import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -215,6 +216,9 @@ async function renderForm(existing) {
     users.map((u) => el('option', { value: u.name || u.email }))
   );
 
+  // 未保存ガード: 入力後にうっかり戻る/再読込しても、離脱前に警告を出す
+  const guard = installUnsavedGuard();
+
   const save = async () => {
     const report_date   = f.date.value;
     const bodyText      = f.body.value.trim();
@@ -225,12 +229,14 @@ async function renderForm(existing) {
     try {
       if (existing) {
         await api.put(`/api/reports/${existing.id}`, { report_date, body: bodyText, reporter_name, category_id });
+        guard.clear();
         go(`?id=${existing.id}`);
       } else {
         const { id } = await api.post('/api/reports', { report_date, body: bodyText, reporter_name, category_id });
+        guard.clear();
         renderSaved(id);
       }
-    } catch (err) { alert(err.message); }
+    } catch (err) { alert(saveErrorMessage(err)); }
   };
 
   // カテゴリが未登録のときは入力欄の下に案内を出す（管理者は管理画面へのリンク付き）
@@ -255,7 +261,7 @@ async function renderForm(existing) {
       field('内容', f.body, '今日の作業・引き継ぎ・気づき等を記録してください（任意）。'),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
-        el('button', { class: 'btn', onclick: () => (existing ? go(`?id=${existing.id}`) : go('')) }, 'キャンセル'),
+        el('button', { class: 'btn', onclick: () => { guard.clear(); existing ? go(`?id=${existing.id}`) : go(''); } }, 'キャンセル'),
       ]),
     ]),
   ]);

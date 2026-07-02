@@ -16,6 +16,7 @@ import {
 import { openQrScanner } from '/js/qr-scan.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
+import { createDraft, saveErrorMessage } from '/js/draft.js';
 
 const INPUT_TYPE_LABELS = { ok_ng: 'OK / NG', number: '数値', select: '選択式', text: '自由記述' };
 
@@ -130,6 +131,7 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
 
   const checklistBox = el('div', {}, []);
   let itemInputs = [];
+  let draftItems = null; // 下書き復元時の項目値（master_id → 値）。チェックリスト構築時に初期値として使う
 
   const equipmentSelect = buildEquipSelect(equipment, {
     value: existing ? existing.equipment_id : (equipmentId || ''),
@@ -160,7 +162,7 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
     const existingValues = new Map(
       existing ? existing.items.map((i) => [i.master_id, i.value]) : []
     );
-    itemInputs = masters.map((m) => buildItemInput(m, existingValues.get(m.id)));
+    itemInputs = masters.map((m) => buildItemInput(m, existingValues.get(m.id) ?? draftItems?.[m.id]));
     render(checklistBox, itemInputs.map((i) => i.box));
   };
   equipmentSelect.addEventListener('change', () => loadChecklist().catch(showError));
@@ -213,6 +215,41 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
       e.target.value = '';
     },
   });
+
+  // ---- 下書き自動保存（新規のみ）----
+  //   入力途中の内容を localStorage に自動保存し、誤って閉じても次回「復元」できる。
+  //   写真・動画は下書き対象外（テキスト・チェック値のみ）。保存成功時に消える。
+  const collectDraft = () => {
+    const items = {};
+    for (const i of itemInputs) {
+      const v = i.getValue();
+      if (v !== undefined && v !== '') items[i.master.id] = v;
+    }
+    return {
+      equipment_id: equipmentSelect.value,
+      assignee_name: assigneeInput.value,
+      inspected_at: datetimeInput.value,
+      note: noteInput.value,
+      items,
+    };
+  };
+  const applyDraft = async (d) => {
+    if (d.equipment_id) equipmentSelect.value = String(d.equipment_id);
+    if (d.assignee_name) assigneeInput.value = d.assignee_name;
+    if (d.inspected_at) datetimeInput.value = d.inspected_at;
+    noteInput.value = d.note || '';
+    draftItems = d.items || null;
+    await loadChecklist(); // 下書きの項目値を初期値としてチェックリストを再構築
+  };
+  const draft = existing ? null : createDraft('inspection-new', collectDraft);
+  if (draft) {
+    const touch = () => draft.touch();
+    app.addEventListener('input', touch);
+    app.addEventListener('change', touch);
+    // OK/NG ボタンは click 操作なので click でも下書き保存
+    app.addEventListener('click', (e) => { if (e.isTrusted && e.target.closest?.('.okng-btn')) draft.touch(); });
+  }
+  const draftBanner = draft ? draft.banner((d) => { applyDraft(d).catch(showError); }) : null;
 
   const saveBtn = el('button', { class: 'btn btn-primary' }, existing ? '更新する' : '保存する');
   saveBtn.addEventListener('click', async () => {
@@ -267,15 +304,17 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
         alert('⚠ 異常値を含む記録として保存しました。必要に応じて修理依頼・トラブル記録を起票してください。');
       }
       dirty = false; // 保存済みなので離脱警告を出さない
+      draft?.clear(); // 保存できたので下書きを消す
       go(`?id=${existing ? existing.id : result.id}`);
     } catch (err) {
-      alert(err.message);
+      alert(saveErrorMessage(err));
       saveBtn.disabled = false;
       saveBtn.textContent = existing ? '更新する' : '保存する';
     }
   });
 
   render(app, [
+    draftBanner,
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '点検記録を編集' : '点検を記録'),
       el('div', { class: 'field' }, [

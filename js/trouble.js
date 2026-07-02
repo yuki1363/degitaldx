@@ -13,6 +13,7 @@ import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
+import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 
 // CSV出力の列定義（トラブル履歴）
 const CSV_COLUMNS = [
@@ -483,12 +484,55 @@ async function renderForm(existing, prefill = null) {
     input.addEventListener('input', () => { reportValues[tag] = input.value; });
     return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
   };
-  const reportSection = reportFields.length === 0 ? null
-    : el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
-        el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, 'トラブル報告書（帳票）の入力'),
-        el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます（出力時に入力し直す必要はありません）。'),
-        ...reportFields.map(reportInput),
-      ]);
+  // 帳票入力欄は再描画できる箱にしておく（下書き復元時に reportValues を反映し直すため）
+  const reportBox = el('div', {});
+  const renderReportSection = () => {
+    if (reportFields.length === 0) { render(reportBox, []); return; }
+    render(reportBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
+      el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, 'トラブル報告書（帳票）の入力'),
+      el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます（出力時に入力し直す必要はありません）。'),
+      ...reportFields.map(reportInput),
+    ]));
+  };
+  renderReportSection();
+
+  // ---- 入力を失わない仕組み ----
+  //   新規: 入力を下書きとして自動保存（localStorage）。誤って閉じても次回「復元」できる。
+  //   編集: サーバーに元データがあるため下書きは使わず、離脱時の未保存警告のみ。
+  const collectDraft = () => ({
+    occurred_at: f.occurred_at.value,
+    category_id: f.category_id.value,
+    equipment_id: f.equipment_id.value,
+    phenomenon: f.phenomenon.value,
+    cause: f.cause.value,
+    countermeasure: f.countermeasure.value,
+    reporter_name: f.reporter_name.value,
+    custom: customInputs.map(({ fld, input }) => ({ id: fld.id, value: input.value })),
+    report: { ...reportValues },
+  });
+  const applyDraft = (d) => {
+    if (d.occurred_at) f.occurred_at.value = d.occurred_at;
+    if (d.category_id != null) f.category_id.value = d.category_id;
+    if (d.equipment_id != null) f.equipment_id.value = d.equipment_id;
+    f.phenomenon.value = d.phenomenon || '';
+    f.cause.value = d.cause || '';
+    f.countermeasure.value = d.countermeasure || '';
+    if (d.reporter_name) f.reporter_name.value = d.reporter_name;
+    for (const c of (d.custom || [])) {
+      const target = customInputs.find(({ fld }) => fld.id === c.id);
+      if (target) target.input.value = c.value;
+    }
+    Object.assign(reportValues, d.report || {});
+    renderReportSection();
+  };
+  const draft = existing ? null : createDraft('trouble-new', collectDraft);
+  const guard = installUnsavedGuard(); // 新規・編集とも離脱時に警告（新規はさらに下書きでも守る）
+  if (draft) {
+    const touch = () => draft.touch();
+    app.addEventListener('input', touch);
+    app.addEventListener('change', touch);
+  }
+  const draftBanner = draft ? draft.banner(applyDraft) : null;
 
   const save = async () => {
     const customValues = customInputs
@@ -523,17 +567,21 @@ async function renderForm(existing, prefill = null) {
       body.file_ids = fileIds;
       if (existing) {
         await api.put(`/api/troubles/${existing.id}`, body);
+        guard?.clear(); // 保存済みなので離脱警告を出さない
         go(`?id=${existing.id}`);
       } else {
         const { id } = await api.post('/api/troubles', body);
+        draft?.clear(); // 保存できたので下書きを消す
+        guard?.clear();
         go(`?id=${id}`);
       }
     } catch (err) {
-      alert(err.message);
+      alert(saveErrorMessage(err));
     }
   };
 
   render(app, [
+    draftBanner,
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? 'トラブル記録を編集' : 'トラブルを記録'),
       field('発生日時（必須）', f.occurred_at),
@@ -554,7 +602,7 @@ async function renderForm(existing, prefill = null) {
       field('記録者', f.reporter_name),
       reporterOptions,
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
-      reportSection,
+      reportBox,
       el('div', { class: 'field' }, [
         el('label', {}, '写真・動画'),
         el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px' }, [
@@ -567,7 +615,8 @@ async function renderForm(existing, prefill = null) {
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
         el('button', {
           class: 'btn',
-          onclick: () => (existing ? go(`?id=${existing.id}`) : go('')),
+          // 明示的なキャンセルでは未保存警告を出さない（新規の下書きは残る＝次回復元できる）
+          onclick: () => { guard?.clear(); existing ? go(`?id=${existing.id}`) : go(''); },
         }, 'キャンセル'),
       ]),
     ]),

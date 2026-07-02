@@ -11,6 +11,7 @@ import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
+import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 
 const STATUS = {
   open:          { label: '受付',    color: '#1e40af', bg: '#dbeafe' },
@@ -371,6 +372,9 @@ async function renderForm(existing, prefill = null) {
     users.map((u) => el('option', { value: u.name || u.email }))
   );
 
+  // 未保存ガード: 入力後にうっかり戻る/再読込しても、離脱前に警告を出す
+  const guard = installUnsavedGuard();
+
   const save = async () => {
     const body = {
       title: f.title.value.trim(),
@@ -387,12 +391,14 @@ async function renderForm(existing, prefill = null) {
     try {
       if (existing) {
         await api.put(`/api/repairs/${existing.id}`, body);
+        guard.clear();
         go(`?id=${existing.id}`);
       } else {
         const { id } = await api.post('/api/repairs', body);
+        guard.clear();
         go(`?id=${id}`);
       }
-    } catch (err) { alert(err.message); }
+    } catch (err) { alert(saveErrorMessage(err)); }
   };
 
   render(app, [
@@ -413,7 +419,7 @@ async function renderForm(existing, prefill = null) {
       field('詳細・症状', f.description),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
-        el('button', { class: 'btn', onclick: () => (existing ? go(`?id=${existing.id}`) : go('')) }, 'キャンセル'),
+        el('button', { class: 'btn', onclick: () => { guard.clear(); existing ? go(`?id=${existing.id}`) : go(''); } }, 'キャンセル'),
       ]),
     ]),
   ]);
