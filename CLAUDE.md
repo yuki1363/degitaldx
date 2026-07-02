@@ -153,14 +153,14 @@
 - 削除済みデータの閲覧・復元（論理削除の復元）
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）
 **テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
-### 10. チャット / コメント
-- トラブル・点検・修理の各レコードにコメントスレッド
+### 10. チャット
 - グループチャットでシフト間の引き継ぎ
+- ※ レコード別のコメントスレッドは運用簡素化のため**廃止**（UI・API とも削除済み。`comments` テーブルは過去データ保持のためスキーマに残置）
 - リアルタイム性はポーリング（30秒間隔）で開始、必要なら Durable Objects + WebSocket へ拡張
 - **個人情報の入力防止**:
   - 入力欄に注意書きを常設（「氏名・電話番号・住所等の個人情報は入力しないでください」）
   - 送信時に電話番号・メールアドレス・郵便番号等のパターンを検知したら**警告ダイアログ**を表示（送信前に本人へ確認。検知はクライアント側の正規表現で実施）
-**テーブル**: `comments`、`chat_messages`（いずれも+監査列）
+**テーブル**: `chat_messages`（+監査列）
 ### 11. 横断検索（過去データの検索・抽出）
 蓄積したトラブル記録・点検履歴・修理履歴・日報をキーワードで横断検索し、過去の事例をすぐに確認できるようにする（AIは使わない通常検索）。
 - 検索ボックスにキーワードを入力（例「コンプレッサ 異音」「3号機 漏れ」）すると、対象テーブルを横断して該当レコードを一覧表示
@@ -192,13 +192,13 @@
 │   ├── report.js           # 07 日報
 │   ├── dashboard.js        # 08 グラフ・レポート・CSV/PDF出力
 │   ├── admin.js            # 09 管理機能・監査ログ・復元
-│   ├── chat.js             # 10 チャット/コメント（個人情報検知）
+│   ├── chat.js             # 10 チャット（個人情報検知）
 │   └── search.js           # 11 横断検索
 ├── functions/
 │   └── api/
 │       ├── equipment/ inspections/ repairs/ troubles/
 │       ├── parts/          # CRUD + import.js（CSV取込）
-│       ├── reports/ plans/ comments/
+│       ├── reports/ plans/
 │       ├── stats/          # 集計・CSV出力
 │       ├── files/          # R2アップロード/取得
 │       ├── search.js       # 横断検索（キーワード+フィルタ）

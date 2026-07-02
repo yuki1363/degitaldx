@@ -11,7 +11,7 @@
  *   点検・トラブルの新規保存がオフラインで失敗すると IndexedDB の送信キューに保存し、
  *   オンライン復帰時に自動送信する（写真Blob含む）。
  */
-const CACHE_VERSION = 'v0.93.0';
+const CACHE_VERSION = 'v0.94.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -56,7 +56,6 @@ const PRECACHE_URLS = [
   '/js/chat.js',
   '/js/ai-assistant.js',
   '/js/nav.js',
-  '/js/comments.js',
   '/js/search.js',
   '/js/notifications.js',
   '/js/vendor/qrcode.mjs',
