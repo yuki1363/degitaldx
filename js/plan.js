@@ -128,17 +128,18 @@ function showDaySheet(fullDate, dateLabel, dayPlans) {
   document.body.appendChild(backdrop);
 }
 
+// 予定が指定日に含まれるか（開始日〜終了日の期間予定は全日に表示する。月表示・週表示で共用）
+function inRange(p, fullDate) {
+  const s = p.planned_date.slice(0, 10);
+  const e = (p.planned_end_date || p.planned_date).slice(0, 10);
+  return s <= fullDate && fullDate <= e;
+}
+
 // ---------------- 月表示 ----------------
 
 async function renderMonthCalendar(year, month) {
   const monthStr = `${year}-${String(month).padStart(2, '0')}`;
   const { plans } = await api.get(`/api/plans?month=${monthStr}`);
-
-  const inRange = (p, fullDate) => {
-    const s = p.planned_date.slice(0, 10);
-    const e = (p.planned_end_date || p.planned_date).slice(0, 10);
-    return s <= fullDate && fullDate <= e;
-  };
 
   const { firstDay, daysInMonth } = monthInfo(year, month);
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -239,7 +240,8 @@ async function renderWeekCalendar(weekStart) {
 
   const weekCols = days.map((day, i) => {
     const dayStr = dateToStr(day);
-    const dayPlans = plans.filter((p) => p.planned_date.slice(0, 10) === dayStr);
+    // 期間予定（開始〜終了）は期間中の全日に表示する（月表示と同じ判定）
+    const dayPlans = plans.filter((p) => inRange(p, dayStr));
     const isToday = dayStr === todayStr;
     const isWeekend = i === 0 || i === 6;
     return el('div', {
