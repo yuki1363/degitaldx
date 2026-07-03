@@ -1,6 +1,6 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { json, jsonError, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
@@ -88,6 +88,8 @@ export async function onRequestPut({ request, params, env, data }) {
 
   const body = await readJson(request);
   if (!body) return jsonError(400, 'リクエストボディが不正です');
+  const conflict = checkEditConflict(body, existing);
+  if (conflict) return conflict; // 同時編集ガード
 
   const UPDATABLE = ['title', 'equipment_id', 'description', 'assignee_name', 'status'];
 

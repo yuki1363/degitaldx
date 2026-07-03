@@ -554,6 +554,8 @@ async function renderForm(existing, prefill = null) {
       reporter_name: f.reporter_name.value.trim() || null,
       custom_fields_json: customValues.length > 0 ? customValues : null,
       form_values_json: Object.keys(reportClean).length > 0 ? reportClean : null,
+      // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
+      ...(existing ? { expected_updated_at: existing.updated_at } : {}),
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }

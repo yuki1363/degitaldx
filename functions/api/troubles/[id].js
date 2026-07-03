@@ -1,6 +1,6 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { json, jsonError, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 import { ensureTroubleColumns } from './index.js';
@@ -81,6 +81,8 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, 'トラブル記録が見つかりません');
 
   const body = await readJson(request);
+  const conflict = checkEditConflict(body, existing);
+  if (conflict) return conflict; // 同時編集ガード
   const UPDATABLE = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json', 'form_values_json', 'reporter_name'];
 
   const setClauses = [];

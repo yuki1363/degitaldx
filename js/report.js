@@ -229,7 +229,8 @@ async function renderForm(existing) {
 
     try {
       if (existing) {
-        await api.put(`/api/reports/${existing.id}`, { report_date, body: bodyText, reporter_name, category_id });
+        // expected_updated_at は同時編集ガード（他の人が先に更新していたら409）
+        await api.put(`/api/reports/${existing.id}`, { report_date, body: bodyText, reporter_name, category_id, expected_updated_at: existing.updated_at });
         guard.clear();
         go(`?id=${existing.id}`);
       } else {

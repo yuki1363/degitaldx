@@ -382,6 +382,8 @@ async function renderForm(existing, prefill = null) {
       equipment_id: f.equipment_id.value ? Number(f.equipment_id.value) : null,
       assignee_name: f.assignee_name.value.trim() || null,
       description: f.description.value.trim() || null,
+      // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
+      ...(existing ? { expected_updated_at: existing.updated_at } : {}),
     };
     // 新規かつ起票元（トラブル/点検）が指定されていれば相互リンクとして保存
     if (!existing && prefill?.source_table && prefill?.source_id) {

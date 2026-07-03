@@ -295,7 +295,8 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
       saveBtn.textContent = '保存中…';
       const body = { ...baseBody, file_ids: fileIds };
       const result = existing
-        ? await api.put(`/api/inspections/${existing.id}`, body)
+        // expected_updated_at は同時編集ガード（他の人が先に更新していたら409）
+        ? await api.put(`/api/inspections/${existing.id}`, { ...body, expected_updated_at: existing.updated_at })
         : await api.post('/api/inspections', body);
       // 保全計画から開始した点検なら、保存成功時にその計画を自動で完了にする
       if (!existing && planId) {

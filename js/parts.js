@@ -565,6 +565,8 @@ async function renderForm(existing) {
       supplier: f.supplier.value.trim() || null,
       supplier_email: f.supplier_email.value.trim() || null,
       note: f.note.value.trim() || null,
+      // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
+      ...(existing ? { expected_updated_at: existing.updated_at } : {}),
     };
     // 在庫数は新規登録時のみ初期値として送る（編集時は「在庫数を更新」から変更）
     if (!existing) body.quantity = parseInt(f.quantity.value, 10) || 0;

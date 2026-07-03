@@ -1,6 +1,6 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { json, jsonError, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
 export async function onRequestGet({ params, env }) {
@@ -39,6 +39,8 @@ export async function onRequestPut({ request, params, env, data }) {
   // 編集・削除できる（作成者/管理者の区別なし。変更は audit_log で追跡）。
 
   const body = await readJson(request);
+  const conflict = checkEditConflict(body, existing);
+  if (conflict) return conflict; // 同時編集ガード
   const { report_date, body: bodyText, category_id, reporter_name } = body ?? {};
   if (!report_date) return jsonError(400, 'report_date は必須です');
   const bodyValue = bodyText ? String(bodyText).trim() : '';

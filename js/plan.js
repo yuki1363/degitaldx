@@ -552,6 +552,8 @@ async function renderForm(existing, fromAnnual = false) {
       note: noteInput.value.trim() || null,
       recurrence_rule: null,
       form_values_json: Object.keys(permitValues).length ? JSON.stringify(permitValues) : null,
+      // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
+      ...(existing ? { expected_updated_at: existing.updated_at } : {}),
     };
     // 年間計画タスクは「カレンダーにも表示」フラグを送る（年間計画表にはそのまま残る）
     if (isAnnualTask) body.on_calendar = onCalCheckbox.checked ? 1 : 0;

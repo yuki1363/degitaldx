@@ -3,7 +3,7 @@
 //   PUT    : 編集（editor 以上。再検証・異常値再判定・差分を audit_log に記録）
 //   DELETE : 論理削除（editor 以上）
 
-import { json, jsonError, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
@@ -64,6 +64,8 @@ export async function onRequestPut({ request, env, data, params }) {
   if (!existing) return jsonError(404, '点検記録が見つかりません。');
 
   const body = await readJson(request);
+  const conflict = checkEditConflict(body, existing);
+  if (conflict) return conflict; // 同時編集ガード
   // 設備は変更不可（記録の付け替えミス防止）。既存の equipment_id で再検証する
   const parsed = await validateInspectionInput(env, { ...body, equipment_id: existing.equipment_id });
   if (parsed.error) return jsonError(400, parsed.error);

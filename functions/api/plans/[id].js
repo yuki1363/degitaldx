@@ -1,6 +1,6 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { json, jsonError, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeFormValues } from './index.js';
 
@@ -34,6 +34,8 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, '保全計画が見つかりません');
 
   const body = await readJson(request);
+  const conflict = checkEditConflict(body, existing);
+  if (conflict) return conflict; // 同時編集ガード
   const now = nowIso();
   const userEmail = data.user.email;
 

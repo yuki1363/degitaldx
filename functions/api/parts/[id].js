@@ -6,7 +6,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { normImportance } from './index.js';
-import { json, jsonError, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
 async function getPart(DB, id) {
@@ -65,6 +65,8 @@ export async function onRequestPut({ env, data, params, request }) {
 
   const body = await readJson(request);
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
+  const conflict = checkEditConflict(body, part);
+  if (conflict) return conflict; // 同時編集ガード
 
   // quantity は transaction エンドポイント経由で更新するためここでは受け付けない。
   // part_no は内部キーのため変更しない（型番は model_no）。
