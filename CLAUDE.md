@@ -33,7 +33,7 @@
 - `workers.dev` パブリックURLやR2パブリックURLを公開しない（不特定多数のアクセスを防ぐ）
 - Access の保護が外れた状態でURLを共有しない
 ### 運用前提
-- **利用者**: 約10名、全員が会社メールアドレス保有。同時アクセスも少数
+- **利用者**: 3名（設計上は10名程度まで余裕あり）、全員が会社メールアドレス保有。同時アクセスも少数
 - **アクセス制御**: Cloudflare Access のワンタイムコード認証（会社メールの許可リスト方式）。アプリ側にログイン画面は実装しない。ログインユーザーの識別は Access が付与するヘッダー `Cf-Access-Authenticated-User-Email` を Functions 側で読み取り、`users` テーブルと突合する
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
@@ -79,6 +79,7 @@
   3. SQLがプリペアドステートメントか
   4. 権限チェックが Functions 側にあるか
   5. スマホ幅（375px）でレイアウトが崩れていないか
+  6. E2Eテスト（`cd tests && npm test`）が全項目パスするか
 - エラー修正時は、原因の説明 → 最小限の修正、の順で行う。無関係なリファクタリングを混ぜない
 - この CLAUDE.md と実装が食い違う変更を行った場合は、CLAUDE.md も同時に更新する
 ---
@@ -205,6 +206,7 @@
 │       ├── search.js       # 横断検索（キーワード+フィルタ）
 │       ├── admin/          # audit.js / restore.js / masters.js
 │       └── me.js           # ログインユーザー情報
+├── tests/                  # E2Eテスト（実ブラウザ検証。cd tests && npm test）
 ├── schema.sql              # D1テーブル定義
 └── wrangler.toml           # D1/R2/Secretバインディング
 ```

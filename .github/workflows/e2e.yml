@@ -1,0 +1,37 @@
+# E2Eテスト（実ブラウザ）— push / PR のたびに自動実行する
+#   ローカルの `cd tests && npm test` と同じものを GitHub Actions で回す。
+#   壊れたコミットがデプロイされる前に気づくための安全網。
+#   （Cloudflare Pages のデプロイ自体は従来どおり push で行われる。
+#     このテストはそれを止めないが、失敗すれば GitHub 上で ❌ が付く）
+name: E2E
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 依存関係のインストール
+        working-directory: tests
+        run: npm install
+
+      - name: Chromium のインストール
+        working-directory: tests
+        run: npx playwright install --with-deps chromium
+
+      - name: E2Eテスト実行
+        working-directory: tests
+        run: npm test
+
+      - name: 失敗時にサーバーログを表示
+        if: failure()
+        run: cat tests/e2e-server.log || true

@@ -1,0 +1,13 @@
+{
+  "name": "degitaldx-tests",
+  "private": true,
+  "type": "module",
+  "description": "E2Eテスト（実ブラウザ）。使い方: npm install && npm test（詳細は tests/README.md）",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0",
+    "wrangler": "^4.0.0"
+  }
+}
