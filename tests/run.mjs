@@ -17,6 +17,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// wrangler 4.x は Node.js 22 以上が必須。古いNodeだと分かりにくい失敗をするため先に検査する
+const nodeMajor = Number(process.versions.node.split('.')[0]);
+if (nodeMajor < 22) {
+  console.error(`[run] Node.js 22 以上が必要です（現在 v${process.versions.node}）。wrangler が動作しません。`);
+  process.exit(1);
+}
+
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(TESTS_DIR, '..');
 const PORT = 8799;
@@ -70,6 +77,8 @@ process.on('SIGTERM', () => { cleanup(); process.exit(143); });
 async function waitForServer(timeoutMs = 90000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    // サーバープロセスが起動前に死んでいたら待たずに失敗させる（原因究明を早く）
+    if (server && server.exitCode !== null) return false;
     try {
       const res = await fetch(`${BASE}/`);
       if (res.status === 200) return true;
@@ -77,6 +86,16 @@ async function waitForServer(timeoutMs = 90000) {
     await new Promise((r) => setTimeout(r, 1000));
   }
   return false;
+}
+
+// 起動失敗時にサーバーログの末尾を出す（CIのログだけで原因が分かるように）
+function printServerLogTail(lines = 30) {
+  try {
+    const text = fs.readFileSync(SERVER_LOG, 'utf8').trim().split('\n');
+    console.error(`[run] --- ${path.basename(SERVER_LOG)}（末尾${lines}行） ---`);
+    for (const l of text.slice(-lines)) console.error(l);
+    console.error('[run] --- ログここまで ---');
+  } catch { /* ログが無ければ何もしない */ }
 }
 
 let exitCode = 1;
@@ -113,6 +132,7 @@ try {
     { cwd: ROOT, detached: true, stdio: ['ignore', logFd, logFd] });
 
   if (!(await waitForServer())) {
+    printServerLogTail();
     throw new Error(`サーバーが起動しませんでした（${SERVER_LOG} を確認してください）`);
   }
   log('サーバー起動を確認。E2Eテストを実行します…\n');

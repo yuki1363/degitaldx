@@ -5,6 +5,8 @@
 
 ## 実行方法（1コマンド）
 
+前提: **Node.js 22 以上**（wrangler 4.x の要件。古いと起動しません）
+
 ```bash
 cd tests
 npm install        # 初回のみ（playwright / wrangler を取得）

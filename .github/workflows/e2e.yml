@@ -5,9 +5,9 @@
 #     このテストはそれを止めないが、失敗すれば GitHub 上で ❌ が付く）
 name: E2E
 
+# push のみで実行（pull_request も付けると同じコミットで二重に走るため）
 on:
   push:
-  pull_request:
 
 jobs:
   e2e:
@@ -16,9 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # wrangler 4.x は Node.js 22 以上が必須（20だと起動に失敗する）
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: 依存関係のインストール
         working-directory: tests
