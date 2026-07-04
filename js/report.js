@@ -120,8 +120,9 @@ async function renderList() {
     listBox,
   ]);
   updateWriteLabel();
-  // 開いた時点で直近30日分を自動表示（条件を変えたら「検索」で再絞り込み）
-  await load();
+  // 日報は件数が多くページが長くなるため、初期表示では一覧を出さない（検索してから表示）。
+  // 期間の初期値は直近30日なので、「検索」を1回押せばすぐ最近の日報が見られる。
+  render(listBox, el('p', { class: 'empty' }, '🔍 条件を選んで「検索」を押してください。'));
 }
 
 // ---------------- 詳細 ----------------
@@ -178,7 +179,8 @@ async function renderForm(existing) {
   // 点検・トラブル詳細からのプリフィル（本文・日付・カテゴリ。記録の紐づけは行わない）
   const urlParams   = new URLSearchParams(window.location.search);
   const prefillDate = urlParams.get('date');
-  const prefillCategory = urlParams.get('category'); // 一覧で選んだカテゴリで新規作成
+  const prefillCategory = urlParams.get('category');          // 一覧で選んだカテゴリ（ID指定）で新規作成
+  const prefillCategoryName = urlParams.get('category_name'); // カテゴリ名で初期選択（トラブル→日報 など）
   const prefillBody = urlParams.get('body');         // トラブル等から本文（現象・原因・対策）をプリフィル
 
   const initDate = existing?.report_date || prefillDate || todayStr();
@@ -198,15 +200,24 @@ async function renderForm(existing) {
       placeholder: '入力者名（自由入力）',
       list: 'report-reporter-options',
     }),
-    category: el('select', {},
-      [el('option', { value: '' }, '— カテゴリを選択（任意）'),
-      ...categories.map((c) => {
-        const selected = existing
-          ? existing.category_id === c.id
-          : (prefillCategory != null && String(prefillCategory) === String(c.id));
-        return el('option', { value: c.id, selected }, c.name);
-      })]
-    ),
+    category: (() => {
+      // 初期選択カテゴリの決定: 編集中の値 > ID指定 > 名前一致（完全一致 → 部分一致）
+      // 名前一致はトラブル詳細の「日報に記録」等が使う（マスタ名変更時は一致しないだけで無害）
+      const initialCategoryId = existing
+        ? existing.category_id
+        : (prefillCategory != null
+            ? Number(prefillCategory)
+            : (prefillCategoryName
+                ? (categories.find((c) => c.name === prefillCategoryName)
+                    || categories.find((c) => c.name.includes(prefillCategoryName)))?.id ?? null
+                : null));
+      return el('select', {},
+        [el('option', { value: '' }, '— カテゴリを選択（任意）'),
+        ...categories.map((c) =>
+          el('option', { value: c.id, selected: initialCategoryId === c.id }, c.name)
+        )]
+      );
+    })(),
     body: el('textarea', {
       placeholder: '今日の作業内容・申し送り事項・気づきを記録してください',
       style: 'min-height:140px',

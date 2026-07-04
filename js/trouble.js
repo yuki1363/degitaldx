@@ -252,7 +252,10 @@ async function renderDetail(id) {
             const date = trouble.occurred_at
               ? new Date(trouble.occurred_at).toLocaleDateString('sv-SE')
               : new Date().toLocaleDateString('sv-SE');
-            const q = new URLSearchParams({ new: '1', link_type: 'trouble', link_id: String(trouble.id), date });
+            const q = new URLSearchParams({ new: '1', date });
+            // トラブル対応の日報は、カテゴリ「…突発故障修理」を初期選択にする
+            // （カテゴリ名の部分一致で解決。マスタ名を変えた場合は選択されないだけで無害）
+            q.set('category_name', '突発故障修理');
             const eqLabel = trouble.equipment_name ? `${trouble.equipment_code} ${trouble.equipment_name}` : '';
             q.set('body', [
               `【トラブル対応】${eqLabel}`.trim(),

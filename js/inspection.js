@@ -493,14 +493,13 @@ async function renderDetail(id) {
             const date = inspection.inspected_at
               ? new Date(inspection.inspected_at).toLocaleDateString('sv-SE')
               : new Date().toLocaleDateString('sv-SE');
-            const q = new URLSearchParams({ new: '1', link_type: 'inspection', link_id: String(inspection.id), date });
-            // 点検内容（設備・異常項目・備考）を日報本文へプリフィル
-            const abnormal = (inspection.items || [])
-              .filter((it) => it.abnormal)
-              .map((it) => `${it.name}: ${formatItemValue(it)}`);
+            const q = new URLSearchParams({ new: '1', date });
+            // 点検結果（全項目）を日報本文へプリフィル。異常項目には ⚠ を付ける
+            const resultLines = (inspection.items || [])
+              .map((it) => `・${it.name}: ${formatItemValue(it)}${it.abnormal ? ' ⚠基準外' : ''}`);
             q.set('body', [
               `【点検】${inspection.equipment_name || ''}`.trim(),
-              abnormal.length ? `異常: ${abnormal.join('、')}` : '異常なし',
+              ...(resultLines.length ? ['点検結果:', ...resultLines] : []),
               inspection.note ? `備考: ${inspection.note}` : null,
             ].filter(Boolean).join('\n'));
             return el('a', { class: 'btn', href: `/pages/report?${q}` }, '📝 日報に記録');
