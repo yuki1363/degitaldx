@@ -74,7 +74,10 @@ check('全17ページ表示・pageerrorなし', pageErrors.length === 0, pageErr
 
 // ---------- 2. トラブル: 登録→一覧自動表示→編集 ----------
 section('2. トラブル記録の基本フロー');
-const t1 = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E現象テスト', reporter_name: 'E2E記録者名' } });
+// 設備名でも横断検索がヒットするか検証するため、設備に紐づけて登録する
+const eqForSearch = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-01', name: 'E2E設備フィルム機' } });
+const eqSearchId = eqForSearch.json?.id;
+const t1 = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E現象テスト', reporter_name: 'E2E記録者名', equipment_id: eqSearchId } });
 check('トラブル登録（201）', t1.status === 201, `status=${t1.status}`);
 const troubleId = t1.json?.id;
 
@@ -94,6 +97,9 @@ check('横断検索: 記録者名でヒット', (s2.json?.results || []).some((r
 // あいまい検索: ひらがな・小文字で入力してもカタカナ・大文字のデータがヒットする
 const s3 = await api(`/api/search?q=${encodeURIComponent('e2e現象てすと')}`);
 check('横断検索: あいまい（かな/大小文字ゆれ）でヒット', (s3.json?.results || []).some((r) => r.type === 'trouble'));
+// 設備名でヒット: 本文に「フィルム機」が無くても、紐づく設備名でトラブルが引ける
+const s4 = await api(`/api/search?q=${encodeURIComponent('フィルム機')}`);
+check('横断検索: 設備名でトラブルがヒット', (s4.json?.results || []).some((r) => r.type === 'trouble'));
 
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');

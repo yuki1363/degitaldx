@@ -98,8 +98,8 @@ export async function onRequestGet({ request, env }) {
     };
     const rows = await searchWithFallback(
       run,
-      ['t.phenomenon', 't.cause', 't.countermeasure', 't.reporter_name', 't.form_values_json', 't.custom_fields_json'],
-      ['t.phenomenon', 't.cause', 't.countermeasure']
+      ['t.phenomenon', 't.cause', 't.countermeasure', 't.reporter_name', 't.form_values_json', 't.custom_fields_json', 'e.name', 'e.code'],
+      ['t.phenomenon', 't.cause', 't.countermeasure', 'e.name', 'e.code']
     );
     for (const r of rows ?? []) {
       results.push({
@@ -137,8 +137,8 @@ export async function onRequestGet({ request, env }) {
       return (await db.prepare(sql).bind(...binds).all()).results;
     };
     const rows = await searchWithFallback(run,
-      ['r.title', 'r.description', 'r.assignee_name'],
-      ['r.title', 'r.description']);
+      ['r.title', 'r.description', 'r.assignee_name', 'e.name', 'e.code'],
+      ['r.title', 'r.description', 'e.name', 'e.code']);
     const STATUS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
     for (const r of rows ?? []) {
       results.push({
@@ -219,8 +219,8 @@ export async function onRequestGet({ request, env }) {
       // no-op: skip
     } else {
       const rows = await searchWithFallback(run,
-        ['ir.note', 'ir.items_json', 'ir.assignee_name'],
-        ['ir.note']);
+        ['ir.note', 'ir.items_json', 'ir.assignee_name', 'e.name', 'e.code'],
+        ['ir.note', 'e.name', 'e.code']);
       for (const r of rows ?? []) {
         results.push({
           type:           'inspection',
