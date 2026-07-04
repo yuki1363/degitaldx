@@ -24,6 +24,14 @@ function buildKeywordClauses(keywords, cols) {
   return { clauses, binds };
 }
 
+
+// 拡張列（後付けのALTER列を含む）で検索し、列が無い旧DBでは基本列のみで再試行する。
+//   run(cols) は rows 配列を返す関数。検索全体を止めないための保険。
+async function searchWithFallback(run, extendedCols, baseCols) {
+  try { return await run(extendedCols); }
+  catch { return await run(baseCols); }
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp  = new URL(request.url).searchParams;
@@ -43,28 +51,34 @@ export async function onRequestGet({ request, env }) {
 
   // ---------- トラブル記録 ----------
   if (types.includes('trouble')) {
-    const cols = ['t.phenomenon', 't.cause', 't.countermeasure'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
-    let sql = `
-      SELECT
-        t.id, t.occurred_at AS date_val, t.phenomenon AS title,
-        t.cause, t.countermeasure,
-        tc.name AS category_name,
-        e.name  AS equipment_name, e.code AS equipment_code
-      FROM trouble_record t
-      LEFT JOIN trouble_category tc ON t.category_id = tc.id
-      LEFT JOIN equipment_ledger  e  ON t.equipment_id = e.id
-      WHERE t.deleted_at IS NULL
-    `;
-    const binds = [...kwBinds];
-    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-    if (from)       { sql += ` AND t.occurred_at >= ?`; binds.push(from); }
-    if (to)         { sql += ` AND t.occurred_at <= ?`; binds.push(to + 'T23:59:59Z'); }
-    if (equipId)    { sql += ` AND t.equipment_id = ?`; binds.push(equipId); }
-    if (categoryId) { sql += ` AND t.category_id = ?`;  binds.push(categoryId); }
-    sql += ` ORDER BY t.occurred_at DESC LIMIT ${limit}`;
-
-    const { results: rows } = await db.prepare(sql).bind(...binds).all();
+    // 拡張列: 記録者名・帳票入力（処置・トラブル名等のJSON）・カスタム項目値も検索対象にする
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      let sql = `
+        SELECT
+          t.id, t.occurred_at AS date_val, t.phenomenon AS title,
+          t.cause, t.countermeasure,
+          tc.name AS category_name,
+          e.name  AS equipment_name, e.code AS equipment_code
+        FROM trouble_record t
+        LEFT JOIN trouble_category tc ON t.category_id = tc.id
+        LEFT JOIN equipment_ledger  e  ON t.equipment_id = e.id
+        WHERE t.deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from)       { sql += ` AND t.occurred_at >= ?`; binds.push(from); }
+      if (to)         { sql += ` AND t.occurred_at <= ?`; binds.push(to + 'T23:59:59Z'); }
+      if (equipId)    { sql += ` AND t.equipment_id = ?`; binds.push(equipId); }
+      if (categoryId) { sql += ` AND t.category_id = ?`;  binds.push(categoryId); }
+      sql += ` ORDER BY t.occurred_at DESC LIMIT ${limit}`;
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
+    const rows = await searchWithFallback(
+      run,
+      ['t.phenomenon', 't.cause', 't.countermeasure', 't.reporter_name', 't.form_values_json', 't.custom_fields_json'],
+      ['t.phenomenon', 't.cause', 't.countermeasure']
+    );
     for (const r of rows ?? []) {
       results.push({
         type:           'trouble',
@@ -81,24 +95,28 @@ export async function onRequestGet({ request, env }) {
 
   // ---------- 業務依頼 ----------
   if (types.includes('repair')) {
-    const cols = ['r.title', 'r.description'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
-    let sql = `
-      SELECT
-        r.id, r.created_at AS date_val, r.title, r.status,
-        e.name AS equipment_name, e.code AS equipment_code
-      FROM repair_request r
-      LEFT JOIN equipment_ledger e ON r.equipment_id = e.id
-      WHERE r.deleted_at IS NULL
-    `;
-    const binds = [...kwBinds];
-    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-    if (from)    { sql += ` AND r.created_at >= ?`; binds.push(from); }
-    if (to)      { sql += ` AND r.created_at <= ?`; binds.push(to + 'T23:59:59Z'); }
-    if (equipId) { sql += ` AND r.equipment_id = ?`; binds.push(equipId); }
-    sql += ` ORDER BY r.created_at DESC LIMIT ${limit}`;
-
-    const { results: rows } = await db.prepare(sql).bind(...binds).all();
+    // 拡張列: 担当者名も検索対象にする
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      let sql = `
+        SELECT
+          r.id, r.created_at AS date_val, r.title, r.status,
+          e.name AS equipment_name, e.code AS equipment_code
+        FROM repair_request r
+        LEFT JOIN equipment_ledger e ON r.equipment_id = e.id
+        WHERE r.deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from)    { sql += ` AND r.created_at >= ?`; binds.push(from); }
+      if (to)      { sql += ` AND r.created_at <= ?`; binds.push(to + 'T23:59:59Z'); }
+      if (equipId) { sql += ` AND r.equipment_id = ?`; binds.push(equipId); }
+      sql += ` ORDER BY r.created_at DESC LIMIT ${limit}`;
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
+    const rows = await searchWithFallback(run,
+      ['r.title', 'r.description', 'r.assignee_name'],
+      ['r.title', 'r.description']);
     const STATUS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
     for (const r of rows ?? []) {
       results.push({
@@ -116,26 +134,28 @@ export async function onRequestGet({ request, env }) {
 
   // ---------- 日報 ----------
   if (types.includes('report')) {
-    const cols = ['dr.body'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
-    let sql = `
-      SELECT
-        dr.id, dr.report_date AS date_val, dr.body,
-        rc.name AS category_name,
-        u.name  AS reporter_name
-      FROM daily_report dr
-      LEFT JOIN report_category rc ON dr.category_id = rc.id
-      LEFT JOIN users            u  ON dr.reporter_id = u.id
-      WHERE dr.deleted_at IS NULL
-    `;
-    const binds = [...kwBinds];
-    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-    if (from)       { sql += ` AND dr.report_date >= ?`; binds.push(from); }
-    if (to)         { sql += ` AND dr.report_date <= ?`; binds.push(to); }
-    if (categoryId) { sql += ` AND dr.category_id = ?`;  binds.push(categoryId); }
-    sql += ` ORDER BY dr.report_date DESC LIMIT ${limit}`;
-
-    const { results: rows } = await db.prepare(sql).bind(...binds).all();
+    // 拡張列: 入力者名（自由入力）も検索対象にする
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      let sql = `
+        SELECT
+          dr.id, dr.report_date AS date_val, dr.body,
+          rc.name AS category_name,
+          COALESCE(dr.reporter_name, u.name) AS reporter_name
+        FROM daily_report dr
+        LEFT JOIN report_category rc ON dr.category_id = rc.id
+        LEFT JOIN users            u  ON dr.reporter_id = u.id
+        WHERE dr.deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from)       { sql += ` AND dr.report_date >= ?`; binds.push(from); }
+      if (to)         { sql += ` AND dr.report_date <= ?`; binds.push(to); }
+      if (categoryId) { sql += ` AND dr.category_id = ?`;  binds.push(categoryId); }
+      sql += ` ORDER BY dr.report_date DESC LIMIT ${limit}`;
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
+    const rows = await searchWithFallback(run, ['dr.body', 'dr.reporter_name'], ['dr.body']);
     for (const r of rows ?? []) {
       results.push({
         type:           'report',
@@ -152,29 +172,33 @@ export async function onRequestGet({ request, env }) {
 
   // ---------- 点検結果 ----------
   if (types.includes('inspection')) {
-    const cols = ['ir.note'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
-    let sql = `
-      SELECT
-        ir.id, ir.inspected_at AS date_val, ir.has_abnormal,
-        ir.note,
-        e.name AS equipment_name, e.code AS equipment_code
-      FROM inspection_result ir
-      LEFT JOIN equipment_ledger e ON ir.equipment_id = e.id
-      WHERE ir.deleted_at IS NULL
-    `;
-    const binds = [...kwBinds];
-    // キーワードなしかつ note のみ検索なので、キーワードがある場合のみ note でフィルタ
-    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-    if (from)    { sql += ` AND ir.inspected_at >= ?`; binds.push(from); }
-    if (to)      { sql += ` AND ir.inspected_at <= ?`; binds.push(to + 'T23:59:59Z'); }
-    if (equipId) { sql += ` AND ir.equipment_id = ?`;  binds.push(equipId); }
+    // 拡張列: 点検項目の値（items_json・自由記述など）と担当者名も検索対象にする
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      let sql = `
+        SELECT
+          ir.id, ir.inspected_at AS date_val, ir.has_abnormal,
+          ir.note,
+          e.name AS equipment_name, e.code AS equipment_code
+        FROM inspection_result ir
+        LEFT JOIN equipment_ledger e ON ir.equipment_id = e.id
+        WHERE ir.deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from)    { sql += ` AND ir.inspected_at >= ?`; binds.push(from); }
+      if (to)      { sql += ` AND ir.inspected_at <= ?`; binds.push(to + 'T23:59:59Z'); }
+      if (equipId) { sql += ` AND ir.equipment_id = ?`;  binds.push(equipId); }
+      sql += ` ORDER BY ir.inspected_at DESC LIMIT ${limit}`;
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
     // キーワードも設備も期間もなければスキップ（全件は多すぎる）
     if (!keywords.length && !from && !to && !equipId) {
       // no-op: skip
     } else {
-      sql += ` ORDER BY ir.inspected_at DESC LIMIT ${limit}`;
-      const { results: rows } = await db.prepare(sql).bind(...binds).all();
+      const rows = await searchWithFallback(run,
+        ['ir.note', 'ir.items_json', 'ir.assignee_name'],
+        ['ir.note']);
       for (const r of rows ?? []) {
         results.push({
           type:           'inspection',
@@ -256,22 +280,27 @@ export async function onRequestGet({ request, env }) {
 
   // ---------- 保全計画 ----------
   if (types.includes('plan')) {
-    const cols = ['title', 'note', 'line_name', 'equipment_name'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
     const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
-    let sql = `
-      SELECT id, title, plan_type, planned_date, line_name, equipment_name, note, status
-      FROM maintenance_plan
-      WHERE deleted_at IS NULL
-    `;
-    const binds = [...kwBinds];
-    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-    if (from) { sql += ` AND planned_date >= ?`; binds.push(from); }
-    if (to)   { sql += ` AND planned_date <= ?`; binds.push(to); }
+    // 拡張列: 担当者・点検者も検索対象にする
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      let sql = `
+        SELECT id, title, plan_type, planned_date, line_name, equipment_name, note, status
+        FROM maintenance_plan
+        WHERE deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from) { sql += ` AND planned_date >= ?`; binds.push(from); }
+      if (to)   { sql += ` AND planned_date <= ?`; binds.push(to); }
+      sql += ` ORDER BY planned_date DESC LIMIT ${limit}`;
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
     // キーワードも期間もなければ全件になるのでスキップ
     if (keywords.length || from || to) {
-      sql += ` ORDER BY planned_date DESC LIMIT ${limit}`;
-      const { results: rows } = await db.prepare(sql).bind(...binds).all();
+      const rows = await searchWithFallback(run,
+        ['title', 'note', 'line_name', 'equipment_name', 'assignee_name', 'inspector_name'],
+        ['title', 'note', 'line_name', 'equipment_name']);
       for (const r of rows ?? []) {
         const equip = [r.line_name, r.equipment_name].filter(Boolean).join(' / ');
         results.push({

@@ -74,7 +74,7 @@ check('全17ページ表示・pageerrorなし', pageErrors.length === 0, pageErr
 
 // ---------- 2. トラブル: 登録→一覧自動表示→編集 ----------
 section('2. トラブル記録の基本フロー');
-const t1 = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E現象テスト' } });
+const t1 = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E現象テスト', reporter_name: 'E2E記録者名' } });
 check('トラブル登録（201）', t1.status === 201, `status=${t1.status}`);
 const troubleId = t1.json?.id;
 
@@ -85,6 +85,12 @@ check('一覧に自動表示（検索ボタン不要）', listText.includes('E2E
 
 const put1 = await api(`/api/troubles/${troubleId}`, { method: 'PUT', body: { phenomenon: 'E2E現象テスト（編集後）' } });
 check('編集PUT（200）', put1.status === 200, `status=${put1.status}`);
+
+// 横断検索: 本文（現象）と記録者名の両方でヒットすること
+const s1 = await api(`/api/search?q=${encodeURIComponent('E2E現象テスト')}`);
+check('横断検索: 現象でヒット', (s1.json?.results || []).some((r) => r.type === 'trouble'));
+const s2 = await api(`/api/search?q=${encodeURIComponent('E2E記録者名')}`);
+check('横断検索: 記録者名でヒット', (s2.json?.results || []).some((r) => r.type === 'trouble'));
 
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');
