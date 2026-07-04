@@ -1,6 +1,8 @@
 // 10 チャット — グループチャット（シフト引き継ぎ・一斉連絡）
-//   30秒ポーリングで新着メッセージを自動取得
-//   ファイル/写真添付対応、既読数表示
+//   画面表示中は5秒ポーリングで新着メッセージをほぼ即時に表示
+//   （タブが裏に回ったら停止して無駄なリクエストを出さない）
+//   ファイル/写真添付対応、既読数表示（送信者本人は既読に数えない）
+//   メッセージは送信から10日で自動削除される（サーバー側・DBを軽く保つ）
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
@@ -203,6 +205,7 @@ function renderForm() {
       textarea,
       sendBtn,
     ]),
+    el('p', { class: 'hint', style: 'margin:2px 0 0;font-size:11px' }, 'メッセージは送信から10日で自動削除されます'),
   ]);
   textarea.focus();
 }
@@ -212,8 +215,17 @@ function renderForm() {
     currentUser = await getCurrentUser();
     await loadInitial();
     renderForm();
-    pollTimer = setInterval(poll, 30000);
-    window.addEventListener('pagehide', () => clearInterval(pollTimer));
+    // 画面表示中は5秒間隔でポーリング（送信されたらほぼ即時に表示される）。
+    // タブが裏に回ったら停止し、戻ったら即取得＋再開（無駄なリクエストを出さない）。
+    const POLL_MS = 5000;
+    const startPolling = () => { if (!pollTimer) pollTimer = setInterval(poll, POLL_MS); };
+    const stopPolling = () => { clearInterval(pollTimer); pollTimer = null; };
+    startPolling();
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { stopPolling(); }
+      else { poll(); startPolling(); }
+    });
+    window.addEventListener('pagehide', stopPolling);
   } catch (err) {
     render(chatList, el('p', { class: 'notice is-error' }, err.message || String(err)));
   }

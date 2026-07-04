@@ -6,10 +6,31 @@
 
 import { json } from '../_lib/http.js';
 
-// キーワードを OR でまとめた LIKE 条件を生成する
-// cols: 検索対象列名の配列, kw: キーワード文字列
-function likeOr(cols, kw) {
-  return '(' + cols.map((c) => `${c} LIKE ?`).join(' OR ') + ')';
+// ---- あいまい検索: キーワードの表記ゆれを吸収するバリアントを生成する ----
+//   ・全角英数 → 半角（例「ＡＢＣ１２３」→「ABC123」。英字の大小は LIKE が元々区別しない）
+//   ・ひらがな ⇄ カタカナ（例「こんぷれっさ」でカタカナの「コンプレッサ」がヒット）
+//   ・末尾の長音ゆれ（例「コンプレッサー」で「コンプレッサ」もヒット。逆方向は部分一致で元々当たる）
+//   D1(SQLite) には日本語正規化関数が無いため、クエリ側を複数形に展開して LIKE の OR で当てる。
+const toHalfWidth = (s) => s
+  .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(/　/g, ' ');
+const hiraToKata = (s) => s.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+const kataToHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+
+function keywordVariants(kw) {
+  const half = toHalfWidth(kw);
+  const set = new Set([kw, half, hiraToKata(half), kataToHira(half)]);
+  for (const v of [...set]) {
+    if (v.length > 2 && (v.endsWith('ー') || v.endsWith('ｰ'))) set.add(v.slice(0, -1));
+  }
+  return [...set].slice(0, 6); // バリアント数の上限（bind数の暴発防止）
+}
+
+// 1キーワードぶんの LIKE 条件（全列 × 全バリアントの OR）
+function likeOr(cols, variantCount) {
+  const parts = [];
+  for (const c of cols) for (let i = 0; i < variantCount; i++) parts.push(`${c} LIKE ?`);
+  return '(' + parts.join(' OR ') + ')';
 }
 
 // 複数キーワード（AND）を生成して WHERE 句と bind 値を返す
@@ -18,8 +39,9 @@ function buildKeywordClauses(keywords, cols) {
   const clauses = [];
   const binds   = [];
   for (const kw of keywords) {
-    clauses.push(likeOr(cols, kw));
-    for (const _c of cols) binds.push(`%${kw}%`);
+    const variants = keywordVariants(kw);
+    clauses.push(likeOr(cols, variants.length));
+    for (const _c of cols) for (const v of variants) binds.push(`%${v}%`);
   }
   return { clauses, binds };
 }

@@ -19,8 +19,56 @@ export async function ensureChatSchema(db) {
   ]);
 }
 
-export async function onRequestGet({ request, env, data }) {
+// ---- 古いメッセージの自動削除（送信から10日）----
+//   チャットは短期の引き継ぎ用途のため、10日を過ぎたメッセージは自動で物理削除して
+//   DBとR2を軽く保つ。添付ファイルは R2 オブジェクトも削除し、files は purged 扱いにする
+//   （容量集計から除外される）。GET の応答をブロックしないよう waitUntil で実行し、
+//   1プロセスにつき1時間に1回だけ動かす（3名運用では十分）。
+const CHAT_RETENTION_DAYS = 10;
+let lastCleanupAt = 0;
+
+async function cleanupOldMessages(env) {
+  const db = env.DB;
+  const cutoff = new Date(Date.now() - CHAT_RETENTION_DAYS * 86400000).toISOString();
+  const { results: olds } = await db
+    .prepare('SELECT id, file_ids_json FROM chat_messages WHERE created_at < ?')
+    .bind(cutoff).all();
+  if (!olds || olds.length === 0) return;
+
+  // 添付ファイルを R2 ごと削除（失敗しても本体の削除は続行）
+  const now = nowIso();
+  for (const m of olds) {
+    let fileIds = [];
+    try { const a = JSON.parse(m.file_ids_json || 'null'); if (Array.isArray(a)) fileIds = a; } catch { /* 壊れたJSONは無視 */ }
+    for (const fid of fileIds) {
+      try {
+        const f = await db.prepare('SELECT r2_key, purged_at FROM files WHERE id = ?').bind(fid).first();
+        if (f && !f.purged_at) {
+          try { if (env.FILES) await env.FILES.delete(f.r2_key); } catch { /* R2削除失敗は無視 */ }
+          await db.prepare(
+            `UPDATE files SET purged_at = ?, purged_by = ?, deleted_at = COALESCE(deleted_at, ?), deleted_by = COALESCE(deleted_by, ?) WHERE id = ?`
+          ).bind(now, 'system:chat-cleanup', now, 'system:chat-cleanup', fid).run();
+        }
+      } catch { /* purged列が無い旧DB等でもメッセージ削除は続行 */ }
+    }
+  }
+
+  await db.prepare('DELETE FROM chat_messages WHERE created_at < ?').bind(cutoff).run();
+  await writeAuditLog(db, {
+    tableName: 'chat_messages', recordId: 'auto-cleanup', action: 'delete',
+    changedBy: 'system:chat-cleanup', diff: { deleted_count: olds.length, cutoff },
+  });
+}
+
+export async function onRequestGet({ request, env, data, waitUntil }) {
   await ensureChatSchema(env.DB); // 既読テーブル等を自動で用意（未読数・既読数の表示に必要）
+
+  // 10日より古いメッセージの自動削除（1時間に1回・応答をブロックしない）
+  if (Date.now() - lastCleanupAt > 3600_000) {
+    lastCleanupAt = Date.now();
+    const p = cleanupOldMessages(env).catch(() => { /* 失敗しても次回再試行 */ });
+    if (typeof waitUntil === 'function') waitUntil(p);
+  }
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
   const channel = sp.get('channel') || 'general';
@@ -42,18 +90,21 @@ export async function onRequestGet({ request, env, data }) {
         ).bind(channel, since2).first();
         unreadCount = cntRow?.n ?? 0;
       }
-      // 最新メッセージを既読した人数（last_read_at >= latest message）
+      // 最新メッセージを既読した人数（last_read_at >= latest message）。
+      // 送信者本人は「既読」に数えない（自分の投稿を自分が見ても既読が付かないように）。
+      // total_users も送信者を除いた人数を返す（表示は「◯人中N人既読」のまま意味が正しくなる）。
       const latestRow = await db.prepare(
-        'SELECT MAX(created_at) AS latest FROM chat_messages WHERE channel = ? AND deleted_at IS NULL'
+        'SELECT created_at AS latest, created_by AS author FROM chat_messages WHERE channel = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1'
       ).bind(channel).first();
-      if (latestRow?.latest) {
-        const rRow = await db.prepare(
-          'SELECT COUNT(*) AS n FROM chat_channel_reads WHERE channel = ? AND last_read_at >= ?'
-        ).bind(channel, latestRow.latest).first();
-        readers = rRow?.n ?? 0;
-      }
       const tRow = await db.prepare('SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL').first();
       totalUsers = tRow?.n ?? 0;
+      if (latestRow?.latest) {
+        const rRow = await db.prepare(
+          'SELECT COUNT(*) AS n FROM chat_channel_reads WHERE channel = ? AND last_read_at >= ? AND user_email != ?'
+        ).bind(channel, latestRow.latest, latestRow.author || '').first();
+        readers = rRow?.n ?? 0;
+        totalUsers = Math.max(0, totalUsers - 1); // 分母からも送信者を除く
+      }
     } catch { /* 未マイグレーション環境ではスキップ */ }
     return json({ unread_count: unreadCount, readers, total_users: totalUsers });
   }
@@ -74,14 +125,17 @@ export async function onRequestGet({ request, env, data }) {
   const messages = since ? (results ?? []) : (results ?? []).reverse();
 
   // 既読ユーザー数: 各メッセージに対して「このメッセージ以降まで読んだ人数」を付与
-  // 最新20件だけに付与（古いメッセージは全員既読扱いで十分）
+  // 最新20件だけに付与（古いメッセージは全員既読扱いで十分）。
+  // 送信者本人は数えない（自分の投稿を自分が見ても「既読1」にならないように）。
   let readCounts = {};
   try {
     const { results: reads } = await db.prepare(
       'SELECT user_email, last_read_at FROM chat_channel_reads WHERE channel = ?'
     ).bind(channel).all();
     for (const msg of messages.slice(-20)) {
-      readCounts[msg.id] = (reads ?? []).filter((r) => r.last_read_at >= msg.created_at).length;
+      readCounts[msg.id] = (reads ?? []).filter(
+        (r) => r.last_read_at >= msg.created_at && r.user_email !== msg.created_by
+      ).length;
     }
   } catch { /* 未マイグレーション時はスキップ */ }
 

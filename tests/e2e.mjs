@@ -91,6 +91,9 @@ const s1 = await api(`/api/search?q=${encodeURIComponent('E2E現象テスト')}`
 check('横断検索: 現象でヒット', (s1.json?.results || []).some((r) => r.type === 'trouble'));
 const s2 = await api(`/api/search?q=${encodeURIComponent('E2E記録者名')}`);
 check('横断検索: 記録者名でヒット', (s2.json?.results || []).some((r) => r.type === 'trouble'));
+// あいまい検索: ひらがな・小文字で入力してもカタカナ・大文字のデータがヒットする
+const s3 = await api(`/api/search?q=${encodeURIComponent('e2e現象てすと')}`);
+check('横断検索: あいまい（かな/大小文字ゆれ）でヒット', (s3.json?.results || []).some((r) => r.type === 'trouble'));
 
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');
@@ -195,6 +198,10 @@ const chatRead = await api('/api/chat?channel=general', { method: 'PUT' });
 check('既読の更新（200）', chatRead.status === 200, `status=${chatRead.status}`);
 const chatUnread = await api('/api/chat?count_unread=1&channel=general');
 check('既読後の未読数が0', chatUnread.json?.unread_count === 0, JSON.stringify(chatUnread.json));
+// 送信者本人は既読に数えない（自分の投稿を自分が読んでも既読0のまま）
+const chatAfterRead = await api('/api/chat?channel=general&limit=10');
+const ownMsg = (chatAfterRead.json?.messages || []).find((m) => m.body === 'E2Eチャットテスト');
+check('自分の投稿の既読数は0（送信者除外）', ownMsg?.read_count === 0, `read_count=${ownMsg?.read_count}`);
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
