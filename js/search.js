@@ -5,6 +5,7 @@ import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDateTime } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
+import { buildCsvText, downloadCsv, excelText } from '/js/csv.js';
 
 const app = document.getElementById('app');
 
@@ -19,6 +20,26 @@ const TYPE_CONFIG = {
 };
 
 const ALL_TYPES = Object.keys(TYPE_CONFIG);
+
+// 直近の検索結果（CSV出力用に保持）
+let currentResults = [];
+
+// 検索結果を CSV 出力する（Shift_JIS は Excel 文字化け対策）。
+// 設備番号を含む「設備」列は Excel の日付変換よけに excelText で囲む。
+function exportSearchCsv(enc) {
+  if (currentResults.length === 0) { alert('出力対象がありません。まず検索してください。'); return; }
+  const columns = [
+    { label: '種別',   value: (r) => TYPE_CONFIG[r.type]?.label || r.type },
+    { label: '日付',   value: (r) => r.date || '' },
+    { label: '設備',   value: (r) => excelText(r.equipment_name || '') },
+    { label: '内容',   value: (r) => r.title || '' },
+    { label: '補足',   value: (r) => r.snippet || '' },
+    { label: 'カテゴリ', value: (r) => r.category_name || '' },
+  ];
+  const text = buildCsvText(currentResults, columns);
+  const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
+  downloadCsv(`search_${dateStr}.csv`, text, enc);
+}
 
 // URL パラメータを読み書き
 function getParams() {
@@ -54,6 +75,7 @@ async function doSearch(params, resultsBox) {
     if (params.category_id)  sp.set('category_id', params.category_id);
 
     const { results, count, keywords } = await api.get(`/api/search?${sp}`);
+    currentResults = results || [];
 
     if (count === 0) {
       render(resultsBox, el('p', { class: 'empty' }, params.q
@@ -81,9 +103,15 @@ async function doSearch(params, resultsBox) {
     };
 
     render(resultsBox, [
-      el('p', { style: 'font-size:13px;color:#64748b;margin:4px 0 12px' },
-        `${count}件ヒット${keywords.length ? '（キーワード: ' + keywords.join('、') + '）' : ''}`
-      ),
+      el('div', { class: 'search-result-header', style: 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:4px 0 12px' }, [
+        el('p', { style: 'font-size:13px;color:#64748b;margin:0' },
+          `${count}件ヒット${keywords.length ? '（キーワード: ' + keywords.join('、') + '）' : ''}`
+        ),
+        el('div', { class: 'action-row', style: 'margin:0' }, [
+          el('button', { class: 'btn btn-sm', type: 'button', onclick: () => exportSearchCsv('UTF-8') }, '📥 CSV（UTF-8/BOM）'),
+          el('button', { class: 'btn btn-sm', type: 'button', onclick: () => exportSearchCsv('sjis')  }, '📥 CSV（Shift_JIS）'),
+        ]),
+      ]),
       el('div', { class: 'search-results' },
         results.map((r) => {
           const cfg = TYPE_CONFIG[r.type] || {};

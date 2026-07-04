@@ -100,6 +100,13 @@ check('横断検索: あいまい（かな/大小文字ゆれ）でヒット', (
 // 設備名でヒット: 本文に「フィルム機」が無くても、紐づく設備名でトラブルが引ける
 const s4 = await api(`/api/search?q=${encodeURIComponent('フィルム機')}`);
 check('横断検索: 設備名でトラブルがヒット', (s4.json?.results || []).some((r) => r.type === 'trouble'));
+// 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
+await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(800);
+const hasCsvBtn = await page.evaluate(() =>
+  [...document.querySelectorAll('.search-result-header button')].some((b) => b.textContent.includes('CSV'))
+);
+check('横断検索: 結果にCSV出力ボタンが出る', hasCsvBtn);
 
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');

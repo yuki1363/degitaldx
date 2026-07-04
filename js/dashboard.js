@@ -1,9 +1,9 @@
-// 08 ダッシュボード — サマリー/グラフ・抽出レポート・CSV/PDF出力
+// 08 ダッシュボード — サマリー/グラフ・カスタムグラフ
+//   （抽出→表→CSV/PDF は横断検索(11)へ集約。ダッシュボードは「見る（グラフ）」に専念）
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
-import { buildCsvText, downloadCsv } from '/js/csv.js';
+import { el, render } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 
 const app = document.getElementById('app');
@@ -157,190 +157,9 @@ async function renderSummary(fromStr, toStr) {
   if (Object.keys(stats.repair_summary).length > 0) drawRepairSummary('chart-repair', stats.repair_summary);
 }
 
-// ---------------- 抽出レポートタブ ----------------
-
-const TYPE_CONFIG = {
-  trouble:    { label: 'トラブル',  color: '#b45309', bg: '#fef3c7', dateField: 'occurred_at', titleField: 'phenomenon' },
-  inspection: { label: '点検',      color: '#1e40af', bg: '#dbeafe', dateField: 'inspected_at', titleField: null },
-  repair:     { label: '業務依頼',  color: '#6b21a8', bg: '#f3e8ff', dateField: 'created_at',  titleField: 'title' },
-  report:     { label: '日報',      color: '#15803d', bg: '#dcfce7', dateField: 'report_date',  titleField: null },
-};
-
-async function renderExtract(fromStr, toStr) {
-  const contentEl = app.querySelector('#tab-content');
-  render(contentEl, el('p', { class: 'loading' }, '読み込み中…'));
-
-  const [{ equipment }, { categories }, { categories: reportCats }] = await Promise.all([
-    api.get('/api/equipment'),
-    api.get('/api/troubles/categories'),
-    api.get('/api/reports/categories'),
-  ]);
-
-  let types      = ['trouble', 'inspection', 'repair', 'report'];
-  let equipId    = '';
-  let categoryId = '';
-  let currentFrom = fromStr;
-  let currentTo   = toStr;
-  const tableBox = el('div', {}, []);
-
-  const fetchAndRender = async () => {
-    render(tableBox, el('p', { class: 'loading' }, '読み込み中…'));
-    try {
-      const fetches = [];
-
-      if (types.includes('trouble')) {
-        const p = new URLSearchParams({ from: currentFrom, to: currentTo });
-        if (equipId)    p.set('equipment_id', equipId);
-        if (categoryId) p.set('category_id', categoryId);
-        fetches.push(api.get(`/api/troubles?${p}`).then(({ troubles }) =>
-          troubles.map((t) => ({ _type: 'trouble', _date: t.occurred_at?.slice(0, 10), _title: t.phenomenon, _equipment: t.equipment_name, _person: t.reporter_name || t.creator_name, _status: null, _id: t.id, ...t }))
-        ));
-      }
-      if (types.includes('inspection')) {
-        const p = new URLSearchParams();
-        if (equipId) p.set('equipment_id', equipId);
-        fetches.push(api.get(`/api/inspections${p.size ? '?' + p : ''}`).then(({ inspections }) =>
-          inspections
-            .filter((i) => {
-              const d = i.inspected_at?.slice(0, 10) || '';
-              return d >= currentFrom && d <= currentTo;
-            })
-            .map((i) => ({ _type: 'inspection', _date: i.inspected_at?.slice(0, 10), _title: `${i.equipment_name || ''}の点検`, _equipment: i.equipment_name, _person: i.assignee_name, _status: i.has_abnormal ? '異常あり' : '正常', _id: i.id, ...i }))
-        ));
-      }
-      if (types.includes('repair')) {
-        const p = new URLSearchParams();
-        if (equipId) p.set('equipment_id', equipId);
-        fetches.push(api.get(`/api/repairs${p.size ? '?' + p : ''}`).then(({ repairs }) =>
-          repairs
-            .filter((r) => {
-              const d = r.created_at?.slice(0, 10) || '';
-              return d >= currentFrom && d <= currentTo;
-            })
-            .map((r) => ({ _type: 'repair', _date: r.created_at?.slice(0, 10), _title: r.title, _equipment: r.equipment_name, _person: r.assignee_name, _status: r.status, _id: r.id, ...r }))
-        ));
-      }
-      if (types.includes('report')) {
-        const p = new URLSearchParams({ from: currentFrom, to: currentTo });
-        if (categoryId) p.set('category_id', categoryId);
-        fetches.push(api.get(`/api/reports?${p}`).then(({ reports }) =>
-          reports.map((r) => ({ _type: 'report', _date: r.report_date, _title: r.body.slice(0, 60), _equipment: null, _person: r.reporter_name, _status: r.category_name, _id: r.id, ...r }))
-        ));
-      }
-
-      const results = (await Promise.all(fetches)).flat();
-      results.sort((a, b) => (b._date || '').localeCompare(a._date || ''));
-
-      if (results.length === 0) {
-        render(tableBox, el('p', { class: 'empty' }, '該当データがありません。'));
-        return;
-      }
-
-      const STATUS_REPAIR = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
-
-      render(tableBox, [
-        el('p', { style: 'font-size:13px;color:#64748b;margin:4px 0 8px' }, `${results.length}件`),
-        el('div', { style: 'overflow-x:auto' }, [
-          el('table', { class: 'extract-table' }, [
-            el('thead', {}, [
-              el('tr', {}, [
-                el('th', {}, '種別'),
-                el('th', {}, '日付'),
-                el('th', {}, '設備'),
-                el('th', {}, '内容'),
-                el('th', {}, '担当/記録者'),
-                el('th', {}, '状態'),
-              ]),
-            ]),
-            el('tbody', {}, results.map((row) => {
-              const cfg = TYPE_CONFIG[row._type] || {};
-              return el('tr', {}, [
-                el('td', {}, el('span', { class: 'type-badge', style: `background:${cfg.bg};color:${cfg.color}` }, cfg.label || row._type)),
-                el('td', {}, row._date || ''),
-                el('td', {}, row._equipment || '—'),
-                el('td', {}, el('a', { href: `${LINKED_TYPE_URLS[row._type]}${row._id}`, class: 'table-link' }, row._title || '—')),
-                el('td', {}, row._person || '—'),
-                el('td', {}, STATUS_REPAIR[row._status] || row._status || '—'),
-              ]);
-            })),
-          ]),
-        ]),
-
-        el('div', { class: 'action-row', style: 'margin-top:8px' }, [
-          el('button', { class: 'btn btn-sm', onclick: () => exportCsv(results, 'UTF-8') }, '📥 CSV（UTF-8/BOM）'),
-          el('button', { class: 'btn btn-sm', onclick: () => exportCsv(results, 'sjis')   }, '📥 CSV（Shift_JIS）'),
-          el('button', { class: 'btn btn-sm', onclick: () => window.print() }, '🖨 印刷/PDF'),
-        ]),
-      ]);
-    } catch (err) {
-      render(tableBox, el('p', { class: 'notice is-error' }, err.message));
-    }
-  };
-
-  const exportCsv = (rows, enc) => {
-    const STATUS_REPAIR = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
-    const columns = [
-      { label: '種別',         value: (r) => TYPE_CONFIG[r._type]?.label || r._type },
-      { label: '日付',         value: (r) => r._date || '' },
-      { label: '設備',         value: (r) => r._equipment || '' },
-      { label: '内容',         value: (r) => r._title || '' },
-      { label: '担当/記録者',  value: (r) => r._person || '' },
-      { label: '状態',         value: (r) => STATUS_REPAIR[r._status] || r._status || '' },
-    ];
-    const text = buildCsvText(rows, columns);
-    const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
-    downloadCsv(`report_${dateStr}.csv`, text, enc);
-  };
-
-  // フィルタUI
-  const typeCheckboxes = Object.entries(TYPE_CONFIG).map(([type, cfg]) => {
-    const cb = el('input', { type: 'checkbox', checked: true, id: `type-${type}`, onchange: () => {
-      types = Object.keys(TYPE_CONFIG).filter((t) => document.getElementById(`type-${t}`)?.checked);
-      fetchAndRender().catch(() => {});
-    }});
-    return el('label', { class: 'type-check', style: `background:${cfg.bg};color:${cfg.color}` }, [cb, ` ${cfg.label}`]);
-  });
-
-  const fromInput = el('input', { type: 'date', value: currentFrom, onchange: (e) => { currentFrom = e.target.value; fetchAndRender().catch(() => {}); }});
-  const toInput   = el('input', { type: 'date', value: currentTo,   onchange: (e) => { currentTo   = e.target.value; fetchAndRender().catch(() => {}); }});
-
-  const equipSel = buildEquipSelect(equipment, {
-    value: equipId || '',
-    allLabel: '全設備',
-    onchange: (e) => { equipId = e.target.value; fetchAndRender().catch(() => {}); },
-  });
-
-  const allCats = [
-    ...categories.map((c) => ({ ...c, _type: 'trouble' })),
-    ...reportCats.map((c) => ({ ...c, _type: 'report' })),
-  ];
-  const catSel = el('select', { onchange: (e) => { categoryId = e.target.value; fetchAndRender().catch(() => {}); }}, [
-    el('option', { value: '' }, '全カテゴリ/ジャンル'),
-    ...allCats.map((c) => el('option', { value: c.id }, `${c.name}`)),
-  ]);
-
-  render(contentEl, [
-    el('div', { class: 'filter-bar' }, typeCheckboxes),
-    el('div', { class: 'filter-bar' }, [
-      el('label', { class: 'filter-label' }, ['FROM ', fromInput]),
-      el('label', { class: 'filter-label' }, ['TO ', toInput]),
-    ]),
-    el('div', { class: 'filter-bar' }, [equipSel, catSel]),
-    tableBox,
-  ]);
-  await fetchAndRender();
-}
-
-const LINKED_TYPE_URLS = {
-  trouble:    '/pages/trouble?id=',
-  inspection: '/pages/inspection?id=',
-  repair:     '/pages/repair?id=',
-  report:     '/pages/report?id=',
-};
-
 // ---------------- カスタムグラフタブ ----------------
 //   CLAUDE.md 08: 集計軸・期間・対象設備を選択できるカスタムグラフ。
-//   データはトラブル/点検/業務依頼を取得してクライアント側で集計する（抽出レポートと同じ取り方）。
+//   データはトラブル/点検/業務依頼を取得してクライアント側で集計する。
 //   単一系列のため凡例は出さない（円グラフのみカテゴリ凡例）。色は既存のチャート配色に合わせる。
 
 const CUSTOM_DATA_TYPES = {
@@ -532,7 +351,6 @@ async function renderDashboard() {
   const tabs = [
     { id: 'summary',  label: 'サマリー/グラフ' },
     { id: 'custom',   label: 'カスタムグラフ' },
-    { id: 'extract',  label: '抽出レポート' },
   ];
   const tabBtns = tabs.map(({ id, label }) =>
     el('button', {
@@ -549,12 +367,10 @@ async function renderDashboard() {
   const loadTab = async () => {
     const from = fromInput.value || defaultFrom;
     const to   = toInput.value   || defaultTo;
-    if (activeTab === 'summary') {
-      await renderSummary(from, to);
-    } else if (activeTab === 'custom') {
+    if (activeTab === 'custom') {
       await renderCustom(from, to);
     } else {
-      await renderExtract(from, to);
+      await renderSummary(from, to);
     }
   };
 
