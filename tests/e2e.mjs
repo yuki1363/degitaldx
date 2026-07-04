@@ -179,8 +179,19 @@ const graph = await page.evaluate(() => ({
 }));
 check('カスタムグラフ描画', graph.canvas && graph.chart, JSON.stringify(graph));
 
-// ---------- 9. オフラインでの静的表示 ----------
-section('9. オフラインでアプリが起動する（SWプリキャッシュ）');
+// ---------- 9. チャット: 投稿→取得→既読 ----------
+section('9. チャット（投稿・取得・既読）');
+const chatPost = await api('/api/chat', { method: 'POST', body: { body: 'E2Eチャットテスト', channel: 'general' } });
+check('チャット投稿（201）', chatPost.status === 201, `status=${chatPost.status}`);
+const chatList = await api('/api/chat?channel=general&limit=10');
+check('投稿が一覧に反映', (chatList.json?.messages || []).some((m) => m.body === 'E2Eチャットテスト'));
+const chatRead = await api('/api/chat?channel=general', { method: 'PUT' });
+check('既読の更新（200）', chatRead.status === 200, `status=${chatRead.status}`);
+const chatUnread = await api('/api/chat?count_unread=1&channel=general');
+check('既読後の未読数が0', chatUnread.json?.unread_count === 0, JSON.stringify(chatUnread.json));
+
+// ---------- 10. オフラインでの静的表示 ----------
+section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
 const resp = await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
 const offlineOk = !!resp && resp.status() === 200 &&

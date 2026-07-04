@@ -2,8 +2,25 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { ensureColumns } from '../_lib/db-compat.js';
+
+// 後付けの列・テーブルを、未マイグレーションの本番DBでも自動で用意する（自己修復）。
+//   file_ids_json 列が無いDBでは投稿INSERTが「has no column named」で500になるため、
+//   投稿・既読更新の入口で必ず呼ぶ。適用済みなら何もしない（1プロセス1回だけ実行）。
+export async function ensureChatSchema(db) {
+  await ensureColumns(db, 'chat_schema', [
+    'ALTER TABLE chat_messages ADD COLUMN file_ids_json TEXT',
+    `CREATE TABLE IF NOT EXISTS chat_channel_reads (
+       channel       TEXT NOT NULL,
+       user_email    TEXT NOT NULL,
+       last_read_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+       PRIMARY KEY (channel, user_email)
+     )`,
+  ]);
+}
 
 export async function onRequestGet({ request, env, data }) {
+  await ensureChatSchema(env.DB); // 既読テーブル等を自動で用意（未読数・既読数の表示に必要）
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
   const channel = sp.get('channel') || 'general';
@@ -77,6 +94,7 @@ export async function onRequestPost({ request, env, data }) {
   if (denied) return denied;
 
   const db = env.DB;
+  await ensureChatSchema(db); // file_ids_json 列を自動で用意（未マイグレーションでも500にしない）
   const body = await readJson(request);
   const { body: msgBody, channel = 'general', file_ids } = body ?? {};
   if (!msgBody?.trim() && (!file_ids || file_ids.length === 0)) {
@@ -106,10 +124,11 @@ export async function onRequestPost({ request, env, data }) {
   return json({ id }, 201);
 }
 
-// PUT /api/chat/read — 既読位置を更新（channel クエリパラメータで指定）
+// PUT /api/chat?channel=... — 既読位置を更新（フロントは js/chat.js が呼ぶ）
 export async function onRequestPut({ request, env, data }) {
   if (!data.user) return jsonError(401, '認証が必要です');
   const db = env.DB;
+  await ensureChatSchema(db); // 既読テーブルを自動で用意（未マイグレーションでも既読が記録されるように）
   const channel = new URL(request.url).searchParams.get('channel') || 'general';
   const now = nowIso();
   try {
