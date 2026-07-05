@@ -1586,6 +1586,36 @@ input.is-abnormal {
   color: var(--color-text-muted);
 }
 
+/* 申し送りテンプレートのチップ（タップで入力欄へ挿入） */
+.chat-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px 0;
+}
+
+.chat-tpl-chip {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-tpl-chip:active { background: #e2e8f0; }
+
+/* 投稿の記録化アクション（📋で開閉。トラブル/業務依頼/日報へ昇格） */
+.chat-record-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+
+.chat-msg.is-mine .chat-record-actions { justify-content: flex-end; }
+
 /* ---- AI ボットパネル ---- */
 .ai-bot-wrap {
   display: flex;

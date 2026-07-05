@@ -170,9 +170,12 @@ check('入庫で発注中が自動解除', after.json?.part?.ordered_at === null
 // ---------- 7. 週表示: 期間予定が全日に出る ----------
 section('7. 保全計画 週表示（期間予定）');
 const weekPlan = await page.evaluate(async () => {
+  // plan.js の週表示は「直前の日曜日」始まり（Sun–Sat）。表示週の月〜金に期間予定を作る。
+  // ISO週の月曜で作ると、今日が日曜のとき表示週の外になり検出できない（曜日非依存にする）。
   const now = new Date();
-  const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-  const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  const sun = new Date(now); sun.setDate(now.getDate() - now.getDay()); // 表示週の開始（直前の日曜）
+  const mon = new Date(sun); mon.setDate(sun.getDate() + 1);            // 表示週の月曜
+  const fri = new Date(sun); fri.setDate(sun.getDate() + 5);            // 表示週の金曜
   const f = (d) => d.toLocaleDateString('sv-SE');
   const r = await fetch('/api/plans', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -215,6 +218,23 @@ check('既読後の未読数が0', chatUnread.json?.unread_count === 0, JSON.str
 const chatAfterRead = await api('/api/chat?channel=general&limit=10');
 const ownMsg = (chatAfterRead.json?.messages || []).find((m) => m.body === 'E2Eチャットテスト');
 check('自分の投稿の既読数は0（送信者除外）', ownMsg?.read_count === 0, `read_count=${ownMsg?.read_count}`);
+
+// 記録化リンク・申し送りテンプレート（チャットを業務の入り口にする2機能）
+await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => document.body.innerText.includes('E2Eチャットテスト'), { timeout: 8000 }).catch(() => {});
+const recordHref = await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-record-actions a')]
+    .map((x) => x.getAttribute('href'))
+    .find((h) => h && h.includes('/pages/trouble?new=1')) || null
+);
+check('チャット: 記録化リンクが本文を引き継ぐ', !!recordHref && decodeURIComponent(recordHref).includes('E2Eチャットテスト'), `href=${recordHref}`);
+const tplValue = await page.evaluate(() => {
+  const chip = document.querySelector('.chat-tpl-chip');
+  if (!chip) return null;
+  chip.click();
+  return document.querySelector('#chat-form textarea')?.value ?? null;
+});
+check('チャット: 申し送りテンプレートが入力欄に挿入される', !!tplValue && tplValue.includes('【'), `value=${tplValue}`);
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

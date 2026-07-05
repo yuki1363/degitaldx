@@ -3,6 +3,8 @@
 //   （タブが裏に回ったら停止して無駄なリクエストを出さない）
 //   ファイル/写真添付対応、既読数表示（送信者本人は既読に数えない）
 //   メッセージは送信から10日で自動削除される（サーバー側・DBを軽く保つ）
+//   投稿を記録化: 有益な投稿をトラブル/業務依頼/日報へ昇格（本文をプリフィル）。10日で消える前に正式記録へ
+//   申し送りテンプレート: 定型文をタップで入力欄へ挿入（現場スマホの入力を軽く・書き方を統一）
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
@@ -25,6 +27,30 @@ const PI_PATTERNS = [
 ];
 function detectPersonalInfo(text) {
   return PI_PATTERNS.some((p) => p.test(text));
+}
+
+// 申し送りの定型文（タップで入力欄へ挿入）。現場スマホでの入力を減らし、書き方を統一する。
+const HANDOFF_TEMPLATES = [
+  '【引き継ぎ】次の当番へ：',
+  '【対応中】設備：\n状況：',
+  '【要確認】',
+  '【完了報告】',
+  '【部品発注】品番：\n数量：',
+];
+
+// チャット投稿を正式な記録へ「昇格」させるリンク群を作る。
+//   10日で自動削除されるチャットの中で、有益な情報をトラブル/業務依頼/日報として残せるようにする。
+//   遷移先フォームは既存の URL プリフィルに対応済み（本文を引き継ぐ）。写真は引き継がないので別途添付する。
+function buildRecordActions(body) {
+  const title = body.split('\n')[0].slice(0, 40); // 業務依頼の件名は1行目のみ（長すぎ防止）
+  const links = [
+    ['🔧 トラブル記録', `/pages/trouble?${new URLSearchParams({ new: '1', phenomenon: body })}`],
+    ['🛠 業務依頼',    `/pages/repair?${new URLSearchParams({ new: '1', title, description: body })}`],
+    ['📝 日報',        `/pages/report?${new URLSearchParams({ body })}`],
+  ];
+  return el('div', { class: 'chat-record-actions', style: 'display:none' },
+    links.map(([label, href]) => el('a', { class: 'btn btn-sm', href }, label))
+  );
 }
 
 // メッセージに添付されたファイルのサムネイル/リンクを描画
@@ -68,10 +94,22 @@ async function appendMessages(messages) {
       renderAttachments(fileIds).then((el2) => { if (el2) render(attachEl, el2.childNodes ? Array.from(el2.childNodes) : [el2]); });
     }
 
+    // 記録化: 本文のある投稿を、editor 以上がトラブル/業務依頼/日報へ昇格できる（📋で開閉）
+    const canRecord = hasRole(currentUser, 'editor') && !!msg.body;
+    const recordActions = canRecord ? buildRecordActions(msg.body) : null;
+    const recordBtn = canRecord ? el('button', {
+      class: 'btn-icon',
+      title: '記録化（トラブル/業務依頼/日報に変換）',
+      onclick: () => {
+        recordActions.style.display = recordActions.style.display === 'none' ? 'flex' : 'none';
+      },
+    }, '📋') : null;
+
     const row = el('div', { class: `chat-msg ${isMine ? 'is-mine' : ''}`, dataset: { id: String(msg.id) } }, [
       el('div', { class: 'chat-meta' }, [
         el('span', { class: 'chat-author' }, msg.author_name || maskEmail(msg.created_by)),
         el('span', { class: 'chat-time' }, formatDateTime(msg.created_at)),
+        recordBtn,
         (isMine || isAdmin) ? el('button', {
           class: 'btn-icon',
           title: '削除',
@@ -84,6 +122,7 @@ async function appendMessages(messages) {
       ]),
       msg.body ? el('div', { class: 'chat-body', style: 'white-space:pre-wrap' }, msg.body) : null,
       fileIds.length > 0 ? attachEl : null,
+      recordActions,
       isMine && readBadge ? el('div', { class: 'chat-read-row' }, [readBadge]) : null,
     ]);
     chatList.appendChild(row);
@@ -192,7 +231,23 @@ function renderForm() {
     }
   };
 
+  // 申し送りテンプレート: タップで入力欄へ挿入（既存文があれば改行して追記）
+  const insertTemplate = (t) => {
+    const cur = textarea.value;
+    textarea.value = cur.trim() ? cur.replace(/\s*$/, '') + '\n' + t : t;
+    textarea.focus();
+    const end = textarea.value.length;
+    try { textarea.setSelectionRange(end, end); } catch { /* 一部環境で失敗しても無害 */ }
+  };
+  const templateRow = el('div', { class: 'chat-templates' },
+    HANDOFF_TEMPLATES.map((t) => el('button', {
+      type: 'button', class: 'chat-tpl-chip', title: 'タップで入力欄に挿入',
+      onclick: () => insertTemplate(t),
+    }, t.split('\n')[0]))
+  );
+
   render(chatForm, [
+    templateRow,
     filePreview,
     el('div', { class: 'chat-input-row' }, [
       el('button', {
