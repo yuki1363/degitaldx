@@ -185,7 +185,10 @@ export async function onRequestGet({ request, env, data, waitUntil }) {
   `;
   const binds = [channel];
 
-  if (since) { sql += ` AND cm.created_at > ?`; binds.push(since); }
+  // since は「>=」で比較する。created_at は秒精度のため、「>」だと直前に取得した
+  // メッセージと同じ秒に投稿されたものが永遠に取得されない（2人がほぼ同時に投稿すると
+  // 片方が表示されない）。境界の重複行はクライアントが id で重複スキップする。
+  if (since) { sql += ` AND cm.created_at >= ?`; binds.push(since); }
   sql += ` ORDER BY cm.created_at ${since ? 'ASC' : 'DESC'} LIMIT ?`;
   binds.push(limit);
 

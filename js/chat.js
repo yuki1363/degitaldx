@@ -178,16 +178,20 @@ function renderPinnedBar(pinned) {
   ])));
 }
 
-// メッセージをDOMに追加（最下部へ）。同じIDの行は二重に描画しない
+// メッセージをDOMに追加（最下部へ）。同じIDの行は二重に描画しない。
+// 戻り値は「新しく追加した件数」（sinceが >= 比較のため境界の重複行が毎回混ざる。
+// 追加0件のときは既読PUTを送らない判定に使う）
 async function appendMessages(messages) {
-  if (messages.length === 0) return;
+  if (messages.length === 0) return 0;
   chatList.querySelector('.empty')?.remove(); // 「メッセージはありません」の表示を消す
   const atBottom = chatList.scrollHeight - chatList.scrollTop <= chatList.clientHeight + 60;
+  let added = 0;
 
   for (const msg of messages) {
     if (msg.created_at > (lastTimestamp || '')) lastTimestamp = msg.created_at;
     // 送信直後の即時取得と5秒ポーリングが並走しても、同じメッセージを二重描画しない
     if (chatList.querySelector(`[data-id="${msg.id}"]`)) continue;
+    added++;
 
     const isMine = msg.created_by === currentUser.email;
     const isAdmin = currentUser.role === 'admin';
@@ -255,7 +259,8 @@ async function appendMessages(messages) {
     if (msg.pinned_at) setPinState(entry, true);
   }
 
-  if (atBottom) chatList.scrollTop = chatList.scrollHeight;
+  if (added > 0 && atBottom) chatList.scrollTop = chatList.scrollHeight;
+  return added;
 }
 
 async function loadInitial() {
@@ -286,8 +291,9 @@ async function poll() {
     if (!lastTimestamp) return;
     const { messages, meta, pinned } = await api.get(`/api/chat?channel=${CHANNEL}&since=${encodeURIComponent(lastTimestamp)}`);
     if (messages.length > 0) {
-      await appendMessages(messages);
-      api.put(`/api/chat?channel=${CHANNEL}`).catch(() => {});
+      // since は >= 比較のため境界の既表示行も返る。実際に追加があったときだけ既読を更新
+      const added = await appendMessages(messages);
+      if (added > 0) api.put(`/api/chat?channel=${CHANNEL}`).catch(() => {});
     }
     // 新着が無くても既読数・👍・📌はライブ更新する
     applyMeta(meta);

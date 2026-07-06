@@ -102,7 +102,7 @@ const s4 = await api(`/api/search?q=${encodeURIComponent('フィルム機')}`);
 check('横断検索: 設備名でトラブルがヒット', (s4.json?.results || []).some((r) => r.type === 'trouble'));
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(800);
+await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});
 const hasCsvBtn = await page.evaluate(() =>
   [...document.querySelectorAll('.search-result-header button')].some((b) => b.textContent.includes('CSV'))
 );
@@ -185,9 +185,16 @@ const weekPlan = await page.evaluate(async () => {
 });
 check('期間予定の登録', weekPlan === 201, `status=${weekPlan}`);
 await page.goto(`${BASE}/pages/plan`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(600);
+// 月表示の描画完了を待ってから「週」に切り替える（読み込み中にクリックすると、
+// 後着した月表示の描画が週表示を上書きして .cal-week-col が0個になるフレークがCIで出る）
+await page.waitForFunction(() => !!document.querySelector('.cal-grid'), { timeout: 10000 }).catch(() => {});
 await page.click('button:has-text("週")');
-await page.waitForTimeout(1000);
+// 週表示の7列が揃い、対象予定が現れるまで条件待ち（固定1秒待ちは遅いCIで不足する）
+await page.waitForFunction(() => document.querySelectorAll('.cal-week-col').length >= 7, { timeout: 10000 }).catch(() => {});
+await page.waitForFunction(
+  () => [...document.querySelectorAll('.cal-week-col')].filter((c) => c.innerText.includes('E2E週跨ぎ予定')).length >= 5,
+  { timeout: 10000 }
+).catch(() => {});
 const weekHits = await page.evaluate(() =>
   [...document.querySelectorAll('.cal-week-col')].filter((c) => c.innerText.includes('E2E週跨ぎ予定')).length);
 check('週表示で5日間すべてに表示', weekHits === 5, `${weekHits}日`);
@@ -245,6 +252,7 @@ const recordHref = await page.evaluate(() =>
     .find((h) => h && h.includes('/pages/trouble?new=1')) || null
 );
 check('チャット: 記録化リンクが本文を引き継ぐ', !!recordHref && decodeURIComponent(recordHref).includes('E2Eチャットテスト'), `href=${recordHref}`);
+await page.waitForFunction(() => !!document.querySelector('.chat-tpl-chip'), { timeout: 10000 }).catch(() => {});
 const tplValue = await page.evaluate(() => {
   const chip = document.querySelector('.chat-tpl-chip');
   if (!chip) return null;
@@ -269,7 +277,10 @@ check('ピン留め（pinned=true）', pin1.status === 200 && pin1.json?.pinned 
 const listP = await api('/api/chat?channel=general&limit=10');
 check('ピン一覧に反映', (listP.json?.pinned || []).some((p) => p.id === chatMsgId));
 await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(800);
+await page.waitForFunction(
+  () => (document.getElementById('chat-pinned')?.innerText || '').includes('E2Eチャットテスト'),
+  { timeout: 10000 }
+).catch(() => {});
 const pinBarText = await page.evaluate(() => document.getElementById('chat-pinned')?.innerText || '');
 check('ピン留めバーに表示される', pinBarText.includes('E2Eチャットテスト'), `bar="${pinBarText.slice(0, 60)}"`);
 const unpin = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: false } });
@@ -289,7 +300,8 @@ const fileMeta = await api(`/api/files/${upId}?meta=1`);
 check('ファイルメタAPI（?meta=1）', fileMeta.status === 200 && fileMeta.json?.content_type === 'image/png', JSON.stringify(fileMeta.json));
 await api('/api/chat', { method: 'POST', body: { body: 'E2E画像添付', channel: 'general', file_ids: [upId] } });
 await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1200);
+// 添付メタの取得（?meta=1）→サムネイル描画は非同期のため条件待ち
+await page.waitForFunction(() => !!document.querySelector('.chat-msg img.chat-thumb'), { timeout: 10000 }).catch(() => {});
 const hasThumb = await page.evaluate(() => !!document.querySelector('.chat-msg img.chat-thumb'));
 check('画像添付がサムネイル表示される（バグ修正）', hasThumb);
 
@@ -308,7 +320,8 @@ const mLast = await api('/api/inspections/masters', { method: 'POST', body: { eq
 const insp1 = await api('/api/inspections', { method: 'POST', body: { equipment_id: eqLast.json?.id, inspected_at: new Date().toISOString(), items: [{ master_id: mLast.json?.id, value: 0.45 }] } });
 check('前回値テスト用の点検登録', insp1.status === 201, `status=${insp1.status}`);
 await page.goto(`${BASE}/pages/inspection?new=1&equipment_id=${eqLast.json?.id}`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1200);
+// チェックリスト＋前回値の取得は非同期のため条件待ち（固定待ちは遅いCIで不足する）
+await page.waitForFunction(() => !!document.querySelector('.last-value-hint'), { timeout: 10000 }).catch(() => {});
 const lastHintText = await page.evaluate(() => document.querySelector('.last-value-hint')?.textContent || '');
 check('点検入力に前回値が表示される', lastHintText.includes('前回 0.45'), `hint="${lastHintText}"`);
 
@@ -316,15 +329,22 @@ check('点検入力に前回値が表示される', lastHintText.includes('前�
 const stPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E棚卸部品', quantity: 10, safety_stock: 1 } });
 check('棚卸テスト用の部品登録', stPart.status === 201, `status=${stPart.status}`);
 await page.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(600);
+await page.waitForFunction(() => !!document.querySelector('button'), { timeout: 10000 }).catch(() => {});
 await page.click('button:has-text("棚卸")');
 await page.fill('input[type="search"]', 'E2E棚卸部品');
-await page.waitForTimeout(900); // 検索デバウンス300ms + 再取得
+// 検索デバウンス300ms + 再取得 → 棚卸入力欄が出るまで条件待ち
+await page.waitForFunction(() => !!document.querySelector('.stocktake-input'), { timeout: 10000 }).catch(() => {});
 await page.fill('.stocktake-input', '7');
 await page.click('button:has-text("一括確定")');
-await page.waitForTimeout(900);
-const stAfter = await api(`/api/parts/${stPart.json?.id}`);
-check('棚卸モードで在庫が実数に更新される', stAfter.json?.part?.quantity === 7, `qty=${stAfter.json?.part?.quantity}`);
+// adjust の反映を最大5秒リトライで確認（確定は confirm→逐次POST→alert の非同期処理）
+let stQty = null;
+for (let i = 0; i < 10; i++) {
+  await page.waitForTimeout(500);
+  const r = await api(`/api/parts/${stPart.json?.id}`);
+  stQty = r.json?.part?.quantity;
+  if (stQty === 7) break;
+}
+check('棚卸モードで在庫が実数に更新される', stQty === 7, `qty=${stQty}`);
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
