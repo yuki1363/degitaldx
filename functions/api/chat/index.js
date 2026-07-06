@@ -16,6 +16,16 @@ export async function ensureChatSchema(db) {
        last_read_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
        PRIMARY KEY (channel, user_email)
      )`,
+    // 📌ピン留め（ピン中は10日自動削除の対象外）
+    'ALTER TABLE chat_messages ADD COLUMN pinned_at TEXT',
+    'ALTER TABLE chat_messages ADD COLUMN pinned_by TEXT',
+    // 👍確認リアクション（既読とは別の「了解した」表明。1メッセージ×1ユーザーで1件）
+    `CREATE TABLE IF NOT EXISTS chat_reactions (
+       message_id  INTEGER NOT NULL,
+       user_email  TEXT    NOT NULL,
+       created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+       PRIMARY KEY (message_id, user_email)
+     )`,
   ]);
 }
 
@@ -30,8 +40,9 @@ let lastCleanupAt = 0;
 async function cleanupOldMessages(env) {
   const db = env.DB;
   const cutoff = new Date(Date.now() - CHAT_RETENTION_DAYS * 86400000).toISOString();
+  // 📌ピン留め中のメッセージは削除しない（重要な申し送りを残す。解除すると次回の対象になる）
   const { results: olds } = await db
-    .prepare('SELECT id, file_ids_json FROM chat_messages WHERE created_at < ?')
+    .prepare('SELECT id, file_ids_json FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL')
     .bind(cutoff).all();
   if (!olds || olds.length === 0) return;
 
@@ -53,11 +64,68 @@ async function cleanupOldMessages(env) {
     }
   }
 
-  await db.prepare('DELETE FROM chat_messages WHERE created_at < ?').bind(cutoff).run();
+  // リアクションも本体と一緒に物理削除（孤児レコードを残さない）
+  try {
+    await db.prepare(
+      'DELETE FROM chat_reactions WHERE message_id IN (SELECT id FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL)'
+    ).bind(cutoff).run();
+  } catch { /* chat_reactions が無い旧DBでも本体の削除は続行 */ }
+  await db.prepare('DELETE FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL').bind(cutoff).run();
   await writeAuditLog(db, {
     tableName: 'chat_messages', recordId: 'auto-cleanup', action: 'delete',
     changedBy: 'system:chat-cleanup', diff: { deleted_count: olds.length, cutoff },
   });
+}
+
+// 直近20件ぶんの既読数・リアクションと、ピン留め一覧をまとめて返す。
+//   一覧GET・ポーリングGETの両方に載せることで、既読数/リアクション/ピンが
+//   画面リロードなしで（5秒ポーリングで）ライブ更新される。
+async function buildChatMeta(db, channel, userEmail) {
+  const meta = {};
+  let pinned = [];
+  try {
+    const { results: latest } = await db.prepare(
+      `SELECT id, created_at, created_by FROM chat_messages
+        WHERE channel = ? AND deleted_at IS NULL
+        ORDER BY created_at DESC LIMIT 20`
+    ).bind(channel).all();
+
+    const { results: reads } = await db.prepare(
+      'SELECT user_email, last_read_at FROM chat_channel_reads WHERE channel = ?'
+    ).bind(channel).all();
+
+    let reactions = [];
+    const ids = (latest ?? []).map((m) => m.id);
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(',');
+      const { results } = await db.prepare(
+        `SELECT r.message_id, r.user_email, COALESCE(u.name, r.user_email) AS name
+           FROM chat_reactions r
+           LEFT JOIN users u ON u.email = r.user_email
+          WHERE r.message_id IN (${placeholders})`
+      ).bind(...ids).all();
+      reactions = results ?? [];
+    }
+
+    for (const m of latest ?? []) {
+      meta[m.id] = {
+        // 既読数（送信者本人は数えない）
+        read_count: (reads ?? []).filter((r) => r.last_read_at >= m.created_at && r.user_email !== m.created_by).length,
+        reactions:  reactions.filter((r) => r.message_id === m.id).map((r) => r.name),
+        my_react:   userEmail ? reactions.some((r) => r.message_id === m.id && r.user_email === userEmail) : false,
+      };
+    }
+
+    const { results: pinnedRows } = await db.prepare(
+      `SELECT cm.*, u.name AS author_name
+         FROM chat_messages cm
+         LEFT JOIN users u ON cm.created_by = u.email
+        WHERE cm.channel = ? AND cm.deleted_at IS NULL AND cm.pinned_at IS NOT NULL
+        ORDER BY cm.pinned_at DESC LIMIT 10`
+    ).bind(channel).all();
+    pinned = pinnedRows ?? [];
+  } catch { /* 未マイグレーション環境では meta なしで返す（表示は劣化するが動作は継続） */ }
+  return { meta, pinned };
 }
 
 export async function onRequestGet({ request, env, data, waitUntil }) {
@@ -124,23 +192,10 @@ export async function onRequestGet({ request, env, data, waitUntil }) {
   const { results } = await db.prepare(sql).bind(...binds).all();
   const messages = since ? (results ?? []) : (results ?? []).reverse();
 
-  // 既読ユーザー数: 各メッセージに対して「このメッセージ以降まで読んだ人数」を付与
-  // 最新20件だけに付与（古いメッセージは全員既読扱いで十分）。
-  // 送信者本人は数えない（自分の投稿を自分が見ても「既読1」にならないように）。
-  let readCounts = {};
-  try {
-    const { results: reads } = await db.prepare(
-      'SELECT user_email, last_read_at FROM chat_channel_reads WHERE channel = ?'
-    ).bind(channel).all();
-    for (const msg of messages.slice(-20)) {
-      readCounts[msg.id] = (reads ?? []).filter(
-        (r) => r.last_read_at >= msg.created_at && r.user_email !== msg.created_by
-      ).length;
-    }
-  } catch { /* 未マイグレーション時はスキップ */ }
-
-  const enriched = messages.map((m) => ({ ...m, read_count: readCounts[m.id] ?? undefined }));
-  return json({ messages: enriched });
+  // 既読数・リアクション・ピン一覧（直近20件ぶん）。ポーリングGETにも載せてライブ更新する
+  const { meta, pinned } = await buildChatMeta(db, channel, data?.user?.email);
+  const enriched = messages.map((m) => ({ ...m, read_count: meta[m.id]?.read_count }));
+  return json({ messages: enriched, meta, pinned });
 }
 
 export async function onRequestPost({ request, env, data }) {

@@ -48,6 +48,13 @@ export async function onRequestGet({ request, env, data, params }) {
   const file = await findFile(env, params.id);
   if (!file) return jsonError(404, 'ファイルが見つかりません。');
 
+  // ?meta=1 : メタ情報だけを JSON で返す（R2 を読まない）。
+  //   チャットの添付表示などが「画像かどうか・ファイル名」を知るために使う
+  //   （本体GETはバイナリを返すため、メタ目的で本体をダウンロードさせない）
+  if (new URL(request.url).searchParams.get('meta') === '1') {
+    return json({ id: file.id, file_name: file.file_name, content_type: file.content_type, size_bytes: file.size_bytes });
+  }
+
   const range = parseRange(request.headers.get('Range'), file.size_bytes);
   if (range === 'invalid') {
     return new Response(null, {

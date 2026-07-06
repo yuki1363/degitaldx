@@ -236,6 +236,53 @@ const tplValue = await page.evaluate(() => {
 });
 check('チャット: 申し送りテンプレートが入力欄に挿入される', !!tplValue && tplValue.includes('【'), `value=${tplValue}`);
 
+// 👍確認リアクション（トグル）と meta 反映
+const chatMsgId = chatPost.json?.id;
+const react1 = await api(`/api/chat/${chatMsgId}`, { method: 'POST', body: { action: 'react' } });
+check('リアクション付与（reacted=true）', react1.status === 200 && react1.json?.reacted === true, `status=${react1.status}`);
+const listR = await api('/api/chat?channel=general&limit=10');
+const metaR = listR.json?.meta?.[chatMsgId];
+check('リアクションが meta に反映（名前・my_react）', (metaR?.reactions || []).length === 1 && metaR?.my_react === true, JSON.stringify(metaR));
+const react2 = await api(`/api/chat/${chatMsgId}`, { method: 'POST', body: { action: 'react' } });
+check('リアクション取り消し（reacted=false）', react2.status === 200 && react2.json?.reacted === false, `status=${react2.status}`);
+
+// 📌ピン留め → ピン一覧・上部バー表示 → 解除
+const pin1 = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: true } });
+check('ピン留め（pinned=true）', pin1.status === 200 && pin1.json?.pinned === true, `status=${pin1.status}`);
+const listP = await api('/api/chat?channel=general&limit=10');
+check('ピン一覧に反映', (listP.json?.pinned || []).some((p) => p.id === chatMsgId));
+await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(800);
+const pinBarText = await page.evaluate(() => document.getElementById('chat-pinned')?.innerText || '');
+check('ピン留めバーに表示される', pinBarText.includes('E2Eチャットテスト'), `bar="${pinBarText.slice(0, 60)}"`);
+const unpin = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: false } });
+check('ピン解除（pinned=false）', unpin.status === 200 && unpin.json?.pinned === false, `status=${unpin.status}`);
+
+// 画像添付のサムネイル表示（ファイルメタAPI ?meta=1 のバグ修正回帰）
+const up = await page.evaluate(async () => {
+  const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
+  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#e11'; ctx.fillRect(0, 0, 8, 8);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  const res = await fetch('/api/files?filename=e2e-chat.png', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob });
+  return { status: res.status, json: await res.json().catch(() => null) };
+});
+check('画像アップロード（201）', up.status === 201, `status=${up.status}`);
+const upId = up.json?.file?.id;
+const fileMeta = await api(`/api/files/${upId}?meta=1`);
+check('ファイルメタAPI（?meta=1）', fileMeta.status === 200 && fileMeta.json?.content_type === 'image/png', JSON.stringify(fileMeta.json));
+await api('/api/chat', { method: 'POST', body: { body: 'E2E画像添付', channel: 'general', file_ids: [upId] } });
+await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(1200);
+const hasThumb = await page.evaluate(() => !!document.querySelector('.chat-msg img.chat-thumb'));
+check('画像添付がサムネイル表示される（バグ修正）', hasThumb);
+
+// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）
+await api('/api/chat', { method: 'POST', body: { body: 'E2Eポーリング新着', channel: 'general' } });
+await page.waitForTimeout(6500);
+const pollCount = await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2Eポーリング新着').length);
+check('ポーリングで新着が1回だけ表示される', pollCount === 1, `count=${pollCount}`);
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

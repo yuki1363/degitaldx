@@ -511,6 +511,19 @@ CREATE TABLE IF NOT EXISTS chat_channel_reads (
   PRIMARY KEY (channel, user_email)
 );
 
+-- 📌ピン留め列（migration）: ピン留めした投稿は10日自動削除の対象外（重要な申し送りを残す）
+ALTER TABLE chat_messages ADD COLUMN pinned_at TEXT;
+ALTER TABLE chat_messages ADD COLUMN pinned_by TEXT;
+
+-- chat_reactions — チャットの👍確認リアクション（既読=見た とは別の「了解した」表明）
+--   1メッセージ×1ユーザーで1件（トグル）。メッセージの10日自動削除時に一緒に物理削除する
+CREATE TABLE IF NOT EXISTS chat_reactions (
+  message_id  INTEGER NOT NULL,
+  user_email  TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (message_id, user_email)
+);
+
 -- ---------------------------------------------------------------------
 -- trouble_custom_field — トラブル記録のカスタム項目定義（04 フォームビルダー）
 --   管理画面（09）から項目の追加・編集・削除が可能。
