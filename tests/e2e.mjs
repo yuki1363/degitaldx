@@ -192,6 +192,23 @@ const weekHits = await page.evaluate(() =>
   [...document.querySelectorAll('.cal-week-col')].filter((c) => c.innerText.includes('E2E週跨ぎ予定')).length);
 check('週表示で5日間すべてに表示', weekHits === 5, `${weekHits}日`);
 
+// 期限超過の自動判定: 予定日を過ぎた pending は overdue として返る（DBは書き換えない）
+const odPlan = await page.evaluate(async () => {
+  const d = new Date(Date.now() - 86400000).toLocaleDateString('sv-SE'); // 昨日
+  const r = await fetch('/api/plans', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'E2E期限超過判定', plan_type: 'other', planned_date: d }),
+  });
+  const j = await r.json().catch(() => null);
+  return { status: r.status, id: j?.id };
+});
+check('期限超過テスト用の予定登録', odPlan.status === 201, `status=${odPlan.status}`);
+const odList = await api('/api/plans');
+const odRow = (odList.json?.plans || []).find((p) => p.title === 'E2E期限超過判定');
+check('一覧GET: 期限超過が自動判定される', odRow?.status === 'overdue', `status=${odRow?.status}`);
+const odDetail = await api(`/api/plans/${odPlan.id}`);
+check('詳細GET: 期限超過が自動判定される', odDetail.json?.plan?.status === 'overdue', `status=${odDetail.json?.plan?.status}`);
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });

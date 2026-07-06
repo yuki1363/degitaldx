@@ -91,11 +91,17 @@ let flushing = false;
 async function sendOne(item) {
   // 写真を先にアップロードして file_ids を集める
   // （キュー投入前にアップロード済みの分が payload.file_ids に入っていることがあるためマージする）
+  // 1枚アップロードするごとに進捗を IndexedDB へ保存する。途中で本体POSTが失敗しても、
+  // 再試行時はアップロード済みの写真を再送しない（二重アップロード・R2孤児ファイルを防ぐ）
   const fileIds = [...(item.payload?.file_ids || [])];
-  for (const f of item.files || []) {
+  while ((item.files || []).length > 0) {
+    const f = item.files[0];
     const file = new File([f.blob], f.name, { type: f.type });
     const meta = await uploadFile(file, {});
     fileIds.push(meta.id);
+    item.payload = { ...item.payload, file_ids: fileIds };
+    item.files = item.files.slice(1);
+    await updateItem(item);
   }
   const body = { ...item.payload, file_ids: fileIds };
   if (item.kind === 'trouble') {
@@ -125,6 +131,9 @@ export async function flushOutbox() {
   try {
     const items = await getAll();
     for (const item of items) {
+      // failed（検証エラー等）は自動再送しない。「今すぐ送信」ボタンが pending に
+      // 戻したときだけ再試行する（毎回の復帰・起動で失敗し続けるのを防ぐ）
+      if (item.status === 'failed') continue;
       try {
         await sendOne(item);
         await removeItem(item.id);

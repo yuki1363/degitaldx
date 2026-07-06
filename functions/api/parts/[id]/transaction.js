@@ -55,35 +55,42 @@ export async function onRequestPost({ env, data, params, request }) {
     return jsonError(400, 'related_id は整数で指定してください。');
   }
 
-  const oldQty = part.quantity;
+  const oldQty = part.quantity; // 通知の「しきい値またぎ」判定に使う（多少の前後は許容）
   let newQty;
   let delta;
-
-  if (type === 'in') {
-    delta = bodyQty;
-    newQty = oldQty + bodyQty;
-  } else if (type === 'out') {
-    if (oldQty - bodyQty < 0) {
-      return jsonError(400, '在庫不足です。');
-    }
-    delta = -bodyQty;
-    newQty = oldQty - bodyQty;
-  } else {
-    // adjust: body.quantity は新しい絶対値
-    delta = bodyQty - oldQty;
-    newQty = bodyQty;
-  }
-
   const now = nowIso();
 
-  // 在庫数を更新
-  await DB.prepare(
-    `UPDATE parts_inventory
-        SET quantity = ?1, updated_by = ?2, updated_at = ?3
-      WHERE id = ?4`
-  )
-    .bind(newQty, userEmail, now, id)
-    .run();
+  if (type === 'adjust') {
+    // adjust: body.quantity は新しい絶対値（棚卸）
+    delta = bodyQty - oldQty;
+    newQty = bodyQty;
+    await DB.prepare(
+      `UPDATE parts_inventory
+          SET quantity = ?1, updated_by = ?2, updated_at = ?3
+        WHERE id = ?4`
+    )
+      .bind(newQty, userEmail, now, id)
+      .run();
+  } else {
+    // 入庫・出庫は相対更新（quantity = quantity + Δ）で行う。
+    // 「読み取り→計算→絶対値で書き込み」だと、2人が同時に±したとき片方の更新が消える。
+    // 出庫の在庫不足ガードも同じUPDATEの条件で行い、同時出庫でもマイナス在庫にならない。
+    delta = type === 'in' ? bodyQty : -bodyQty;
+    const res = await DB.prepare(
+      `UPDATE parts_inventory
+          SET quantity = quantity + ?1, updated_by = ?2, updated_at = ?3
+        WHERE id = ?4 AND quantity + ?1 >= 0`
+    )
+      .bind(delta, userEmail, now, id)
+      .run();
+    if ((res.meta?.changes ?? 0) === 0) {
+      return jsonError(400, '在庫不足です。');
+    }
+    const after = await DB.prepare(
+      'SELECT quantity FROM parts_inventory WHERE id = ?1'
+    ).bind(id).first();
+    newQty = after?.quantity ?? oldQty + delta;
+  }
 
   // 入出庫履歴を登録（adjust のとき delta は負になることもある）
   await DB.prepare(

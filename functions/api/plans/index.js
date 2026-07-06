@@ -7,6 +7,18 @@ const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
 const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 
+// 期限超過の自動判定（表示専用）: pending のまま予定日（期間予定は終了日）を過ぎた予定を
+// overdue として返す。DB の status は書き換えない（完了にすれば done になる）。
+// 手動で overdue にしなくても、カレンダー・年間計画表・CSV出力で「期限超過」になる。
+// 日付は JST 基準（UTC のままだと朝9時まで前日扱いになり判定が1日近く遅れる）。
+export function deriveOverdue(plan) {
+  if (!plan || plan.status !== 'pending' || plan.unscheduled) return plan;
+  const limit = (plan.planned_end_date || plan.planned_date || '').slice(0, 10);
+  if (!limit) return plan;
+  const todayJst = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+  return limit < todayJst ? { ...plan, status: 'overdue' } : plan;
+}
+
 // 繰り返し予定を指定範囲内に展開して返す
 function expandRecurring(plan, rangeStart, rangeEnd) {
   let rule;
@@ -131,7 +143,7 @@ export async function onRequestGet({ request, env }) {
     `).all();
     const batchIds = await getBatchPlanIds(db);
     const plans = (rows ?? []).filter((p) => p.annual_only || batchIds.has(String(p.id)));
-    return json({ plans });
+    return json({ plans: plans.map(deriveOverdue) });
   }
 
   let rangeStart, rangeEnd;
@@ -199,7 +211,7 @@ export async function onRequestGet({ request, env }) {
     });
   }
 
-  return json({ plans: results });
+  return json({ plans: results.map(deriveOverdue) });
 }
 
 export async function onRequestPost({ request, env, data }) {

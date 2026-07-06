@@ -8,8 +8,10 @@ export async function onRequestGet({ request, env }) {
   const toDate   = sp.get('to')   ? new Date(sp.get('to'))   : new Date();
   const fromDate = sp.get('from') ? new Date(sp.get('from')) : (() => {
     const d = new Date(toDate);
-    d.setMonth(d.getMonth() - 5);
+    // 先に1日へ丸めてから月を引く。逆順だと月末日（29〜31日）に短い月へ繰り越されて
+    // 1ヶ月ずれる（例: 7/31 → setMonth(-5)で2/31→3/3 → setDate(1)で3/1 = 5ヶ月分になる）
     d.setDate(1);
+    d.setMonth(d.getMonth() - 5);
     return d;
   })();
 

@@ -2,7 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
-import { normalizeFormValues } from './index.js';
+import { normalizeFormValues, deriveOverdue } from './index.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
@@ -21,7 +21,8 @@ export async function onRequestGet({ params, env }) {
   const db = env.DB;
   const plan = await getPlan(db, params.id);
   if (!plan) return jsonError(404, '保全計画が見つかりません');
-  return json({ plan });
+  // 一覧GETと同じく、期限を過ぎた pending は「期限超過」として返す（表示の一貫性）
+  return json({ plan: deriveOverdue(plan) });
 }
 
 export async function onRequestPut({ request, params, env, data }) {
