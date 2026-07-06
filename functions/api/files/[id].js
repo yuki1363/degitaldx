@@ -2,8 +2,10 @@
 //
 //   GET    : 認証済みユーザー全員（viewer 以上）。R2 オブジェクトを返す。
 //            動画再生（iOS Safari 等）のため Range リクエストに対応。
+//            ?meta=1 でメタ情報のみ JSON で返す（R2 を読まない）
 //   DELETE : editor 以上。論理削除（R2 オブジェクトは残し、一覧から消す）。
-//            ※ 容量を空ける物理削除は管理画面（Phase 5）で実装予定
+//            ?physical=1 は admin のみ。R2 の実体を削除して purged_at を記録
+//            （容量を解放する完全削除。管理画面「ファイル容量」タブから実行・復元不可）
 
 import { json, jsonError } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';

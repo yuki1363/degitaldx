@@ -4,7 +4,11 @@
 -- 適用方法:
 --   ローカル: npx wrangler d1 execute mainte-db --local  --file=schema.sql
 --   本番:     npx wrangler d1 execute mainte-db --remote --file=schema.sql
---   ※ IF NOT EXISTS / 存在チェック付きのため、再実行しても安全（冪等）
+--   ※ 初回構築用。適用は原則1回。CREATE TABLE / CREATE INDEX は IF NOT EXISTS だが、
+--     後半のマイグレーション節の ALTER TABLE ADD COLUMN は SQLite の制約で
+--     IF NOT EXISTS が書けないため、適用済みDBへ再実行すると途中でエラーになる。
+--     既存DBへの後付け列は、各APIの入口で ensureColumns（functions/api/_lib/db-compat.js）が
+--     自動適用（自己修復）するため、再実行は不要。
 --
 -- 共通設計（CLAUDE.md 参照）:
 --   - 全業務テーブルに共通監査列を持たせる:

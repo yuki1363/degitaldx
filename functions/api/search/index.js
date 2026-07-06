@@ -49,9 +49,16 @@ function buildKeywordClauses(keywords, cols) {
 
 // 拡張列（後付けのALTER列を含む）で検索し、列が無い旧DBでは基本列のみで再試行する。
 //   run(cols) は rows 配列を返す関数。検索全体を止めないための保険。
+//   フォールバックは「列が存在しない」エラーに限定する（構文エラー・D1障害などの
+//   本物の障害まで握りつぶすと、原因不明のまま検索結果が静かに欠けるため）。
 async function searchWithFallback(run, extendedCols, baseCols) {
   try { return await run(extendedCols); }
-  catch { return await run(baseCols); }
+  catch (err) {
+    const msg = String((err && err.message) || err);
+    if (!/no such column/i.test(msg)) throw err;
+    console.warn('search fallback（未マイグレーション列を除外して再試行）:', msg);
+    return await run(baseCols);
+  }
 }
 
 export async function onRequestGet({ request, env }) {
@@ -173,7 +180,8 @@ export async function onRequestGet({ request, env }) {
       if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
       if (from)       { sql += ` AND dr.report_date >= ?`; binds.push(from); }
       if (to)         { sql += ` AND dr.report_date <= ?`; binds.push(to); }
-      if (categoryId) { sql += ` AND dr.category_id = ?`;  binds.push(categoryId); }
+      // category_id はトラブルのジャンルID（検索画面のセレクタはトラブルジャンル）。
+      // 日報カテゴリは別マスタで同じIDでも意味が違うため、日報には適用しない
       sql += ` ORDER BY dr.report_date DESC LIMIT ${limit}`;
       return (await db.prepare(sql).bind(...binds).all()).results;
     };

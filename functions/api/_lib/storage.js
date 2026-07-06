@@ -6,7 +6,8 @@
 //     アップロードは HTTP 507 で拒否する
 //   - 警告ライン（既定 8GB）を超えたら応答に warning を付け、画面で注意喚起する
 //   - 論理削除されたファイルも R2 にオブジェクトが残るため使用量に含める
-//     （R2 オブジェクトごと消す物理削除は管理画面（Phase 5）で実装予定）
+//     （R2 オブジェクトごと消す物理削除は実装済み: DELETE /api/files/:id?physical=1（admin）。
+//       物理削除済み（purged_at あり）は使用量集計から除外される）
 //   - 環境変数 R2_HARD_LIMIT_BYTES / R2_WARN_BYTES で上限を変更できる
 //     （ローカルでの拒否動作テストにも使う）
 
@@ -43,7 +44,9 @@ export const RELATED_TABLES = [
 
 /**
  * アップロード済みファイルをレコードに紐づける（点検記録・設備資料などの保存時に使う）。
- * 未紐づけ（related_id IS NULL）か、同じレコードに紐づいているファイルのみ更新できる。
+ * 未紐づけ（related_id IS NULL）は「アップロードした本人のファイル」のみ取り込める
+ * （他人が未紐づけのファイルIDを推測して自分のレコードへ横取りできないように）。
+ * 既に同じレコードに紐づいているファイルは、編集者が誰でも再指定できる（編集フロー用）。
  * @returns 紐づけた件数
  */
 export async function attachFiles(env, { fileIds, relatedTable, relatedId, userEmail, now }) {
@@ -58,7 +61,10 @@ export async function attachFiles(env, { fileIds, relatedTable, relatedId, userE
         SET related_table = ?1, related_id = ?2, updated_by = ?3, updated_at = ?4
       WHERE id IN (${placeholders})
         AND deleted_at IS NULL
-        AND (related_id IS NULL OR (related_table = ?1 AND related_id = ?2))`
+        AND (
+          (related_id IS NULL AND (created_by = ?3 OR created_by IS NULL))
+          OR (related_table = ?1 AND related_id = ?2)
+        )`
   )
     .bind(relatedTable, relatedId, userEmail, now, ...ids)
     .run();

@@ -34,7 +34,17 @@ function check(name, ok, detail = '') {
 }
 const section = (t) => console.log(`\n=== ${t} ===`);
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] });
+let browser;
+try {
+  browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] });
+} catch (err) {
+  // ブラウザ未導入の環境で「何が必要か」をすぐ分かるようにする
+  console.error('❌ Chromium を起動できませんでした。ブラウザが未導入の可能性があります。');
+  console.error('   対処: cd tests && npx playwright install chromium');
+  console.error('   （同梱ブラウザを使う場合は E2E_CHROMIUM=/path/to/chrome を指定）');
+  console.error(`   詳細: ${err.message}`);
+  process.exit(1);
+}
 const context = await browser.newContext();
 const page = await context.newPage();
 const pageErrors = [];

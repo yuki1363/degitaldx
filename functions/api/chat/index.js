@@ -73,7 +73,9 @@ async function cleanupOldMessages(env) {
   await db.prepare('DELETE FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL').bind(cutoff).run();
   await writeAuditLog(db, {
     tableName: 'chat_messages', recordId: 'auto-cleanup', action: 'delete',
-    changedBy: 'system:chat-cleanup', diff: { deleted_count: olds.length, cutoff },
+    changedBy: 'system:chat-cleanup',
+    // 証跡用に削除対象のID一覧も残す（肥大化しないよう最大100件まで）
+    diff: { deleted_count: olds.length, cutoff, ids: olds.slice(0, 100).map((m) => m.id) },
   });
 }
 

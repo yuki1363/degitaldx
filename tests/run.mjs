@@ -98,8 +98,31 @@ function printServerLogTail(lines = 30) {
   } catch { /* ログが無ければ何もしない */ }
 }
 
+// Service Worker のプリキャッシュURLが実ファイルと対応しているか検査する。
+// 手動リストのため、ファイル追加・改名時の更新漏れ（=オフライン起動の一部破損）を
+// テスト実行のたび（=CIでも）早期に検出する。
+function checkPrecacheUrls() {
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const m = sw.match(/PRECACHE_URLS\s*=\s*\[([\s\S]*?)\]/);
+  if (!m) throw new Error('sw.js から PRECACHE_URLS を読み取れませんでした');
+  const urls = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  const missing = urls.filter((u) => {
+    const rel = u === '/' ? 'index.html'
+      : (u.startsWith('/pages/') && !u.includes('.')) ? `${u.slice(1)}.html`
+      : u.slice(1);
+    return !fs.existsSync(path.join(ROOT, rel));
+  });
+  if (missing.length > 0) {
+    throw new Error(`sw.js の PRECACHE_URLS に存在しないファイルがあります: ${missing.join(', ')}`);
+  }
+  log(`SWプリキャッシュ検査OK（${urls.length}件すべて実在）`);
+}
+
 let exitCode = 1;
 try {
+  // 0. SWプリキャッシュの静的検査（サーバー不要・数ms）
+  checkPrecacheUrls();
+
   // 1. wrangler.toml の [ai] を一時除去（バックアップして復元保証）
   const toml = fs.readFileSync(TOML, 'utf8');
   fs.copyFileSync(TOML, TOML_BACKUP);
