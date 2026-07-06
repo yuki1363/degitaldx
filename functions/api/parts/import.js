@@ -62,9 +62,11 @@ export async function onRequestPost({ env, data, request }) {
 
 // --- 全置き換えモード ---
 async function doReplace(DB, userEmail, now, validRows, skipped, errors) {
-  const before = await DB.prepare(
-    `SELECT COUNT(*) AS n FROM parts_inventory WHERE deleted_at IS NULL`
-  ).first();
+  // 置き換え前のID一覧を控える（監査ログに残す。件数だけだと後から追跡できないため）
+  const { results: beforeRows } = await DB.prepare(
+    `SELECT id FROM parts_inventory WHERE deleted_at IS NULL`
+  ).all();
+  const beforeIds = (beforeRows ?? []).map((r) => r.id);
 
   const statements = [];
   statements.push(
@@ -107,13 +109,14 @@ async function doReplace(DB, userEmail, now, validRows, skipped, errors) {
   }
 
   const inserted = validRows.length;
-  const deleted = before?.n || 0;
+  const deleted = beforeIds.length;
   await writeAuditLog(DB, {
     tableName: 'parts_inventory',
     recordId: 0,
     action: 'update',
     changedBy: userEmail,
-    diff: { mode: 'replace_all', deleted, inserted, skipped, total: validRows.length + skipped },
+    // 証跡用に論理削除した対象ID一覧も残す（肥大化しないよう最大100件まで）
+    diff: { mode: 'replace_all', deleted, deleted_ids: beforeIds.slice(0, 100), inserted, skipped, total: validRows.length + skipped },
   });
 
   return json({ inserted, updated: 0, deleted, skipped, errors });
