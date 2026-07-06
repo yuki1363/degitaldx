@@ -163,7 +163,26 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
     const existingValues = new Map(
       existing ? existing.items.map((i) => [i.master_id, i.value]) : []
     );
-    itemInputs = masters.map((m) => buildItemInput(m, existingValues.get(m.id) ?? draftItems?.[m.id]));
+
+    // 前回値: この設備の直近の点検記録から数値項目の値を引き、入力欄に「前回・差分」を表示する
+    // （編集時は自分自身を除いた直近。取得に失敗しても入力は通常どおり可能）
+    const lastValues = new Map();
+    try {
+      const { inspections } = await api.get(`/api/inspections?equipment_id=${eqId}`);
+      const prev = (inspections || []).find((r) => !existing || r.id !== existing.id);
+      if (prev) {
+        const d = await api.get(`/api/inspections/${prev.id}`);
+        for (const it of d.inspection?.items || []) {
+          if (it.input_type === 'number' && it.value !== null && it.value !== undefined) {
+            lastValues.set(it.master_id, { value: it.value, date: d.inspection.inspected_at });
+          }
+        }
+      }
+    } catch { /* 前回値なしで続行 */ }
+
+    itemInputs = masters.map((m) =>
+      buildItemInput(m, existingValues.get(m.id) ?? draftItems?.[m.id], lastValues.get(m.id))
+    );
     render(checklistBox, itemInputs.map((i) => i.box));
   };
   equipmentSelect.addEventListener('change', () => loadChecklist().catch(showError));

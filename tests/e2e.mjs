@@ -300,6 +300,32 @@ const pollCount = await page.evaluate(() =>
   [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2Eポーリング新着').length);
 check('ポーリングで新着が1回だけ表示される', pollCount === 1, `count=${pollCount}`);
 
+// ---------- 9.5 機能強化: 点検の前回値表示・部品の棚卸モード ----------
+section('9.5 機能強化（前回値表示・棚卸モード）');
+// 前回値: 数値項目の入力欄に、直近の点検の値と差分が表示される
+const eqLast = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-LAST', name: 'E2E前回値設備' } });
+const mLast = await api('/api/inspections/masters', { method: 'POST', body: { equipment_id: eqLast.json?.id, name: 'E2E圧力', input_type: 'number', unit: 'MPa' } });
+const insp1 = await api('/api/inspections', { method: 'POST', body: { equipment_id: eqLast.json?.id, inspected_at: new Date().toISOString(), items: [{ master_id: mLast.json?.id, value: 0.45 }] } });
+check('前回値テスト用の点検登録', insp1.status === 201, `status=${insp1.status}`);
+await page.goto(`${BASE}/pages/inspection?new=1&equipment_id=${eqLast.json?.id}`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(1200);
+const lastHintText = await page.evaluate(() => document.querySelector('.last-value-hint')?.textContent || '');
+check('点検入力に前回値が表示される', lastHintText.includes('前回 0.45'), `hint="${lastHintText}"`);
+
+// 棚卸モード: 実数を入力→一括確定で在庫が調整される
+const stPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E棚卸部品', quantity: 10, safety_stock: 1 } });
+check('棚卸テスト用の部品登録', stPart.status === 201, `status=${stPart.status}`);
+await page.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(600);
+await page.click('button:has-text("棚卸")');
+await page.fill('input[type="search"]', 'E2E棚卸部品');
+await page.waitForTimeout(900); // 検索デバウンス300ms + 再取得
+await page.fill('.stocktake-input', '7');
+await page.click('button:has-text("一括確定")');
+await page.waitForTimeout(900);
+const stAfter = await api(`/api/parts/${stPart.json?.id}`);
+check('棚卸モードで在庫が実数に更新される', stAfter.json?.part?.quantity === 7, `qty=${stAfter.json?.part?.quantity}`);
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

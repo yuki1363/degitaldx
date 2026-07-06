@@ -137,6 +137,11 @@ async function renderList() {
   let allParts = [];
   let timer = null;
 
+  // 棚卸モード: 一覧の行を「帳簿数 → 実数入力」に切り替え、差異だけを一括で
+  // 棚卸調整（type=adjust）として確定する。入力値はフィルタ変更をまたいで保持する
+  let stocktakeMode = false;
+  const stocktakeInputs = new Map(); // part_id → input要素（値の保持と差異集計に使う）
+
   const listBox = el('div', { class: 'row-list' }, []);
 
   // 設備名 → 機器名の2段階で表示を絞り込むセレクタ
@@ -215,6 +220,92 @@ async function renderList() {
     ]);
   };
 
+  // ---- 棚卸モードの行（帳簿数 → 実数入力。差異行は赤背景＋差分バッジ） ----
+  const makeStocktakeRow = (p) => {
+    let input = stocktakeInputs.get(p.id);
+    if (!input) {
+      input = el('input', {
+        type: 'number', inputmode: 'numeric', min: '0', step: '1',
+        value: String(p.quantity),
+        class: 'stocktake-input',
+      });
+      stocktakeInputs.set(p.id, input);
+    }
+    const diffBadge = el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px', hidden: true }, '');
+    const row = el('div', { class: 'list-item stocktake-row' }, [
+      el('div', { class: 'list-item-main' }, [
+        el('div', { class: 'list-item-title' }, p.name),
+        p.model_no ? el('div', { class: 'list-item-sub' }, `型番: ${p.model_no}`) : null,
+      ]),
+      el('span', { class: 'book-qty' }, `帳簿 ${p.quantity} →`),
+      input,
+      diffBadge,
+    ]);
+    const refresh = () => {
+      const v = Number(input.value);
+      const diff = input.value !== '' && Number.isInteger(v) && v >= 0 && v !== p.quantity;
+      row.classList.toggle('is-diff', diff);
+      diffBadge.hidden = !diff;
+      if (diff) diffBadge.textContent = `${v - p.quantity > 0 ? '+' : ''}${v - p.quantity}`;
+      updateStocktakeBar();
+    };
+    input.oninput = refresh;
+    refresh();
+    return row;
+  };
+
+  // 差異の集計（入力済み・0以上の整数・帳簿数と異なるもの）
+  const collectStocktakeDiffs = () => {
+    const diffs = [];
+    for (const p of allParts) {
+      const inp = stocktakeInputs.get(p.id);
+      if (!inp || inp.value === '') continue;
+      const v = Number(inp.value);
+      if (Number.isInteger(v) && v >= 0 && v !== p.quantity) diffs.push({ part: p, actual: v });
+    }
+    return diffs;
+  };
+
+  const stocktakeBar = el('div', { class: 'stocktake-bar', style: 'display:none' }, []);
+
+  const updateStocktakeBar = () => {
+    if (!stocktakeMode) return;
+    const diffs = collectStocktakeDiffs();
+    const confirmBtn = el('button', {
+      class: 'btn btn-primary',
+      disabled: diffs.length === 0,
+      onclick: async (e) => {
+        if (!confirm(`差異のある ${diffs.length}件を棚卸調整として確定します。よろしいですか？\n（入出庫履歴に「棚卸」として記録されます）`)) return;
+        e.currentTarget.disabled = true;
+        let ok = 0, ng = 0;
+        for (const d of diffs) {
+          try {
+            await api.post(`/api/parts/${d.part.id}/transaction`, { type: 'adjust', quantity: d.actual, note: '棚卸' });
+            ok++;
+          } catch { ng++; }
+        }
+        alert(`棚卸を確定しました: ${ok}件更新${ng ? ` ／ ${ng}件失敗（通信環境を確認して再実行してください）` : ''}`);
+        setStocktake(false);
+        await load();
+      },
+    }, `差異 ${diffs.length}件を一括確定`);
+    render(stocktakeBar, [
+      el('span', { class: 'hint' }, '実数を入力（差異のある行だけ更新されます）'),
+      confirmBtn,
+    ]);
+  };
+
+  const setStocktake = (on) => {
+    stocktakeMode = on;
+    stocktakeInputs.clear();
+    stocktakeToggle.classList.toggle('btn-primary', on);
+    stocktakeToggle.textContent = on ? '📋 棚卸を終了' : '📋 棚卸';
+    stocktakeBar.style.display = on ? '' : 'none';
+    listBox.style.paddingBottom = on ? '70px' : ''; // 固定バーで最終行が隠れないように
+    if (on) updateStocktakeBar();
+    renderParts();
+  };
+
   // 部品配列を 設備名→機器名 でグループ化して listBox に描画する
   //   （APIは line_name, equipment_name, name 順でソート済み）
   const renderGroups = (parts) => {
@@ -222,6 +313,7 @@ async function renderList() {
       render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
       return;
     }
+    const rowBuilder = stocktakeMode ? makeStocktakeRow : makePartRow;
     const lineMap = new Map();
     for (const p of parts) {
       const line = p.line_name || '';
@@ -236,7 +328,7 @@ async function renderList() {
       nodes.push(el('div', { class: 'group-header-line' }, line || '（設備未設定）'));
       for (const [equip, equipParts] of equipMap) {
         nodes.push(el('div', { class: 'group-header-equip' }, equip || '（機器未設定）'));
-        nodes.push(el('div', { class: 'row-list' }, equipParts.map(makePartRow)));
+        nodes.push(el('div', { class: 'row-list' }, equipParts.map(rowBuilder)));
       }
     }
     render(listBox, nodes);
@@ -364,6 +456,9 @@ async function renderList() {
     }
   };
 
+  // 棚卸モードの切替（editor以上）。実数を入力して差異だけ一括確定する
+  const stocktakeToggle = el('button', { class: 'btn', onclick: () => setStocktake(!stocktakeMode) }, '📋 棚卸');
+
   render(app, [
     el('div', { class: 'field-pair', style: 'margin-bottom:10px' }, [
       el('div', { class: 'field' }, [
@@ -384,9 +479,11 @@ async function renderList() {
           el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 部品を追加'),
           el('button', { class: 'btn', onclick: () => go('?import=1') }, '📥 CSVインポート'),
           el('button', { class: 'btn', onclick: (e) => importFromEquipment(e.currentTarget) }, '📥 台帳から一括登録'),
+          stocktakeToggle,
         ])
       : null,
     listBox,
+    stocktakeBar,
   ]);
   await load();
 }

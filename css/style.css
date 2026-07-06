@@ -1586,6 +1586,40 @@ input.is-abnormal {
   color: var(--color-text-muted);
 }
 
+/* ---- 部品在庫: 棚卸モード（05） ---- */
+.stocktake-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.stocktake-row { gap: 8px; }
+
+.stocktake-row.is-diff { background: var(--color-danger-bg); }
+
+.stocktake-row .book-qty {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.stocktake-input {
+  width: 76px;
+  min-height: var(--tap-size);
+  text-align: right;
+  font-size: 16px;
+}
+
 /* 既読数・👍リアクションのフッター行 */
 .chat-foot {
   display: flex;
