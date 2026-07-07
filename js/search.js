@@ -74,13 +74,14 @@ async function doSearch(params, resultsBox) {
     if (params.equipment_id) sp.set('equipment_id', params.equipment_id);
     if (params.category_id)  sp.set('category_id', params.category_id);
 
-    const { results, count, keywords } = await api.get(`/api/search?${sp}`);
+    const { results, count, keywords, version } = await api.get(`/api/search?${sp}`);
     currentResults = results || [];
+    const verText = version ? `　［${version}］` : '';
 
     if (count === 0) {
-      render(resultsBox, el('p', { class: 'empty' }, params.q
+      render(resultsBox, el('p', { class: 'empty' }, (params.q
         ? `「${params.q}」に一致するデータは見つかりませんでした。`
-        : '条件に一致するデータがありません。'
+        : '条件に一致するデータがありません。') + verText
       ));
       return;
     }
@@ -105,7 +106,7 @@ async function doSearch(params, resultsBox) {
     render(resultsBox, [
       el('div', { class: 'search-result-header', style: 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:4px 0 12px' }, [
         el('p', { style: 'font-size:13px;color:#64748b;margin:0' },
-          `${count}件ヒット${keywords.length ? '（キーワード: ' + keywords.join('、') + '）' : ''}`
+          `${count}件ヒット${keywords.length ? '（キーワード: ' + keywords.join('、') + '）' : ''}${verText}`
         ),
         el('div', { class: 'action-row', style: 'margin:0' }, [
           el('button', { class: 'btn btn-sm', type: 'button', onclick: () => exportSearchCsv('UTF-8') }, '📥 CSV（UTF-8/BOM）'),

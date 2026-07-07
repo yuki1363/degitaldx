@@ -5,6 +5,7 @@
 // 実装: D1 の LIKE 検索（FTS5 への移行は将来の課題）
 
 import { json } from '../_lib/http.js';
+import { APP_VERSION } from '../me.js';
 
 // ---- あいまい検索: キーワードの表記ゆれを吸収するバリアントを生成する ----
 //   ・全角英数 → 半角（例「ＡＢＣ１２３」→「ABC123」。英字の大小は LIKE が元々区別しない）
@@ -375,5 +376,7 @@ export async function onRequestGet({ request, env }) {
     return da < db ? 1 : -1; // 新しい日付を先頭に
   });
 
-  return json({ results, count: results.length, keywords });
+  // version は「いまこの検索APIを動かしているコードの版」。検索画面に表示して
+  // デプロイ反映済みかを一目で判別できるようにする（キャッシュに惑わされないため）。
+  return json({ results, count: results.length, keywords, version: APP_VERSION });
 }
