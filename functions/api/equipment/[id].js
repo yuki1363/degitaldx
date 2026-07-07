@@ -30,18 +30,17 @@ async function findEquipment(env, idParam) {
   const colsBase =
     `id, code, name, location, manufacturer, model, installed_on, status, note,
      created_by, created_at, updated_by, updated_at`;
-  // フォールバックは「列が存在しない」エラーに限定する（D1障害・構文エラーまで
-  // 握りつぶすと、原因不明のまま詳細の一部項目が静かに欠けるため）
-  const isMissingColumn = (err) => /no such column/i.test(String((err && err.message) || err));
+  // 列の追加（マイグレーション）が部分的にしか適用されていない環境でも詳細が
+  // 開けるよう、列の多い順に段階的にフォールバックする。最終段（colsBase）は常に
+  // 存在する列なので、それでも失敗するなら本物の障害としてそのまま投げる。
+  // （D1 のエラー詳細は err.cause 側に入ることがあり、種別で絞ると本番で
+  //   フォールバックが効かず詳細が開けなくなるため、種別では絞らない。）
   try {
     return await run(colsFull);
-  } catch (err) {
-    if (!isMissingColumn(err)) throw err;
-    console.warn('equipment detail fallback（未マイグレーション列を除外して再試行）:', String(err.message || err));
+  } catch {
     try {
       return await run(colsNoMfg);
-    } catch (err2) {
-      if (!isMissingColumn(err2)) throw err2;
+    } catch {
       return run(colsBase);
     }
   }

@@ -49,14 +49,17 @@ function buildKeywordClauses(keywords, cols) {
 
 // 拡張列（後付けのALTER列を含む）で検索し、列が無い旧DBでは基本列のみで再試行する。
 //   run(cols) は rows 配列を返す関数。検索全体を止めないための保険。
-//   フォールバックは「列が存在しない」エラーに限定する（構文エラー・D1障害などの
-//   本物の障害まで握りつぶすと、原因不明のまま検索結果が静かに欠けるため）。
+//   拡張列で失敗したら基本列で再試行する。基本列は常に存在する列なので、それでも失敗する
+//   なら本物の障害としてそのまま投げる（＝onRequestGet が500にする）。base が成功すれば
+//   結果が返るので、未マイグレーション環境でも検索が丸ごと落ちない。
+//   ※ D1 のエラーは詳細が err.cause 側に入ることがあり、err.message だけを「no such column」で
+//     判定すると本番でフォールバックが効かず検索全体が失敗した（設備名でヒットしない不具合）。
+//     基本列は安全に実行できるため、エラー種別で絞らず必ず再試行する方が堅牢。
 async function searchWithFallback(run, extendedCols, baseCols) {
-  try { return await run(extendedCols); }
-  catch (err) {
-    const msg = String((err && err.message) || err);
-    if (!/no such column/i.test(msg)) throw err;
-    console.warn('search fallback（未マイグレーション列を除外して再試行）:', msg);
+  try {
+    return await run(extendedCols);
+  } catch (err) {
+    console.warn('search: 拡張列で失敗したため基本列で再試行します:', String((err && err.message) || err));
     return await run(baseCols);
   }
 }

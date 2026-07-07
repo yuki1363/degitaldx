@@ -107,9 +107,13 @@ check('横断検索: 記録者名でヒット', (s2.json?.results || []).some((r
 // あいまい検索: ひらがな・小文字で入力してもカタカナ・大文字のデータがヒットする
 const s3 = await api(`/api/search?q=${encodeURIComponent('e2e現象てすと')}`);
 check('横断検索: あいまい（かな/大小文字ゆれ）でヒット', (s3.json?.results || []).some((r) => r.type === 'trouble'));
-// 設備名でヒット: 本文に「フィルム機」が無くても、紐づく設備名でトラブルが引ける
+// 設備名でヒット: 本文に「フィルム機」が無くても、紐づく設備名でトラブル・点検が引ける
+// （同じ設備に点検も作る。設備名JOINの回帰＝未マイグレーション環境のフォールバック不具合対策）
+const mSearch = await api('/api/inspections/masters', { method: 'POST', body: { equipment_id: eqSearchId, name: 'E2E点検項目', input_type: 'ok_ng' } });
+await api('/api/inspections', { method: 'POST', body: { equipment_id: eqSearchId, inspected_at: new Date().toISOString(), items: [{ master_id: mSearch.json?.id, value: 'ok' }] } });
 const s4 = await api(`/api/search?q=${encodeURIComponent('フィルム機')}`);
 check('横断検索: 設備名でトラブルがヒット', (s4.json?.results || []).some((r) => r.type === 'trouble'));
+check('横断検索: 設備名で点検がヒット', (s4.json?.results || []).some((r) => r.type === 'inspection'));
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});
