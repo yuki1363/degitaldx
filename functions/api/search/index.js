@@ -378,5 +378,24 @@ export async function onRequestGet({ request, env }) {
 
   // version は「いまこの検索APIを動かしているコードの版」。検索画面に表示して
   // デプロイ反映済みかを一目で判別できるようにする（キャッシュに惑わされないため）。
-  return json({ results, count: results.length, keywords, version: APP_VERSION });
+  // ?debug=1: 実データ診断。ヒットしない原因（設備の実際の列値・点検の紐づけ）を可視化する。
+  let debug;
+  if (sp.get('debug') === '1') {
+    const kw = keywords[0] || '';
+    const byType = {};
+    for (const r of results) byType[r.type] = (byType[r.type] || 0) + 1;
+    const safe = async (label, stmt) => { try { return (await stmt).results; } catch (e) { return [{ [label + '_error']: String((e && e.message) || e) }]; } };
+    // キーワードを含む設備台帳の行（name/line_name/equipment_name のどれに入っているか）
+    const eqHits = await safe('eq', db.prepare(
+      `SELECT id, code, name, line_name, equipment_name FROM equipment_ledger
+        WHERE deleted_at IS NULL AND (name LIKE ?1 OR line_name LIKE ?1 OR equipment_name LIKE ?1) LIMIT 20`
+    ).bind(`%${kw}%`).all());
+    // 直近の点検記録の設備紐づけ（equipment_id と参照先の実際の名前）
+    const inspSample = await safe('insp', db.prepare(
+      `SELECT ir.id, ir.equipment_id, e.name AS e_name, e.line_name AS e_line, e.equipment_name AS e_equip
+         FROM inspection_result ir LEFT JOIN equipment_ledger e ON ir.equipment_id = e.id
+        WHERE ir.deleted_at IS NULL ORDER BY ir.id DESC LIMIT 10`).all());
+    debug = { keyword: kw, byType, equipment_with_keyword: eqHits, recent_inspections: inspSample };
+  }
+  return json({ results, count: results.length, keywords, version: APP_VERSION, debug });
 }
