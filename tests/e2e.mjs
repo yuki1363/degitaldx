@@ -129,6 +129,16 @@ await api('/api/inspections', { method: 'POST', body: { equipment_id: eqSplit.js
 const s5 = await api(`/api/search?q=${encodeURIComponent('ハイドロ')}`);
 check('横断検索: equipment_name列で設備台帳がヒット', (s5.json?.results || []).some((r) => r.type === 'equipment'));
 check('横断検索: equipment_name列で点検がヒット', (s5.json?.results || []).some((r) => r.type === 'inspection'));
+
+// 半角カタカナで登録された設備名を、全角カタカナの検索でヒットさせる（今回の実データ不具合の回帰）
+// 設備名 "ﾌｨﾙﾑ機"（半角）を登録し、"フィルム機"（全角）で検索してヒットするか
+const eqHalf = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-HALF', name: 'ﾌｨﾙﾑ機', line_name: 'JP3号', equipment_name: 'ﾌｨﾙﾑ機' } });
+check('半角カナ設備の登録（201）', eqHalf.status === 201, `status=${eqHalf.status}`);
+const sHalf = await api(`/api/search?q=${encodeURIComponent('フィルム機')}`);
+check('横断検索: 全角カナ検索で半角カナ設備がヒット', (sHalf.json?.results || []).some((r) => r.type === 'equipment'));
+// 逆方向: 半角カナ検索で全角カナ登録もヒット（設備 E2E設備フィルム機 は全角）
+const sHalf2 = await api(`/api/search?q=${encodeURIComponent('ﾌｨﾙﾑ')}`);
+check('横断検索: 半角カナ検索で全角カナ設備がヒット', (sHalf2.json?.results || []).some((r) => r.type === 'equipment'));
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});
