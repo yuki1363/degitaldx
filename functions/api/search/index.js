@@ -64,6 +64,16 @@ async function searchWithFallback(run, extendedCols, baseCols) {
   }
 }
 
+// 設備名の表示用SQL式: line_name（設備名）+ equipment_name（機器名）を優先し、
+// 無ければ e.name。機器名が e.name に入っていない設備でも、結果に正しい設備名を出す。
+// cols に 'e.equipment_name' がある（＝その列が存在する前提の拡張/基本列）ときだけ合成し、
+// 列が無い旧DBのフォールバックでは e.name をそのまま使う。
+function equipNameExpr(cols) {
+  return cols.includes('e.equipment_name')
+    ? `COALESCE(NULLIF(TRIM(COALESCE(e.line_name,'') || ' ' || COALESCE(e.equipment_name,'')), ''), e.name)`
+    : 'e.name';
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp  = new URL(request.url).searchParams;
@@ -91,7 +101,7 @@ export async function onRequestGet({ request, env }) {
           t.id, t.occurred_at AS date_val, t.phenomenon AS title,
           t.cause, t.countermeasure,
           tc.name AS category_name,
-          e.name  AS equipment_name, e.code AS equipment_code
+          ${equipNameExpr(cols)} AS equipment_name, e.code AS equipment_code
         FROM trouble_record t
         LEFT JOIN trouble_category tc ON t.category_id = tc.id
         LEFT JOIN equipment_ledger  e  ON t.equipment_id = e.id
@@ -133,7 +143,7 @@ export async function onRequestGet({ request, env }) {
       let sql = `
         SELECT
           r.id, r.created_at AS date_val, r.title, r.status,
-          e.name AS equipment_name, e.code AS equipment_code
+          ${equipNameExpr(cols)} AS equipment_name, e.code AS equipment_code
         FROM repair_request r
         LEFT JOIN equipment_ledger e ON r.equipment_id = e.id
         WHERE r.deleted_at IS NULL
@@ -212,7 +222,7 @@ export async function onRequestGet({ request, env }) {
         SELECT
           ir.id, ir.inspected_at AS date_val, ir.has_abnormal,
           ir.note,
-          e.name AS equipment_name, e.code AS equipment_code
+          ${equipNameExpr(cols)} AS equipment_name, e.code AS equipment_code
         FROM inspection_result ir
         LEFT JOIN equipment_ledger e ON ir.equipment_id = e.id
         WHERE ir.deleted_at IS NULL
@@ -249,28 +259,32 @@ export async function onRequestGet({ request, env }) {
 
   // ---------- 設備台帳 ----------
   if (types.includes('equipment')) {
-    const cols = ['name', 'code', 'manufacturer', 'model', 'note'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
-    let sql = `
-      SELECT id, code, name, location, manufacturer, model, status
-      FROM equipment_ledger
-      WHERE deleted_at IS NULL
-    `;
-    const binds = [...kwBinds];
-    if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-    if (!keywords.length && !equipId) {
-      // キーワードなし・設備IDなしは全件になるのでスキップ
-    } else {
+    // 設備名は name のほか line_name（設備名）/ equipment_name（機器名）に分かれて
+    // 入っていることがある（機器名が name に無い設備がある）。それらも検索・表示に使う。
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const extra = cols.includes('line_name') ? ', line_name, equipment_name' : '';
+      let sql = `SELECT id, code, name, location, manufacturer, model, status${extra}
+        FROM equipment_ledger WHERE deleted_at IS NULL`;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
       if (equipId) { sql += ` AND id = ?`; binds.push(equipId); }
       sql += ` ORDER BY code LIMIT ${limit}`;
-      const { results: rows } = await db.prepare(sql).bind(...binds).all();
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
+    // キーワードなし・設備IDなしは全件になるのでスキップ
+    if (keywords.length || equipId) {
+      const rows = await searchWithFallback(run,
+        ['name', 'code', 'manufacturer', 'model', 'note', 'line_name', 'equipment_name'],
+        ['name', 'code', 'manufacturer', 'model', 'note']);
       const STATUS = { active: '稼働中', stopped: '停止中', retired: '廃棄' };
       for (const r of rows ?? []) {
+        const fullName = [r.line_name, r.equipment_name].filter(Boolean).join(' ') || r.name;
         results.push({
           type:           'equipment',
           id:             r.id,
           date:           null,
-          title:          `${r.code} ${r.name}`,
+          title:          `${r.code} ${fullName}`,
           snippet:        [r.location, r.manufacturer, STATUS[r.status]].filter(Boolean).join(' / '),
           category_name:  null,
           equipment_name: null,

@@ -119,6 +119,16 @@ await api('/api/inspections', { method: 'POST', body: { equipment_id: eqSearchId
 const s4 = await api(`/api/search?q=${encodeURIComponent('フィルム機')}`);
 check('横断検索: 設備名でトラブルがヒット', (s4.json?.results || []).some((r) => r.type === 'trouble'));
 check('横断検索: 設備名で点検がヒット', (s4.json?.results || []).some((r) => r.type === 'inspection'));
+
+// 機器名が name 列でなく equipment_name 列にある設備でも、設備台帳・点検が引ける
+// （今回の「保全計画しかヒットしない」不具合の回帰。name には keyword を入れずに登録する）
+const eqSplit = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-SPLIT', name: 'JP2号', line_name: 'JP2号', equipment_name: 'E2Eハイドロ機' } });
+check('分割名の設備登録（201）', eqSplit.status === 201, `status=${eqSplit.status}`);
+const mSplit = await api('/api/inspections/masters', { method: 'POST', body: { equipment_id: eqSplit.json?.id, name: 'E2E分割項目', input_type: 'ok_ng' } });
+await api('/api/inspections', { method: 'POST', body: { equipment_id: eqSplit.json?.id, inspected_at: new Date().toISOString(), items: [{ master_id: mSplit.json?.id, value: 'ok' }] } });
+const s5 = await api(`/api/search?q=${encodeURIComponent('ハイドロ')}`);
+check('横断検索: equipment_name列で設備台帳がヒット', (s5.json?.results || []).some((r) => r.type === 'equipment'));
+check('横断検索: equipment_name列で点検がヒット', (s5.json?.results || []).some((r) => r.type === 'inspection'));
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});
