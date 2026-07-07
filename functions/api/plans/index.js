@@ -11,12 +11,22 @@ const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 // overdue として返す。DB の status は書き換えない（完了にすれば done になる）。
 // 手動で overdue にしなくても、カレンダー・年間計画表・CSV出力で「期限超過」になる。
 // 日付は JST 基準（UTC のままだと朝9時まで前日扱いになり判定が1日近く遅れる）。
-export function deriveOverdue(plan) {
+//
+// 年間計画（毎月1日に登録＝月単位で管理）は「月単位」で判定する。日単位だと予定月の
+// 2日以降に当月分が誤って超過になるため（home-tabs.js と同じ考え方）。当月中は超過にしない
+// （月末までにやる扱い）。monthly を明示指定できるが、未指定なら plan.annual_only で自動判定。
+//   ※ 呼び出しは必ず (p) => deriveOverdue(p) の形にする。map に直接渡すと第2引数に
+//     配列の index が入り、通常予定まで月単位判定になってしまう。
+export function deriveOverdue(plan, monthly) {
   if (!plan || plan.status !== 'pending' || plan.unscheduled) return plan;
   const limit = (plan.planned_end_date || plan.planned_date || '').slice(0, 10);
   if (!limit) return plan;
-  const todayJst = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
-  return limit < todayJst ? { ...plan, status: 'overdue' } : plan;
+  const isMonthly = monthly ?? !!plan.annual_only;
+  const nowJst = new Date(Date.now() + 9 * 3600_000).toISOString();
+  if (isMonthly) {
+    return limit.slice(0, 7) < nowJst.slice(0, 7) ? { ...plan, status: 'overdue' } : plan;
+  }
+  return limit < nowJst.slice(0, 10) ? { ...plan, status: 'overdue' } : plan;
 }
 
 // 繰り返し予定を指定範囲内に展開して返す
@@ -143,7 +153,9 @@ export async function onRequestGet({ request, env }) {
     `).all();
     const batchIds = await getBatchPlanIds(db);
     const plans = (rows ?? []).filter((p) => p.annual_only || batchIds.has(String(p.id)));
-    return json({ plans: plans.map(deriveOverdue) });
+    // 年間計画表は月単位で超過判定する（毎月1日登録・当月は超過にしない）。
+    // batch由来で annual_only 列が無い予定もあるため monthly=true を明示する。
+    return json({ plans: plans.map((p) => deriveOverdue(p, true)) });
   }
 
   let rangeStart, rangeEnd;
@@ -211,7 +223,8 @@ export async function onRequestGet({ request, env }) {
     });
   }
 
-  return json({ plans: results.map(deriveOverdue) });
+  // 通常カレンダーは日単位で判定（annual_only の on_calendar 予定だけは月単位に自動フォールバック）
+  return json({ plans: results.map((p) => deriveOverdue(p)) });
 }
 
 export async function onRequestPost({ request, env, data }) {

@@ -226,6 +226,21 @@ check('一覧GET: 期限超過が自動判定される', odRow?.status === 'over
 const odDetail = await api(`/api/plans/${odPlan.id}`);
 check('詳細GET: 期限超過が自動判定される', odDetail.json?.plan?.status === 'overdue', `status=${odDetail.json?.plan?.status}`);
 
+// 年間計画は「月単位」で超過判定する（毎月1日登録・当月は超過にしない）。
+// 当月1日の annual_only 予定は、月の2日以降でも overdue にならないこと（日単位バグの回帰）。
+const curMonth1st = new Date().toLocaleDateString('sv-SE').slice(0, 7) + '-01';
+const anThis = await api('/api/plans', { method: 'POST', body: { title: 'E2E年間当月', plan_type: 'inspection', planned_date: curMonth1st, annual_only: true } });
+check('年間計画（当月）の登録', anThis.status === 201, `status=${anThis.status}`);
+// 先月の annual_only 予定は overdue になること
+const prevMonth1st = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toLocaleDateString('sv-SE').slice(0, 7) + '-01'; })();
+const anPrev = await api('/api/plans', { method: 'POST', body: { title: 'E2E年間先月', plan_type: 'inspection', planned_date: prevMonth1st, annual_only: true } });
+check('年間計画（先月）の登録', anPrev.status === 201, `status=${anPrev.status}`);
+const anList = await api('/api/plans?annual_only=1');
+const anThisRow = (anList.json?.plans || []).find((p) => p.title === 'E2E年間当月');
+const anPrevRow = (anList.json?.plans || []).find((p) => p.title === 'E2E年間先月');
+check('年間計画: 当月分は月単位判定で超過にならない', anThisRow?.status === 'pending', `status=${anThisRow?.status}`);
+check('年間計画: 先月分は超過になる', anPrevRow?.status === 'overdue', `status=${anPrevRow?.status}`);
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
