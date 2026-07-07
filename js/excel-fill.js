@@ -302,12 +302,14 @@ async function fillAndDownload(template, type, record, inputValues) {
   }
   const values = { ...auto, ...base, ...(inputValues || {}) };
 
-  // ○で1つ選択: 群タグ（例 休止種別）→選んだ選択肢名。各選択肢セル（例 {{故障休止}}）に
-  // 選択時 ○ を入れ、未選択は空にする。群タグ自体には選択肢名が残る（任意で使える）。
+  // ○で1つ選択: 群タグ（例 休止種別）→選んだ選択肢名。各選択肢セル（例 {{故障休止}}）は
+  // 「選択肢名」を残したまま、選ばれたものにだけ ○ を付ける（○◯故障休止 のように）。
+  // セルに {{故障休止}} だけを置いても、ラベルが消えて○だけになることを防ぐ（用紙は
+  // 全選択肢を並べ、該当を○で囲む運用）。群タグ自体には選んだ選択肢名が残る（任意で使える）。
   for (const f of parsedFields) {
     if (f.type !== 'choice' || !Array.isArray(f.options)) continue;
     const sel = values[f.tag] != null ? String(values[f.tag]) : '';
-    for (const opt of f.options) values[opt] = (opt && opt === sel) ? '○' : '';
+    for (const opt of f.options) values[opt] = opt ? (opt === sel ? `○${opt}` : opt) : '';
   }
 
   // ハンコ（赤丸印）: 苗字 → 印影画像を該当セルに埋め込み、タグ文字は空にして消す（画像で表現）。

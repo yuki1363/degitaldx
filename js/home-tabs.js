@@ -263,10 +263,20 @@ export async function loadHomeTabs(container) {
   const bar  = el('div', { class: 'home-tabs-bar', role: 'tablist' });
   const body = el('div', { class: 'home-tabs-body' });
 
+  // 折りたたみ: 通知が機能タイルを画面下へ押し出さないよう、既定では本文を畳んで
+  // カウントバーだけ表示する（タブをタップで開閉）。ただし期限超過があるときだけは
+  // 見落とし防止のため最初から開いておく。
+  let collapsed = overdueCount === 0;
+  const applyCollapsed = () => {
+    body.style.display = collapsed ? 'none' : '';
+    bar.classList.toggle('is-collapsed', collapsed);
+    [...bar.children].forEach((btn, i) => btn.classList.toggle('is-active', tabs[i].key === active && !collapsed));
+  };
+
   const renderActive = () => {
     const tab = tabs.find((t) => t.key === active);
     render(body, tab.content());
-    [...bar.children].forEach((btn, i) => btn.classList.toggle('is-active', tabs[i].key === active));
+    applyCollapsed();
   };
 
   tabs.forEach((t) => {
@@ -274,8 +284,13 @@ export async function loadHomeTabs(container) {
       ? el('span', { class: 'home-tab-count' + (t.over ? ' is-over' : '') }, String(t.count))
       : null;
     bar.appendChild(el('button', {
-      class: 'home-tab', type: 'button',
-      onclick: () => { active = t.key; renderActive(); },
+      class: 'home-tab', type: 'button', title: 'タップで開閉',
+      onclick: () => {
+        if (collapsed) { collapsed = false; active = t.key; }
+        else if (active === t.key) { collapsed = true; }   // 同じタブを再タップで畳む
+        else { active = t.key; }
+        renderActive();
+      },
     }, [el('span', { class: 'home-tab-label' }, t.label), badge]));
   });
 
