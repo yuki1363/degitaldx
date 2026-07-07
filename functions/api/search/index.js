@@ -34,16 +34,30 @@ const KANA_F2H = {
   'ー':'ｰ','・':'･','。':'｡','、':'､','「':'｢','」':'｣',
 };
 const toHalfKana = (s) => { let o = ''; for (const ch of s) o += (KANA_F2H[ch] || ch); return o; };
+// 半角英数 → 全角英数（例 KEN123→ＫＥＮ１２３）。全角英数で登録されたデータをヒットさせる。
+const toFullAlnum = (s) => s.replace(/[A-Za-z0-9]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xFEE0));
 
 function keywordVariants(kw) {
-  const half = toHalfWidth(kw);
-  const full = kw.normalize('NFKC'); // 半角カナ→全角カナ・全角英数→半角 等の正規化（ﾌｨﾙﾑ→フィルム）
-  // 重要なゆれ（全角/半角カタカナ）を前方に置く。上限で切られても半角カナ形が残るように。
-  const set = new Set([kw, full, toHalfKana(full), hiraToKata(full), kataToHira(full), half]);
+  const half = toHalfWidth(kw);        // 全角英数→半角
+  const full = kw.normalize('NFKC');   // 半角カナ→全角カナ・全角英数→半角 等の正規化（ﾌｨﾙﾑ→フィルム, ＫＥＮ→KEN）
+  // 英数の大小×全角/半角を吸収する。半角ASCIIは LIKE が大小を区別しないので、
+  // 半角形が1つあれば半角データはどの大小でもヒットする。全角英数データは LIKE が大小を
+  // 区別するため、全角の大文字形と小文字形の両方を生成する（ＫＥＮ / ｋｅｎ）。
+  // 重要なゆれ（半角カタカナ・全角英数）を前方に置き、上限で切られても残るようにする。
+  const set = new Set([
+    kw,
+    full,                            // 正規化（半角英数・全角カナ）
+    toHalfKana(full),                // 全角カナ→半角カナ（ﾌｨﾙﾑ）
+    toFullAlnum(full.toUpperCase()), // 全角英数（大文字）ＫＥＮ
+    toFullAlnum(full.toLowerCase()), // 全角英数（小文字）ｋｅｎ
+    hiraToKata(full),
+    kataToHira(full),
+    half,
+  ]);
   for (const v of [...set]) {
     if (v.length > 2 && (v.endsWith('ー') || v.endsWith('ｰ'))) set.add(v.slice(0, -1));
   }
-  return [...set].filter(Boolean).slice(0, 6); // バリアント数の上限（bind数の暴発防止）
+  return [...set].filter(Boolean).slice(0, 8); // バリアント数の上限（bind数の暴発防止。単一KWで8×最大10列=80 < D1上限100）
 }
 
 // 1キーワードぶんの LIKE 条件（全列 × 全バリアントの OR）

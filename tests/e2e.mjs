@@ -139,6 +139,14 @@ check('横断検索: 全角カナ検索で半角カナ設備がヒット', (sHal
 // 逆方向: 半角カナ検索で全角カナ登録もヒット（設備 E2E設備フィルム機 は全角）
 const sHalf2 = await api(`/api/search?q=${encodeURIComponent('ﾌｨﾙﾑ')}`);
 check('横断検索: 半角カナ検索で全角カナ設備がヒット', (sHalf2.json?.results || []).some((r) => r.type === 'equipment'));
+
+// 半角⇄全角英数字・大文字小文字のゆれ
+await api('/api/parts', { method: 'POST', body: { name: 'Ｅ２ＥＫＥＮ１２３部品', quantity: 1, safety_stock: 1 } }); // 全角英数で登録
+const sAlnum1 = await api(`/api/search?q=${encodeURIComponent('ken123')}`);                                       // 半角小文字で検索
+check('横断検索: 半角小文字で全角英数字がヒット', (sAlnum1.json?.results || []).some((r) => r.type === 'parts'));
+await api('/api/parts', { method: 'POST', body: { name: 'E2E-XYZ789-部品', quantity: 1, safety_stock: 1 } });     // 半角英数で登録
+const sAlnum2 = await api(`/api/search?q=${encodeURIComponent('ＸＹＺ７８９')}`);                                   // 全角で検索
+check('横断検索: 全角英数字で半角登録がヒット', (sAlnum2.json?.results || []).some((r) => r.type === 'parts'));
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});
