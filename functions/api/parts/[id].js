@@ -8,6 +8,10 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { normImportance } from './index.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { normalizeJa } from '../_lib/normalize.js';
+
+// NFKC 正規化＋trim（半角カナ→全角カナ・全角英数→半角。検索・表示の統一）。空は null
+const nz = (v) => { const s = normalizeJa(String(v)).trim(); return s === '' ? null : s; };
 
 async function getPart(DB, id) {
   return DB.prepare(
@@ -78,16 +82,16 @@ export async function onRequestPut({ env, data, params, request }) {
 
   const now = nowIso();
 
-  const newModelNo      = model_no       !== undefined ? (model_no ? String(model_no).trim() : null)             : part.model_no;
-  const newName         = name           !== undefined ? String(name).trim()                                    : part.name;
-  const newLineName     = line_name      !== undefined ? (line_name ? String(line_name).trim() : null)           : part.line_name;
-  const newEquipName    = equipment_name !== undefined ? (equipment_name ? String(equipment_name).trim() : null) : part.equipment_name;
+  const newModelNo      = model_no       !== undefined ? (model_no ? nz(model_no) : null)                        : part.model_no;
+  const newName         = name           !== undefined ? nz(name)                                                : part.name;
+  const newLineName     = line_name      !== undefined ? (line_name ? nz(line_name) : null)                      : part.line_name;
+  const newEquipName    = equipment_name !== undefined ? (equipment_name ? nz(equipment_name) : null)            : part.equipment_name;
   const newSafetyStock  = safety_stock   !== undefined ? (Number.isFinite(Number(safety_stock)) ? Math.trunc(Number(safety_stock)) : part.safety_stock) : part.safety_stock;
-  const newLocation     = location       !== undefined ? (location ? String(location).trim() : null)             : part.location;
+  const newLocation     = location       !== undefined ? (location ? nz(location) : null)                        : part.location;
   const newImportance   = importance     !== undefined ? normImportance(importance)                              : part.importance;
-  const newSupplier     = supplier       !== undefined ? (supplier ? String(supplier).trim() : null)             : part.supplier;
+  const newSupplier     = supplier       !== undefined ? (supplier ? nz(supplier) : null)                        : part.supplier;
   const newSupplierEmail = supplier_email !== undefined ? (supplier_email ? String(supplier_email).trim() : null) : part.supplier_email;
-  const newNote         = note           !== undefined ? (note ? String(note).trim() : null)                     : part.note;
+  const newNote         = note           !== undefined ? (note ? nz(note) : null)                                : part.note;
 
   await DB.prepare(
     `UPDATE parts_inventory

@@ -9,10 +9,12 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { normImportance } from './index.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { normalizeJa } from '../_lib/normalize.js';
 
 const cell = (v) => {
   if (v === undefined || v === null) return null;
-  const s = String(v).trim();
+  // 取込時に NFKC 正規化（旧システムの半角カナ等をここで統一する。検索・表示のゆれ防止）
+  const s = normalizeJa(String(v)).trim();
   return s === '' ? null : s;
 };
 const num = (v) => {

@@ -12,6 +12,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { normalizeJa } from '../_lib/normalize.js';
 
 const IMPORTANCE_VALUES = ['高', '中', '低'];
 
@@ -23,7 +24,8 @@ export function normImportance(v) {
 
 const trimOrNull = (v) => {
   if (v === undefined || v === null) return null;
-  const s = String(v).trim();
+  // NFKC 正規化して表記ゆれ（半角カナ→全角カナ・全角英数→半角）を吸収（検索・表示の統一）
+  const s = normalizeJa(String(v)).trim();
   return s === '' ? null : s;
 };
 const toInt = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : fallback);

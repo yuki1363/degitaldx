@@ -147,6 +147,15 @@ check('横断検索: 半角小文字で全角英数字がヒット', (sAlnum1.js
 await api('/api/parts', { method: 'POST', body: { name: 'E2E-XYZ789-部品', quantity: 1, safety_stock: 1 } });     // 半角英数で登録
 const sAlnum2 = await api(`/api/search?q=${encodeURIComponent('ＸＹＺ７８９')}`);                                   // 全角で検索
 check('横断検索: 全角英数字で半角登録がヒット', (sAlnum2.json?.results || []).some((r) => r.type === 'parts'));
+
+// 表記正規化: 半角カナで登録しても全角カナで保存される（保存時 NFKC 正規化）
+const eqNorm = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-NORM', name: 'ﾃｽﾄ', line_name: 'ﾃｽﾄ', equipment_name: 'ﾎﾟﾝﾌﾟ' } });
+check('正規化: 半角カナ設備の登録（201）', eqNorm.status === 201, `status=${eqNorm.status}`);
+const eqNormGet = await api(`/api/equipment/${eqNorm.json?.id}`);
+check('正規化: 保存時に半角カナ→全角カナ', eqNormGet.json?.equipment?.equipment_name === 'ポンプ', `equipment_name=${eqNormGet.json?.equipment?.equipment_name}`);
+// 一括正規化API（admin）が動く
+const normRes = await api('/api/admin/normalize', { method: 'POST', body: {} });
+check('一括正規化API（200・ok）', normRes.status === 200 && normRes.json?.ok === true, `status=${normRes.status}`);
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});

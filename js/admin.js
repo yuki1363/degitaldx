@@ -599,6 +599,22 @@ async function renderBackup() {
     'SQLダンプをダウンロード（スキーマ＋データ）',
   );
 
+  // 既存データの表記ゆれ正規化（半角カナ→全角カナ・全角英数→半角）
+  const NORM_LABEL = { equipment_ledger: '設備台帳', parts_inventory: '部品在庫', maintenance_plan: '保全計画' };
+  const normResult = el('p', { class: 'hint', style: 'margin-top:6px' }, '');
+  const normBtn = el('button', { class: 'btn', onclick: async () => {
+    if (!confirm('設備台帳・部品在庫・保全計画の名称を正規化します。\n（半角カナ→全角カナ、全角英数→半角。例「ﾌｨﾙﾑ挿入機」→「フィルム挿入機」）\n表記が統一され、検索・一覧表示が揃います。よろしいですか？')) return;
+    normBtn.disabled = true; normBtn.textContent = '正規化中…';
+    try {
+      const r = await api.post('/api/admin/normalize', {});
+      const s = r.result || {};
+      const parts = Object.entries(s).map(([t, v]) =>
+        v && v.updated != null ? `${NORM_LABEL[t] || t} ${v.updated}件更新` : `${NORM_LABEL[t] || t} スキップ`);
+      normResult.textContent = '完了 — ' + parts.join(' / ');
+    } catch (err) { alert(`正規化に失敗しました: ${err.message}`); }
+    finally { normBtn.disabled = false; normBtn.textContent = '表記を正規化する'; }
+  } }, '表記を正規化する');
+
   render(tabContent, [
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, 'データバックアップ'),
@@ -618,6 +634,13 @@ async function renderBackup() {
         el('p', { class: 'hint', style: 'margin-top:2px' }, '復元方法: sqlite3 コマンド、DB Browser for SQLite、Turso、Neon、PlanetScale など SQLite 互換の DB に取り込めます。'),
         el('div', { class: 'action-row', style: 'margin-top:8px' }, [sqlBtn]),
       ]),
+    ]),
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '表記ゆれの正規化'),
+      el('p', { class: 'hint' }, '設備台帳・部品在庫・保全計画の名称を統一します（半角カタカナ→全角カタカナ、全角英数字→半角）。旧システムから半角カナで取り込んだ設備名などが混在していると検索でヒットしづらいため、一度実行しておくと検索・一覧表示が揃います。'),
+      el('p', { class: 'hint', style: 'margin-top:2px' }, '※ 何度実行しても安全です（変化のある行だけ更新。監査ログに記録されます）。'),
+      el('div', { class: 'action-row', style: 'margin-top:8px' }, [normBtn]),
+      normResult,
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, 'コード・スキーマのバックアップ'),

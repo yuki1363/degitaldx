@@ -6,24 +6,27 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
+import { normalizeJa } from '../_lib/normalize.js';
 
 export const EQUIPMENT_STATUS = ['active', 'stopped', 'retired'];
 
 /** リクエストボディから設備の入力値を取り出して検証する */
 export function parseEquipmentInput(body) {
   if (!body) return { error: 'リクエストボディが不正です。' };
+  // テキスト項目は NFKC 正規化して表記ゆれ（半角カナ→全角カナ・全角英数→半角）を吸収する。
+  // これで検索・一覧表示が統一される（例「ﾌｨﾙﾑ挿入機」→「フィルム挿入機」）。
   const optional = (v, max) => {
-    const s = v === undefined || v === null ? '' : String(v).trim();
+    const s = v === undefined || v === null ? '' : normalizeJa(String(v)).trim();
     return s ? s.slice(0, max) : null;
   };
 
-  const code = String(body.code || '').trim();
+  const code = normalizeJa(String(body.code || '')).trim();
   const lineName = optional(body.line_name, 100);       // 設備名（共有）
   const equipmentName = optional(body.equipment_name, 100); // 機器名（共有）
 
   // 表示名(name)は各機能の見出し・検索に使う。明示があればそれを、無ければ
   // 「設備名＋機器名」から自動生成する（設備名・機器名に一本化したため）。
-  let name = String(body.name || '').trim();
+  let name = normalizeJa(String(body.name || '')).trim();
   if (!name) name = [lineName, equipmentName].filter(Boolean).join(' ');
   name = name.slice(0, 100);
 
