@@ -110,6 +110,7 @@
 
     <p class="phase-note">
       全機能が利用できます（Phase 6 横断検索まで完了）。
+      <span id="app-version" class="app-version" title="いま本番で動いているバージョン（デプロイ確認用）"></span>
     </p>
   </main>
 
@@ -143,6 +144,11 @@
       document.getElementById('user-chip').hidden = false;
       showStorageAlertForAdmin(user);
       loadHomeTabs(document.getElementById('home-overview'));
+      // デプロイ確認用: いま本番で動いている Functions のバージョンを表示する
+      // （/api/me は SW にキャッシュされないので、UIキャッシュの新旧に関係なく最新が分かる）
+      api.get('/api/me').then((r) => {
+        if (r && r.version) document.getElementById('app-version').textContent = ' ・ ' + r.version;
+      }).catch(() => {});
       // 管理者のみ管理タイルを有効化
       if (user.role === 'admin') {
         const tile = document.getElementById('tile-admin');

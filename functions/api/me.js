@@ -4,6 +4,12 @@
 
 import { json } from './_lib/http.js';
 
+// デプロイ確認用のアプリ版。リリースのたびに sw.js の CACHE_VERSION と一緒に上げる。
+// /api/me は Service Worker にキャッシュされない（middlewareで認証必須のAPI）ため、
+// この値＝いま本番で動いている Functions のバージョン。UIキャッシュの新旧に関わらず、
+// 「最新のコードがデプロイ済みか」をホーム画面下部の表示で確認できる。
+export const APP_VERSION = 'v1.3.1';
+
 export function onRequestGet({ data }) {
-  return json({ user: data.user });
+  return json({ user: data.user, version: APP_VERSION });
 }
