@@ -11,6 +11,7 @@ import { api } from '/js/api.js';
 import { el, render } from '/js/util.js';
 import { uploadFile } from '/js/files.js';
 import { CONSTRUCTION_NOTICE_FIELDS, TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
+import { extractTemplateTags } from '/js/excel-fill.js';
 
 const TYPE_LABELS = { construction_notice: '工事連絡書', trouble_report: 'トラブル報告書' };
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -175,6 +176,51 @@ function showForm(container, existing) {
     }
     return row;
   }
+  // タグ確認: アップロード済み Excel の {{タグ}} を抽出し、差し込まれる項目と突き合わせて
+  //   「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの」を示す。
+  //   休止時間が出ない・○が付かない等の「タグ名の食い違い」を管理者が自分で見つけられる。
+  const checkBox = el('div', { class: 'pt-check-box' });
+  async function runTagCheck() {
+    if (!fileId) { render(checkBox, el('p', { class: 'notice is-warning' }, '先に Excel(.xlsx) をアップロードしてください。')); return; }
+    render(checkBox, el('p', { class: 'loading' }, 'Excel のタグを確認中…'));
+    let excelTags;
+    try { excelTags = await extractTemplateTags(fileId); }
+    catch (err) { render(checkBox, el('p', { class: 'notice is-error' }, err.message)); return; }
+    const excelSet = new Set(excelTags);
+    // 差し込まれるタグ = 自動タグ ＋ 入力項目のタグ ＋（○選択は各選択肢名も）
+    const fillable = new Set(AUTO_TAGS[templateType] || []);
+    for (const f of inputFields) {
+      if (f.type === 'choice') { if (f.tag) fillable.add(f.tag); for (const o of (f.options || [])) if (o) fillable.add(o); }
+      else if (f.tag) fillable.add(f.tag);
+    }
+    const excelRows = excelTags.map((t) => el('div', { class: 'pt-check-row' }, [
+      el('code', { class: 'pt-tag' }, `{{${t}}}`),
+      fillable.has(t)
+        ? el('span', { class: 'pt-ok' }, '✓ 差し込まれます')
+        : el('span', { class: 'pt-ng' }, '⚠ 対応する項目がありません（誤字の可能性）'),
+    ]));
+    const missing = [];
+    for (const f of inputFields) {
+      if (f.type === 'choice') {
+        for (const o of (f.options || [])) if (o && !excelSet.has(o)) missing.push(`○「${o}」を付けるには Excel のセルに {{${o}}} が必要です`);
+      } else if (f.tag && !excelSet.has(f.tag)) {
+        missing.push(`「${f.label || f.tag}」は Excel に {{${f.tag}}} が無いため出力されません`);
+      }
+    }
+    render(checkBox, el('div', { class: 'pt-check' }, [
+      el('div', { class: 'pt-check-head' }, `Excel 内のタグ ${excelTags.length}個`),
+      excelTags.length
+        ? el('div', {}, excelRows)
+        : el('p', { class: 'hint' }, 'Excel にタグ {{…}} が見つかりませんでした。差し込みたいセルに {{発生年月日}} のように入力してください。'),
+      missing.length
+        ? el('div', { class: 'pt-check-miss' }, [
+            el('div', { class: 'pt-check-head' }, '⚠ 出力されない項目'),
+            ...missing.map((m) => el('div', { class: 'pt-ng' }, m)),
+          ])
+        : el('p', { class: 'pt-ok', style: 'margin-top:6px' }, '✓ 定義した入力項目はすべて Excel にタグがあります。'),
+    ]));
+  }
+
   const addField = () => { inputFields.push({ tag: '', label: '', type: 'text' }); renderFields(); };
   const loadDefaults = () => {
     const def = cloneDefaults(templateType);
@@ -237,7 +283,9 @@ function showForm(container, existing) {
       el('div', { class: 'action-row', style: 'margin-top:6px' }, [
         el('button', { class: 'btn btn-sm', onclick: addField }, '＋ 入力項目を追加'),
         DEFAULT_FIELDS[templateType] ? el('button', { class: 'btn btn-sm', onclick: loadDefaults }, '📋 標準項目を読み込む') : null,
+        el('button', { class: 'btn btn-sm', type: 'button', onclick: runTagCheck }, '🔍 Excelのタグを確認'),
       ]),
+      checkBox,
     ]),
     el('p', { class: 'hint', style: 'margin-top:8px' }, '※ タグはセルに書式を変えずそのまま入力してください（例: A3 セルに {{予定日}}、レ点セルに {{高所作業}}）。'),
     el('div', { class: 'action-row', style: 'margin-top:12px' }, [

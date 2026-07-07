@@ -340,6 +340,46 @@ async function fillAndDownload(template, type, record, inputValues) {
   downloadBlob(outBlob, buildFilename(type, record));
 }
 
+// テンプレートの Excel から差込タグ {{...}} を抽出する（管理画面のタグ確認用）。
+//   run 分割・ふりがな(<rPh>)を考慮して <si>/<is> ごとにテキストを連結してから拾う
+//   （fillStringItemInner と同じ考え方。分割保存された {{休止時間}} も1つとして拾える）。
+export async function extractTemplateTags(fileId) {
+  const JSZip = await loadJSZip();
+  const res = await fetch(`/api/files/${fileId}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`テンプレートファイルを取得できません（HTTP ${res.status}）`);
+  let zip;
+  try { zip = await JSZip.loadAsync(await res.arrayBuffer()); }
+  catch { throw new Error('Excel(.xlsx) として読み取れませんでした。登録し直してください。'); }
+
+  const decode = (s) => s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  const tags = new Set();
+  const collectFrom = async (path, tagName) => {
+    const file = zip.file(path);
+    if (!file) return;
+    const xml = await file.async('string');
+    const itemRe = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, 'g');
+    let im;
+    while ((im = itemRe.exec(xml)) !== null) {
+      const noPh = im[1].replace(/<rPh\b[^>]*>[\s\S]*?<\/rPh>/g, '');
+      let text = '';
+      const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+      let tm;
+      while ((tm = tRe.exec(noPh)) !== null) text += tm[1];
+      text = decode(text);
+      const gRe = /\{\{\s*([^{}]+?)\s*\}\}/g;
+      let gm;
+      while ((gm = gRe.exec(text)) !== null) tags.add(gm[1].replace(/<[^>]*>/g, '').trim());
+    }
+  };
+  await collectFrom('xl/sharedStrings.xml', 'si');
+  for (const path of Object.keys(zip.files)) {
+    if (/^xl\/worksheets\/sheet\d+\.xml$/.test(path)) await collectFrom(path, 'is');
+  }
+  return [...tags];
+}
+
 /**
  * 帳票（Excel差込）を出力する。入力項目が定義されていればフォームを表示し、
  * 入力後にタグを置換した .xlsx をダウンロードする。PDF は Excel で「PDFで保存」。

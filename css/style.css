@@ -1586,6 +1586,21 @@ input.is-abnormal {
   color: var(--color-text-muted);
 }
 
+/* ---- 帳票テンプレート: タグ確認（09） ---- */
+.pt-check-box:not(:empty) { margin-top: 8px; }
+.pt-check {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  font-size: 13px;
+}
+.pt-check-head { font-weight: 700; margin: 2px 0 4px; }
+.pt-check-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 1px 0; }
+.pt-check-miss { margin-top: 8px; }
+.pt-ok { color: var(--color-success); }
+.pt-ng { color: var(--color-danger); }
+
 /* ---- 部品在庫: 棚卸モード（05） ---- */
 .stocktake-bar {
   position: fixed;
@@ -2353,7 +2368,8 @@ input.is-abnormal {
   font-weight: 700;
 }
 .home-tab-count.is-over { background: #dc2626; }
-.home-tabs-body { padding: 12px 14px; }
+/* 本文が長くても機能タイルが埋もれないよう高さを制限し、中でスクロールさせる */
+.home-tabs-body { padding: 12px 14px; max-height: 38vh; overflow-y: auto; }
 .home-tab-empty { color: #9ca3af; font-size: 13px; margin: 6px 0; }
 
 /* ホーム通知タブ: チャット未読インジケーター */

@@ -93,8 +93,13 @@ const troubleId = t1.json?.id;
 
 await page.goto(`${BASE}/pages/trouble`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(800);
-const listText = await page.evaluate(() => document.body.innerText);
-check('一覧に自動表示（検索ボタン不要）', listText.includes('E2E現象テスト'));
+// 検索するまで一覧は表示しない（設備指定なしで開いた場合）
+const beforeSearch = await page.evaluate(() => document.body.innerText);
+check('トラブル一覧: 検索するまで表示しない', !beforeSearch.includes('E2E現象テスト') && beforeSearch.includes('検索'));
+await page.click('button:has-text("検索")');
+await page.waitForFunction(() => document.body.innerText.includes('E2E現象テスト'), { timeout: 10000 }).catch(() => {});
+const afterSearch = await page.evaluate(() => document.body.innerText.includes('E2E現象テスト'));
+check('トラブル一覧: 検索で表示される', afterSearch);
 
 const put1 = await api(`/api/troubles/${troubleId}`, { method: 'PUT', body: { phenomenon: 'E2E現象テスト（編集後）' } });
 check('編集PUT（200）', put1.status === 200, `status=${put1.status}`);

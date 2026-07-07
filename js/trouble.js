@@ -148,8 +148,15 @@ async function renderList(equipmentId) {
     ]),
     listBox,
   ]);
-  // 開いた時点で直近30日分を自動表示（条件を変えたら「検索」で再絞り込み）
-  await load();
+  updateCsvButtons(); // 初期は0件（CSVボタンは無効）
+  // 検索するまで一覧は表示しない（記録が増えると重い・目的の記録を探しづらいため）。
+  // 設備台帳の「すべて見る」から設備指定で来たときだけ、その設備の記録を自動表示する。
+  if (filterEquipment) {
+    await load();
+  } else {
+    render(listBox, el('p', { class: 'empty', style: 'text-align:center;margin-top:24px' },
+      '条件（ジャンル・設備・期間）を選び「🔍 検索」を押すと表示されます。\n期間は初期で直近30日です。'));
+  }
 }
 
 // ---------------- 詳細 ----------------
