@@ -1063,6 +1063,12 @@ input.is-abnormal {
   line-height: 1; cursor: pointer;
 }
 .day-plan-start-btn:hover { background: #bbf7d0; }
+.day-plan-del-btn {
+  flex-shrink: 0; padding: 4px 8px; border-radius: 6px; font-size: 15px;
+  background: var(--color-danger-bg); border: 1px solid #fecaca;
+  line-height: 1; cursor: pointer;
+}
+.day-plan-del-btn:hover { background: #fecaca; }
 
 .cal-legend {
   display: flex;

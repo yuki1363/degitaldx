@@ -93,15 +93,19 @@ function buildCalNavAndToggle({ label, onPrev, onNext, viewMode, onMonthView, on
 
 // ---------------- 日付クリック時のシート（その日の全予定） ----------------
 
-function showDaySheet(fullDate, dateLabel, dayPlans) {
+// 指定日の予定一覧シート。refresh は削除後にカレンダーを再描画するためのコールバック。
+function showDaySheet(fullDate, dateLabel, dayPlans, refresh) {
   const backdrop = el('div', { class: 'sheet-backdrop' });
   const close = () => backdrop.remove();
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  const canEdit = hasRole(currentUser, 'editor');
   const sheet = el('div', { class: 'sheet' }, [
     el('div', { class: 'sheet-title' }, `${dateLabel}（${dayPlans.length}件）`),
     el('div', { class: 'day-plan-list' }, dayPlans.map((p) => {
       const type = PLAN_TYPES[p.plan_type] || PLAN_TYPES.other;
-      const canStart = p.plan_type === 'inspection' && p.status !== 'done' && hasRole(currentUser, 'editor');
+      const canStart = p.plan_type === 'inspection' && p.status !== 'done' && canEdit;
+      // 複数日にまたがる予定かどうか（判定用。単日なら「削除」＝全期間削除と同じ）
+      const isPeriod = p.planned_end_date && p.planned_end_date.slice(0, 10) !== p.planned_date.slice(0, 10);
       return el('div', { class: 'day-plan-row' }, [
         el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
           el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
@@ -117,9 +121,30 @@ function showDaySheet(fullDate, dateLabel, dayPlans) {
               },
             }, '✅')
           : null,
+        canEdit
+          ? el('button', {
+              class: 'day-plan-del-btn',
+              title: isPeriod ? 'この日だけ削除（他の日程は残ります）' : '削除',
+              onclick: async (e) => {
+                const msg = isPeriod
+                  ? `「${p.title}」の${dateLabel}だけ削除しますか？\n他の日程は残ります（全期間を削除したい場合は詳細画面から）。`
+                  : `「${p.title}」を削除しますか？`;
+                if (!confirm(msg)) return;
+                e.currentTarget.disabled = true;
+                try {
+                  await api.post(`/api/plans/${p.id}/delete-day`, { date: fullDate });
+                  close();
+                  refresh?.();
+                } catch (err) {
+                  alert(err.message);
+                  e.currentTarget.disabled = false;
+                }
+              },
+            }, '🗑')
+          : null,
       ]);
     })),
-    hasRole(currentUser, 'editor')
+    canEdit
       ? el('button', { class: 'sheet-btn', onclick: () => { close(); go(`?new=1&date=${fullDate}`); } }, '＋ この日に予定を追加')
       : null,
     el('button', { class: 'sheet-btn sheet-cancel', onclick: close }, '閉じる'),
@@ -154,7 +179,8 @@ async function renderMonthCalendar(year, month) {
     const dayPlans = plans.filter((p) => inRange(p, fullDate));
     const isToday = fullDate === todayStr;
     // 予定の有無に関わらず日付をクリックでき、その日のシート（＋この日に予定を追加）を開く
-    const handleDayClick = () => showDaySheet(fullDate, `${month}月${d}日`, dayPlans);
+    const handleDayClick = () => showDaySheet(fullDate, `${month}月${d}日`, dayPlans,
+      () => renderMonthCalendar(year, month).catch(showError));
     cells.push(
       el('div', { class: `cal-cell${isToday ? ' is-today' : ''}` }, [
         el('button', { class: 'cal-day-num is-clickable', onclick: handleDayClick }, String(d)),
@@ -252,7 +278,8 @@ async function renderWeekCalendar(weekStart) {
         el('span', { class: 'cal-weekday-short', style: isWeekend ? 'color:#6b7280' : '' }, WEEKDAYS[i]),
         el('button', {
           class: `cal-day-num is-clickable${isToday ? ' is-today' : ''}`,
-          onclick: () => showDaySheet(dayStr, `${day.getMonth() + 1}月${day.getDate()}日`, dayPlans),
+          onclick: () => showDaySheet(dayStr, `${day.getMonth() + 1}月${day.getDate()}日`, dayPlans,
+            () => renderWeekCalendar(weekStart).catch(showError)),
         }, String(day.getDate())),
       ]),
       ...dayPlans.map((p) =>
@@ -340,6 +367,9 @@ async function renderDetail(id, fromAnnual = false) {
   ]);
   const canEdit = hasRole(currentUser, 'editor');
   const type = PLAN_TYPES[plan.plan_type] || PLAN_TYPES.other;
+  // 複数日にまたがる期間予定か（このページの「削除」は常に全期間削除。1日だけの削除は
+  // カレンダーの日付シートから行う）
+  const isPeriodPlan = !!(plan.planned_end_date && plan.planned_end_date.slice(0, 10) !== plan.planned_date.slice(0, 10));
 
   // 時間帯・工事連絡書（帳票）の入力状態を form_values_json から算出
   const formValues = parseFormValues(plan.form_values_json);
@@ -438,12 +468,16 @@ async function renderDetail(id, fromAnnual = false) {
           el('button', { class: 'btn', onclick: () => openExcelExport('construction_notice', plan) }, '📄 帳票(Excel)出力'),
           el('button', {
             class: 'btn btn-danger',
+            title: isPeriodPlan ? `${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)} の全期間を削除します` : undefined,
             onclick: async () => {
-              if (!confirm(`「${plan.title}」を削除しますか？`)) return;
+              const msg = isPeriodPlan
+                ? `「${plan.title}」の全期間（${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)}）を削除しますか？\n1日だけ削除したい場合はカレンダーの日付をタップして削除してください。`
+                : `「${plan.title}」を削除しますか？`;
+              if (!confirm(msg)) return;
               await api.del(`/api/plans/${id}`);
               go('');
             },
-          }, '削除'),
+          }, isPeriodPlan ? '🗑 全期間を削除' : '削除'),
         ])
       : null,
   ]);

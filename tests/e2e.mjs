@@ -287,6 +287,99 @@ const anPrevRow = (anList.json?.plans || []).find((p) => p.title === 'E2E年間�
 check('年間計画: 当月分は月単位判定で超過にならない', anThisRow?.status === 'pending', `status=${anThisRow?.status}`);
 check('年間計画: 先月分は超過になる', anPrevRow?.status === 'overdue', `status=${anPrevRow?.status}`);
 
+// ---------- 7.5 保全計画: 期間予定の「1日だけ削除」----------
+section('7.5 保全計画（期間予定の1日だけ削除）');
+const addDaysStr = (base, n) => { const d = new Date(base); d.setDate(d.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+const dayDelBase = addDaysStr(new Date(), 10); // 他テストの日付と衝突しない近未来の起点
+const dd = (n) => addDaysStr(dayDelBase, n);
+
+// 先頭日を削除 → 開始日が1日進む（レコードは残る。全期間は消えない）
+const pHead = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別削除-先頭', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(4) } });
+check('日別削除: 先頭テスト用の予定登録', pHead.status === 201, `status=${pHead.status}`);
+const delHead = await api(`/api/plans/${pHead.json?.id}/delete-day`, { method: 'POST', body: { date: dd(0) } });
+check('日別削除: 先頭日削除（200・shrunk）', delHead.status === 200 && delHead.json?.mode === 'shrunk', `status=${delHead.status} mode=${delHead.json?.mode}`);
+const pHeadAfter = await api(`/api/plans/${pHead.json?.id}`);
+check('日別削除: 先頭日削除後、開始日が1日進む', pHeadAfter.json?.plan?.planned_date?.slice(0, 10) === dd(1), `planned_date=${pHeadAfter.json?.plan?.planned_date}`);
+
+// 末尾日を削除 → 終了日が1日戻る
+const pTail = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別削除-末尾', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(4) } });
+const delTail = await api(`/api/plans/${pTail.json?.id}/delete-day`, { method: 'POST', body: { date: dd(4) } });
+check('日別削除: 末尾日削除（200・shrunk）', delTail.status === 200 && delTail.json?.mode === 'shrunk', `status=${delTail.status} mode=${delTail.json?.mode}`);
+const pTailAfter = await api(`/api/plans/${pTail.json?.id}`);
+check('日別削除: 末尾日削除後、終了日が1日戻る', pTailAfter.json?.plan?.planned_end_date?.slice(0, 10) === dd(3), `planned_end_date=${pTailAfter.json?.plan?.planned_end_date}`);
+
+// 途中の日を削除 → 前後2件に分割される（他の日程は残る）
+const pMid = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別削除-分割', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(4) } });
+const delMid = await api(`/api/plans/${pMid.json?.id}/delete-day`, { method: 'POST', body: { date: dd(2) } });
+check('日別削除: 途中の日削除（200・split）', delMid.status === 200 && delMid.json?.mode === 'split' && !!delMid.json?.new_id, `status=${delMid.status} mode=${delMid.json?.mode}`);
+const pMidHead = await api(`/api/plans/${pMid.json?.id}`);
+const pMidTail = await api(`/api/plans/${delMid.json?.new_id}`);
+check('日別削除: 分割後、前半の終了日が削除日の前日', pMidHead.json?.plan?.planned_end_date?.slice(0, 10) === dd(1), `planned_end_date=${pMidHead.json?.plan?.planned_end_date}`);
+check('日別削除: 分割後、後半の開始日が削除日の翌日', pMidTail.json?.plan?.planned_date?.slice(0, 10) === dd(3), `planned_date=${pMidTail.json?.plan?.planned_date}`);
+check('日別削除: 分割後、後半の終了日は元の終了日のまま', pMidTail.json?.plan?.planned_end_date?.slice(0, 10) === dd(4), `planned_end_date=${pMidTail.json?.plan?.planned_end_date}`);
+const midRange = await api(`/api/plans?from=${dd(0)}&to=${dd(5)}`);
+const midRangeTitles = (midRange.json?.plans || []).filter((p) => p.title === 'E2E日別削除-分割');
+check('日別削除: 分割後、範囲取得に前後2件とも含まれる', midRangeTitles.length === 2, `count=${midRangeTitles.length}`);
+const midDayHits = midRangeTitles.filter((p) => p.planned_date?.slice(0, 10) <= dd(2) && (p.planned_end_date || p.planned_date).slice(0, 10) >= dd(2));
+check('日別削除: 削除した中日はどちらの分割片の範囲にも含まれない', midDayHits.length === 0, `hits=${midDayHits.length}`);
+
+// 単日予定は「1日だけ削除」＝全体削除と同じ扱い
+const pSingle = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別削除-単日', plan_type: 'other', planned_date: dd(0) } });
+const delSingle = await api(`/api/plans/${pSingle.json?.id}/delete-day`, { method: 'POST', body: { date: dd(0) } });
+check('日別削除: 単日予定は全体削除扱い（200・deleted）', delSingle.status === 200 && delSingle.json?.mode === 'deleted', `status=${delSingle.status} mode=${delSingle.json?.mode}`);
+const pSingleAfter = await api(`/api/plans/${pSingle.json?.id}`);
+check('日別削除: 単日予定削除後は404', pSingleAfter.status === 404, `status=${pSingleAfter.status}`);
+
+// 期間外の日付を指定すると400エラー
+const pRangeCheck = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別削除-範囲外', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(2) } });
+const delOutOfRange = await api(`/api/plans/${pRangeCheck.json?.id}/delete-day`, { method: 'POST', body: { date: dd(10) } });
+check('日別削除: 期間外の日付指定は400', delOutOfRange.status === 400, `status=${delOutOfRange.status}`);
+
+// UI操作: カレンダーの日付シートから🗑で「その日だけ削除」→前後の日程は残る
+const uiPlan = await page.evaluate(async () => {
+  const now = new Date();
+  const sun = new Date(now); sun.setDate(now.getDate() - now.getDay()); // 表示週の開始（直前の日曜）
+  const f = (n) => { const d = new Date(sun); d.setDate(sun.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+  const r = await fetch('/api/plans', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'E2EUI日別削除', plan_type: 'construction', planned_date: f(2), planned_end_date: f(4) }), // 火〜木
+  });
+  return { status: r.status, wed: f(3) };
+});
+check('UI日別削除テスト用の期間予定登録', uiPlan.status === 201, `status=${uiPlan.status}`);
+
+await page.goto(`${BASE}/pages/plan`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => !!document.querySelector('.cal-grid'), { timeout: 10000 }).catch(() => {});
+await page.click('button:has-text("週")');
+await page.waitForFunction(
+  () => [...document.querySelectorAll('.cal-week-col')].some((c) => c.innerText.includes('E2EUI日別削除')),
+  { timeout: 10000 }
+).catch(() => {});
+
+// 削除する日（水曜）の日付ボタンをクリックしてシートを開く
+const wedDayNum = String(Number(uiPlan.wed.slice(-2)));
+await page.evaluate((num) => {
+  const target = [...document.querySelectorAll('.cal-day-num')].find((b) => b.textContent.trim() === num);
+  target?.click();
+}, wedDayNum);
+// このテスト実行時点で他テスト（週跨ぎ予定・期間予定）が同じ週の水曜に重なることがあるため、
+// 対象タイトルを含む行に限定して🗑をクリックする
+await page.waitForFunction(
+  () => [...document.querySelectorAll('.day-plan-row')].some((r) => r.textContent.includes('E2EUI日別削除') && r.querySelector('.day-plan-del-btn')),
+  { timeout: 5000 }
+).catch(() => {});
+await page.locator('.day-plan-row', { hasText: 'E2EUI日別削除' }).locator('.day-plan-del-btn').click();
+// confirm() は page.on('dialog') で自動承諾される。シートが閉じ、カレンダーが再描画されるまで待つ
+await page.waitForFunction((title) => {
+  if (document.querySelector('.sheet-backdrop')) return false;
+  const cols = [...document.querySelectorAll('.cal-week-col')];
+  return cols.filter((c) => c.innerText.includes(title)).length === 2;
+}, 'E2EUI日別削除', { timeout: 10000 }).catch(() => {});
+const afterUiDelete = await page.evaluate((title) =>
+  [...document.querySelectorAll('.cal-week-col')].filter((c) => c.innerText.includes(title)).length,
+'E2EUI日別削除');
+check('UI日別削除: 削除した日だけ消え、前後の日は残る', afterUiDelete === 2, `hits=${afterUiDelete}`);
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
