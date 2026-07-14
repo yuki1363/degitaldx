@@ -428,7 +428,12 @@ async function renderDetail(id) {
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
         el('h3', { class: 'card-title' }, 'トラブル履歴（直近10件）'),
-        el('a', { class: 'btn btn-sm', href: `/pages/trouble?equipment_id=${eq.id}` }, 'すべて見る'),
+        el('div', { class: 'btn-group' }, [
+          // QRでこの設備を開いた流れから、その場でトラブル記録を新規作成できるようにする
+          // （trouble.js は equipment_id 付きの ?new=1 プリフィルに対応済み）
+          canEdit ? el('a', { class: 'btn btn-sm btn-primary', href: `/pages/trouble?new=1&equipment_id=${eq.id}` }, '＋ トラブルを記録') : null,
+          el('a', { class: 'btn btn-sm', href: `/pages/trouble?equipment_id=${eq.id}` }, 'すべて見る'),
+        ]),
       ]),
       troubles.length === 0
         ? el('p', { class: 'empty' }, 'トラブル記録はまだありません。')
@@ -448,7 +453,11 @@ async function renderDetail(id) {
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
         el('h3', { class: 'card-title' }, '業務依頼（直近10件）'),
-        el('a', { class: 'btn btn-sm', href: `/pages/repair?equipment_id=${eq.id}` }, 'すべて見る'),
+        el('div', { class: 'btn-group' }, [
+          // repair.js も equipment_id 付きの ?new=1 プリフィルに対応済み
+          canEdit ? el('a', { class: 'btn btn-sm btn-primary', href: `/pages/repair?new=1&equipment_id=${eq.id}` }, '＋ 業務依頼') : null,
+          el('a', { class: 'btn btn-sm', href: `/pages/repair?equipment_id=${eq.id}` }, 'すべて見る'),
+        ]),
       ]),
       repairs.length === 0
         ? el('p', { class: 'empty' }, '業務依頼はまだありません。')

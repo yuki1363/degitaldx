@@ -29,7 +29,7 @@ function showError(err) {
 
 // ---------------- 発注（Outlook メール作成） ----------------
 
-function buildOrderEmail(part, orderQty) {
+function buildOrderEmail(part, orderQty, dueDate) {
   const subject = `【発注依頼】${part.name}`;
   const lines = [
     '〇〇会社　〇〇様',
@@ -42,8 +42,9 @@ function buildOrderEmail(part, orderQty) {
   ];
   if (part.model_no) lines.push(`型式: ${part.model_no}`);
   if (part.supplier) lines.push(`メーカー名: ${part.supplier}`);
+  lines.push(`希望発注数量: ${orderQty}`);
+  if (dueDate) lines.push(`希望納期: ${dueDate.replace(/-/g, '/')}`);
   lines.push(
-    `希望発注数量: ${orderQty}`,
     '',
     'よろしくお願いいたします。',
   );
@@ -79,16 +80,18 @@ function openInMailto(to, subject, body) {
 function openOrderDialog(part, onOrdered) {
   const shortfall = Math.max((part.safety_stock || 0) - (part.quantity || 0), 1);
   const qtyInput = el('input', { type: 'number', min: '1', value: String(shortfall), style: 'width:120px' });
+  const dueDateInput = el('input', { type: 'date' });
   const preview = el('textarea', { rows: '12', readonly: true });
   const orderedCheck = el('input', { type: 'checkbox', checked: !part.ordered_at });
 
   const refresh = () => {
     const qty = Math.max(parseInt(qtyInput.value, 10) || 1, 1);
-    const mail = buildOrderEmail(part, qty);
+    const mail = buildOrderEmail(part, qty, dueDateInput.value);
     preview.value = `件名: ${mail.subject}\n\n${mail.body}`;
     return mail;
   };
   qtyInput.addEventListener('input', refresh);
+  dueDateInput.addEventListener('input', refresh);
 
   // メール起動と同時に「発注中」を記録（失敗してもメール作成は妨げない）
   const markOrdered = () => {
@@ -102,6 +105,9 @@ function openOrderDialog(part, onOrdered) {
   const close = () => backdrop.remove();
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
 
+  // 宛先は部品マスタに登録済みの仕入先メール（あれば）を自動セットする（毎回の手入力を省く）
+  const supplierEmail = part.supplier_email || '';
+
   const modal = el('div', { class: 'modal' }, [
     el('h3', { class: 'modal-title' }, `発注メールの作成: ${part.name}`),
     part.ordered_at
@@ -109,12 +115,18 @@ function openOrderDialog(part, onOrdered) {
           `📨 この部品は発注中です（${formatDateTime(part.ordered_at)}）。二重発注にご注意ください。`)
       : null,
     el('div', { class: 'field' }, [el('label', {}, '希望発注数量'), qtyInput]),
+    el('div', { class: 'field' }, [el('label', {}, '希望納期（任意）'), dueDateInput]),
     el('div', { class: 'field' }, [el('label', {}, '本文プレビュー（自動生成）'), preview]),
     el('label', { class: 'pf-input-check' }, [orderedCheck, ' メール作成と同時に「発注中」バッジを付ける（入庫で自動解除）']),
-    el('p', { class: 'hint' }, '宛先はメール起動後に入力してください。PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
+    el('p', { class: 'hint' },
+      supplierEmail
+        ? `宛先は仕入先メール（${supplierEmail}）が自動入力されます。違う場合はメール起動後に修正してください。`
+        : '宛先は未登録のため空欄で開きます（部品編集画面で仕入先メールを登録すると次回から自動入力されます）。'
+    ),
+    el('p', { class: 'hint' }, 'PCはOutlook Web、スマホはOutlookアプリの作成画面を開きます。開かない場合は「メールアプリで開く」をお使いください。'),
     el('div', { class: 'modal-actions' }, [
-      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook('', m.subject, m.body); markOrdered(); } }, '📧 Outlookで作成'),
-      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto('', m.subject, m.body); markOrdered(); } }, 'メールアプリで開く'),
+      el('button', { class: 'btn btn-primary', onclick: () => { const m = refresh(); openInOutlook(supplierEmail, m.subject, m.body); markOrdered(); } }, '📧 Outlookで作成'),
+      el('button', { class: 'btn', onclick: () => { const m = refresh(); openInMailto(supplierEmail, m.subject, m.body); markOrdered(); } }, 'メールアプリで開く'),
       el('button', { class: 'btn', onclick: close }, '閉じる'),
     ]),
   ]);

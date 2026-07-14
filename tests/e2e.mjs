@@ -223,6 +223,32 @@ await api(`/api/parts/${partId}/transaction`, { method: 'POST', body: { type: 'i
 const after = await api(`/api/parts/${partId}`);
 check('入庫で発注中が自動解除', after.json?.part?.ordered_at === null, `ordered_at=${after.json?.part?.ordered_at}`);
 
+// ---------- 6.5 現場のクイックアクション ----------
+section('6.5 現場のクイックアクション（設備台帳・発注メール）');
+// 設備台帳の詳細ページから、トラブル記録・業務依頼をワンタップで新規作成できる
+const eqQuick = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-QUICK', name: 'E2Eクイック設備' } });
+check('クイックアクション用の設備登録', eqQuick.status === 201, `status=${eqQuick.status}`);
+await page.goto(`${BASE}/pages/ledger?id=${eqQuick.json?.id}`, { waitUntil: 'networkidle' });
+const quickLinks = await page.evaluate(() => ({
+  trouble: document.querySelector('a[href*="/pages/trouble?new=1"]')?.getAttribute('href') || null,
+  repair: document.querySelector('a[href*="/pages/repair?new=1"]')?.getAttribute('href') || null,
+}));
+check('設備台帳: トラブル記録への新規作成リンクがある', (quickLinks.trouble || '').includes(`equipment_id=${eqQuick.json?.id}`), `href=${quickLinks.trouble}`);
+check('設備台帳: 業務依頼への新規作成リンクがある', (quickLinks.repair || '').includes(`equipment_id=${eqQuick.json?.id}`), `href=${quickLinks.repair}`);
+
+// 発注メールの宛先自動入力・納期指定
+const partForOrder = await api('/api/parts', { method: 'POST', body: { name: 'E2E発注部品', quantity: 1, safety_stock: 5, supplier_email: 'supplier@example.com' } });
+check('発注メールテスト用の部品登録', partForOrder.status === 201, `status=${partForOrder.status}`);
+await page.goto(`${BASE}/pages/parts?id=${partForOrder.json?.id}`, { waitUntil: 'networkidle' });
+await page.click('button:has-text("発注メールを作成")');
+await page.waitForFunction(() => !!document.querySelector('.modal textarea'), { timeout: 5000 }).catch(() => {});
+const hintHasSupplier = await page.evaluate(() => document.querySelector('.modal')?.innerText.includes('supplier@example.com'));
+check('発注メール: 仕入先メールが宛先ヒントに自動反映される', hintHasSupplier);
+await page.fill('.modal input[type="date"]', '2026-08-15');
+const previewHasDueDate = await page.evaluate(() => document.querySelector('.modal textarea')?.value.includes('希望納期'));
+check('発注メール: 納期を入力すると本文プレビューに反映される', previewHasDueDate);
+await page.click('.modal button:has-text("閉じる")');
+
 // ---------- 7. 週表示: 期間予定が全日に出る ----------
 section('7. 保全計画 週表示（期間予定）');
 const weekPlan = await page.evaluate(async () => {
