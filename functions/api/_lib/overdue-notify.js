@@ -10,7 +10,7 @@
 //   作り直さない。確認済みになった後、再び期限超過になれば新しい通知を作る
 //   （例: 業務依頼を再受付して再び期限を過ぎた場合）。
 
-import { createNotification } from './notify.js';
+import { notifyTeam } from './notify.js';
 import { deriveOverdue } from '../plans/index.js';
 import { ensureRepairSchema, isOverdueRepair } from '../repairs/index.js';
 
@@ -30,7 +30,8 @@ async function hasUnacknowledgedNotification(db, relatedTable, relatedId, type) 
   return !!row;
 }
 
-async function notifyOverduePlans(db) {
+async function notifyOverduePlans(env) {
+  const db = env.DB;
   const { results } = await db
     .prepare(
       `SELECT id, title, planned_date, planned_end_date, status, unscheduled, annual_only
@@ -42,7 +43,9 @@ async function notifyOverduePlans(db) {
     if (derived.status !== 'overdue') continue;
     if (await hasUnacknowledgedNotification(db, 'maintenance_plan', p.id, 'plan_overdue')) continue;
     const limit = (p.planned_end_date || p.planned_date || '').slice(0, 10);
-    await createNotification(db, {
+    // waitUntil は渡さない（この関数自体が既に notifications GET の waitUntil 配下で動く
+    // ため、ここでのPush送信はそのまま await して完了を待ってよい）
+    await notifyTeam(env, null, {
       type: 'plan_overdue',
       level: 'warning',
       title: `期限超過: ${p.title}`,
@@ -55,7 +58,8 @@ async function notifyOverduePlans(db) {
   }
 }
 
-async function notifyOverdueRepairs(db) {
+async function notifyOverdueRepairs(env) {
+  const db = env.DB;
   await ensureRepairSchema(db); // due_date列が無い旧DBでもクエリが落ちないようにする
   const todayJst = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
   const { results } = await db
@@ -68,7 +72,7 @@ async function notifyOverdueRepairs(db) {
   for (const r of results ?? []) {
     if (!isOverdueRepair(r)) continue; // 二重チェック（status='done'に変わっていた場合等）
     if (await hasUnacknowledgedNotification(db, 'repair_request', r.id, 'repair_overdue')) continue;
-    await createNotification(db, {
+    await notifyTeam(env, null, {
       type: 'repair_overdue',
       level: 'warning',
       title: `対応期限超過: ${r.title}`,
@@ -84,14 +88,13 @@ async function notifyOverdueRepairs(db) {
 export async function checkOverdueAndNotify(env) {
   if (Date.now() - lastCheckAt < CHECK_INTERVAL_MS) return;
   lastCheckAt = Date.now();
-  const db = env.DB;
   try {
-    await notifyOverduePlans(db);
+    await notifyOverduePlans(env);
   } catch (err) {
     console.error('checkOverdueAndNotify (plans) failed:', err && err.stack ? err.stack : err);
   }
   try {
-    await notifyOverdueRepairs(db);
+    await notifyOverdueRepairs(env);
   } catch (err) {
     console.error('checkOverdueAndNotify (repairs) failed:', err && err.stack ? err.stack : err);
   }

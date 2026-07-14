@@ -3,11 +3,72 @@
 //   既読はチーム共有方式: 誰か1人が「確認」すると全員の未読数が減る。
 
 import { api } from '/js/api.js';
-import { getCurrentUser, hasRole } from '/js/auth.js';
+import { getCurrentUser, hasRole, getVapidPublicKey } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
+
+// ---------------- Web Push 購読の有効/無効切替 ----------------
+//   VAPID未構成（サーバー側で環境変数が未設定）の場合はボタン自体を出さない。
+
+// base64url文字列 → Uint8Array（PushManager.subscribe の applicationServerKey に渡す形式）
+function urlBase64ToUint8Array(base64Url) {
+  const padding = '='.repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function buildPushToggle() {
+  const vapidKey = getVapidPublicKey();
+  if (!vapidKey || !('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+
+  const btn = el('button', { class: 'btn btn-sm', disabled: true }, '確認中…');
+  const hint = el('span', { class: 'hint', style: 'margin-left:8px' }, '');
+
+  const refresh = async () => {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    btn.disabled = false;
+    if (sub) {
+      btn.textContent = '🔕 プッシュ通知をオフにする';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await sub.unsubscribe();
+          await api.post('/api/push/unsubscribe', { endpoint: sub.endpoint });
+        } catch (err) { alert(err.message); }
+        await refresh();
+      };
+    } else {
+      btn.textContent = '🔔 プッシュ通知を有効にする';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          if (Notification.permission === 'denied') {
+            hint.textContent = 'ブラウザの通知許可がブロックされています。ブラウザの設定から許可してください。';
+            return;
+          }
+          const newSub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          });
+          await api.post('/api/push/subscribe', newSub.toJSON());
+          hint.textContent = 'この端末でプッシュ通知が有効になりました。';
+        } catch (err) {
+          hint.textContent = `有効化できませんでした: ${err.message}`;
+        }
+        await refresh();
+      };
+    }
+  };
+  refresh().catch((err) => { btn.textContent = '確認できませんでした'; console.error(err); });
+
+  return el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [btn, hint]);
+}
 
 // トピック（type）とラベル
 const TOPICS = [
@@ -205,6 +266,7 @@ async function renderPage() {
   }
 
   render(app, [
+    buildPushToggle(),
     summaryBox,
     chipRow,
     el('div', { class: 'filter-bar' }, [

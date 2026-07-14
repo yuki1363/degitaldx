@@ -821,3 +821,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_reset_log_fy ON plan_reset_log (fisca
 --   （status の4値enum: open/in_progress/waiting_parts/done は変更しない）。
 ALTER TABLE repair_request ADD COLUMN priority TEXT;
 ALTER TABLE repair_request ADD COLUMN due_date TEXT;
+
+-- push_subscriptions — Web Push購読先（ブラウザごとの購読情報）
+--   ユーザー単位ではなく「端末（ブラウザ）」単位で保持する（同じ人が複数端末で購読できる）。
+--   endpoint はプッシュサービスが発行する一意なURLなのでUNIQUE制約で重複購読を防ぐ。
+--   購読解除（unsubscribe）は物理削除でよい（個人の端末設定に近く、監査対象にしない）。
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_email  TEXT    NOT NULL,
+  endpoint    TEXT    NOT NULL UNIQUE,
+  p256dh      TEXT    NOT NULL,
+  auth        TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_email);

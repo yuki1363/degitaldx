@@ -15,3 +15,25 @@ DEV_USER_EMAIL=admin@example.com
 # ローカルで拒否・警告の動作確認をするときに小さい値にして使う。
 # R2_HARD_LIMIT_BYTES=9000000000
 # R2_WARN_BYTES=8000000000
+
+# Web Push（機能10/通知）の VAPID鍵。両方とも未設定の間は Web Push 機能自体が
+# 無効になる（通知センターに購読ボタンが出ない。画面内通知は今までどおり動く）。
+#
+#   生成方法（この2〜3行をローカルで一度だけ実行し、出力をそのまま貼り付ける）:
+#     node -e "
+#       const crypto = require('crypto');
+#       const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+#       const pub = publicKey.export({ format: 'jwk' }), priv = privateKey.export({ format: 'jwk' });
+#       const b64u = (s) => Buffer.from(s.replace(/-/g,'+').replace(/_/g,'/'), 'base64');
+#       const toB64u = (b) => b.toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+#       console.log('VAPID_PUBLIC_KEY=' + toB64u(Buffer.concat([Buffer.from([4]), b64u(pub.x), b64u(pub.y)])));
+#       console.log('VAPID_PRIVATE_KEY=' + priv.d + '.' + pub.x + '.' + pub.y);
+#     "
+#   本番（Cloudflareダッシュボード）では VAPID_PRIVATE_KEY を必ず「暗号化」環境変数として
+#   設定すること（Pages → 設定 → 環境変数 → 追加時に「暗号化」を選ぶ）。
+#   VAPID_PUBLIC_KEY は秘密ではないので通常の環境変数でよい（ブラウザにもそのまま渡す）。
+#
+# 以下はローカル動作確認専用のサンプル鍵（本番では必ず自分で生成し直すこと）:
+# VAPID_PUBLIC_KEY=BIHbSoHWsRTrqYDA-pavlq8V_4HmF5s2h2HnsiVqg3Oayr4isq8SH2kwSD289nXY1cEkDaEtghggc0KY96bJhRE
+# VAPID_PRIVATE_KEY=IF4UAv__agUh0GuUB03fqTCRUNOKkDFHZuqw6aJEkzQ.gdtKgdaxFOupgMD6lq-WrxX_geYXmzaHYeeyJWqDc5o.yr4isq8SH2kwSD289nXY1cEkDaEtghggc0KY96bJhRE
+# VAPID_SUBJECT=mailto:admin@example.com

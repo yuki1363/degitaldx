@@ -3,11 +3,11 @@
 
 import { requireRole } from '../../_lib/auth.js';
 import { writeAuditLog } from '../../_lib/audit.js';
-import { createNotification } from '../../_lib/notify.js';
+import { notifyTeam } from '../../_lib/notify.js';
 import { json, jsonError, readJson } from '../../_lib/http.js';
 import { nowIso } from '../../_lib/util.js';
 
-export async function onRequestPost({ env, data, params, request }) {
+export async function onRequestPost({ env, data, params, request, waitUntil }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
 
@@ -124,7 +124,7 @@ export async function onRequestPost({ env, data, params, request }) {
   const label = part.model_no ? `${part.model_no}（${part.name}）` : part.name;
   const safetyStock = part.safety_stock || 0;
   if (newQty === 0 && oldQty > 0) {
-    await createNotification(DB, {
+    await notifyTeam(env, waitUntil, {
       type: 'parts_zero',
       level: 'alert',
       title: `在庫切れ: ${part.name}`,
@@ -135,7 +135,7 @@ export async function onRequestPost({ env, data, params, request }) {
       createdBy: userEmail,
     });
   } else if (safetyStock > 0 && newQty > 0 && newQty < safetyStock && oldQty >= safetyStock) {
-    await createNotification(DB, {
+    await notifyTeam(env, waitUntil, {
       type: 'parts_low',
       level: 'warning',
       title: `発注アラート: ${part.name}`,
@@ -161,7 +161,7 @@ export async function onRequestPost({ env, data, params, request }) {
       .all()
       .catch(() => ({ results: [] }));
     for (const r of waiting.results ?? []) {
-      await createNotification(DB, {
+      await notifyTeam(env, waitUntil, {
         type: 'parts_restock',
         level: 'info',
         title: `部品が入庫しました: ${part.name}`,

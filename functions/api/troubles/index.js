@@ -1,6 +1,6 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { createNotification } from '../_lib/notify.js';
+import { notifyTeam } from '../_lib/notify.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
@@ -85,7 +85,7 @@ export async function onRequestGet({ request, env }) {
   return json({ troubles: results ?? [] });
 }
 
-export async function onRequestPost({ request, env, data }) {
+export async function onRequestPost({ request, env, data, waitUntil }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
   const db = env.DB;
@@ -151,7 +151,7 @@ export async function onRequestPost({ request, env, data }) {
   }
   const phenomenonText = phenomenon.trim();
   const shortPhenomenon = phenomenonText.length > 40 ? phenomenonText.slice(0, 40) + '…' : phenomenonText;
-  await createNotification(db, {
+  await notifyTeam(env, waitUntil, {
     type: 'trouble',
     level: 'info',
     title: `トラブル記録: ${eqLabel}${shortPhenomenon}`,

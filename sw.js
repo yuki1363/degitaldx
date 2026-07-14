@@ -10,8 +10,12 @@
  * オフライン入力（CLAUDE.md のオフライン考慮）は js/offline-queue.js が担う:
  *   点検・トラブルの新規保存がオフラインで失敗すると IndexedDB の送信キューに保存し、
  *   オンライン復帰時に自動送信する（写真Blob含む）。
+ *
+ * Web Push（js/notifications.js から購読）:
+ *   push イベントでプッシュ通知を表示し、notificationclick でアプリの該当画面を開く。
+ *   ペイロードは functions/api/_lib/notify.js が { title, body, url } のJSONで送る。
  */
-const CACHE_VERSION = 'v1.7.0';
+const CACHE_VERSION = 'v1.8.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -153,6 +157,38 @@ self.addEventListener('fetch', (event) => {
         status: 503,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       });
+    })
+  );
+});
+
+// Web Push受信 → 通知を表示する。ペイロードが読めない/無い場合も最低限の通知は出す
+// （プッシュサービスの仕様上、pushイベントを受けたら何かしら表示しないと
+//   ブラウザから「サイレントプッシュ」とみなされ購読を無効化されることがあるため）。
+self.addEventListener('push', (event) => {
+  let data = { title: '設備保全アプリ', body: '新しい通知があります', url: '/pages/notifications' };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch { /* JSONでなくても既定値で表示する */ }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      data: { url: data.url || '/pages/notifications' },
+    })
+  );
+});
+
+// 通知タップ → 該当画面を開く（既に開いているタブがあればそこにフォーカスする）
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || '/pages/notifications';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if (client.url.includes(url) && 'focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );
 });

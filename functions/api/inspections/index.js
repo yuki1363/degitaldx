@@ -7,7 +7,7 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { createNotification } from '../_lib/notify.js';
+import { notifyTeam } from '../_lib/notify.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
@@ -174,7 +174,7 @@ export async function onRequestGet({ request, env }) {
   return json({ inspections: results });
 }
 
-export async function onRequestPost({ request, env, data }) {
+export async function onRequestPost({ request, env, data, waitUntil }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
 
@@ -229,7 +229,7 @@ export async function onRequestPost({ request, env, data }) {
       .bind(v.equipment_id)
       .first();
     const eqName = eq ? `${eq.code} ${eq.name}` : `設備#${v.equipment_id}`;
-    await createNotification(env.DB, {
+    await notifyTeam(env, waitUntil, {
       type: 'inspection_abnormal',
       level: 'warning',
       title: `点検で異常検知: ${eqName}`,

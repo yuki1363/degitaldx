@@ -17,14 +17,21 @@ export const ROLE_LABELS = {
 };
 
 let currentUser = null;
+let vapidPublicKey = null;
 
 /** ログインユーザーを取得する（結果はモジュール内にキャッシュ） */
 export async function getCurrentUser(force = false) {
   if (!currentUser || force) {
     const data = await api.get('/api/me');
     currentUser = data.user;
+    vapidPublicKey = data.vapid_public_key || null;
   }
   return currentUser;
+}
+
+/** Web Push の VAPID公開鍵（未構成なら null）。getCurrentUser() 実行後に使えるようになる */
+export function getVapidPublicKey() {
+  return vapidPublicKey;
 }
 
 /** user が role 以上の権限を持つか */

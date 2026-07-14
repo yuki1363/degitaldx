@@ -4,6 +4,7 @@
 //   止めない。エラーはログに残して握りつぶす（戻り値で成否を返す）。
 
 import { nowIso } from './util.js';
+import { sendWebPush } from './webpush.js';
 
 /**
  * 通知を1件作成する。
@@ -45,4 +46,42 @@ export async function createNotification(db, {
     console.error('createNotification failed:', err && err.stack ? err.stack : err);
     return false;
   }
+}
+
+// 購読中の全端末へ Web Push を送る。失効した購読（404/410）は掃除する。
+// 1件ずつ送るため、他の購読者への送信は1件の失敗に引きずられない。
+async function pushToAllSubscribers(env, notif) {
+  const { results } = await env.DB
+    .prepare(`SELECT id, endpoint, p256dh, auth FROM push_subscriptions`)
+    .all();
+  const payload = { title: notif.title, body: notif.body || '', url: notif.linkUrl || '/' };
+  for (const sub of results ?? []) {
+    const subscription = { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } };
+    const result = await sendWebPush(subscription, payload, env);
+    if (!result.ok && (result.status === 404 || result.status === 410)) {
+      // ブラウザ側で購読が失効している合図。次回以降の無駄な送信を避けるため削除する
+      await env.DB.prepare(`DELETE FROM push_subscriptions WHERE id = ?1`).bind(sub.id).run().catch(() => {});
+    }
+  }
+}
+
+/**
+ * createNotification に加え、VAPID鍵が設定されていれば購読中の全端末へ Web Push も送る
+ * （アプリを開いていなくても気づけるようにする）。呼び出し側は createNotification の代わりに
+ * これを使う。Push配信は waitUntil で裏実行し、レスポンスを遅らせない・失敗しても本処理に影響しない。
+ * @param {object} env Functions の env（env.DB・VAPID_PUBLIC_KEY・VAPID_PRIVATE_KEY）
+ * @param {Function} [waitUntil] Pages Functions のコンテキストが渡す waitUntil（無ければ同期的に待つ）
+ * @param {object} notif createNotification と同じ引数
+ * @returns {Promise<boolean>}
+ */
+export async function notifyTeam(env, waitUntil, notif) {
+  const created = await createNotification(env.DB, notif);
+  if (created && env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
+    const pushJob = pushToAllSubscribers(env, notif).catch((err) => {
+      console.error('pushToAllSubscribers failed:', err && err.stack ? err.stack : err);
+    });
+    if (typeof waitUntil === 'function') waitUntil(pushJob);
+    else await pushJob;
+  }
+  return created;
 }

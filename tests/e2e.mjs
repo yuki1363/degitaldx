@@ -311,6 +311,28 @@ await page.goto(`${BASE}/pages/notifications`, { waitUntil: 'networkidle' });
 const hasOverdueFilter = await page.evaluate(() => document.body.innerText.includes('期限超過'));
 check('通知センター: 「⏰ 期限超過」フィルタが表示される', hasOverdueFilter);
 
+// ---------- 6.8 Web Push 購読API ----------
+// 実際のプッシュ配信（暗号化・VAPID署名）はネットワークを要するためE2E環境では検証できない
+// （scratchpad で Web Crypto の暗号化→復号ラウンドトリップ・VAPID署名検証・失効購読の自動削除は
+// 別途確認済み）。ここでは購読の登録・解除・入力検証というAPI契約の部分を確認する。
+section('6.8 Web Push 購読API');
+const fakeSub = {
+  endpoint: 'https://push.example.com/e2e-test-endpoint',
+  keys: { p256dh: 'BEXAMPLE_P256DH_KEY_BASE64URL', auth: 'EXAMPLE_AUTH_BASE64URL' },
+};
+const subRes = await api('/api/push/subscribe', { method: 'POST', body: fakeSub });
+check('Push購読: 登録できる（201）', subRes.status === 201, `status=${subRes.status}`);
+const subAgain = await api('/api/push/subscribe', { method: 'POST', body: fakeSub });
+check('Push購読: 同じendpointを再登録しても成功する（ON CONFLICT UPDATE）', subAgain.status === 201, `status=${subAgain.status}`);
+const subMissing = await api('/api/push/subscribe', { method: 'POST', body: { endpoint: 'https://push.example.com/x' } });
+check('Push購読: keys不足は400', subMissing.status === 400, `status=${subMissing.status}`);
+const unsubRes = await api('/api/push/unsubscribe', { method: 'POST', body: { endpoint: fakeSub.endpoint } });
+check('Push購読解除: 200', unsubRes.status === 200, `status=${unsubRes.status}`);
+const unsubMissing = await api('/api/push/unsubscribe', { method: 'POST', body: {} });
+check('Push購読解除: endpoint不足は400', unsubMissing.status === 400, `status=${unsubMissing.status}`);
+const meRes = await api('/api/me');
+check('/api/me: vapid_public_key フィールドが存在する（未設定ならnull）', 'vapid_public_key' in (meRes.json || {}), JSON.stringify(meRes.json));
+
 // ---------- 7. 週表示: 期間予定が全日に出る ----------
 section('7. 保全計画 週表示（期間予定）');
 const weekPlan = await page.evaluate(async () => {
