@@ -3,6 +3,7 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
+import { ensureRepairSchema, normPriority, parseDueDate, isOverdueRepair } from './index.js';
 
 const VALID_STATUSES = ['open', 'in_progress', 'waiting_parts', 'done'];
 
@@ -66,7 +67,7 @@ export async function onRequestGet({ params, env }) {
   ]);
 
   return json({
-    repair,
+    repair: { ...repair, is_overdue: isOverdueRepair(repair) },
     files: filesResult.results ?? [],
     history: historyResult.results ?? [],
     used_parts: usedPartsResult.results ?? [],
@@ -79,6 +80,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (denied) return denied;
 
   const db = env.DB;
+  await ensureRepairSchema(db); // priority/due_date 列を自動で用意（未マイグレーションでも保存できるように）
   const id = params.id;
   const userEmail = data.user.email;
   const now = nowIso();
@@ -91,7 +93,7 @@ export async function onRequestPut({ request, params, env, data }) {
   const conflict = checkEditConflict(body, existing);
   if (conflict) return conflict; // 同時編集ガード
 
-  const UPDATABLE = ['title', 'equipment_id', 'description', 'assignee_name', 'status'];
+  const UPDATABLE = ['title', 'equipment_id', 'description', 'assignee_name', 'status', 'priority', 'due_date'];
 
   const setClauses = [];
   const binds = [];
@@ -108,8 +110,16 @@ export async function onRequestPut({ request, params, env, data }) {
     if (field === 'status' && !VALID_STATUSES.includes(value)) {
       return jsonError(400, `status は ${VALID_STATUSES.join(' / ')} のいずれかです`);
     }
+    if (field === 'due_date') {
+      const parsed = parseDueDate(value);
+      if (parsed.error) return jsonError(400, parsed.error);
+    }
 
-    const storedValue = field === 'title' ? String(value).trim() : (value ?? null);
+    let storedValue;
+    if (field === 'title') storedValue = String(value).trim();
+    else if (field === 'priority') storedValue = normPriority(value);
+    else if (field === 'due_date') storedValue = parseDueDate(value).value;
+    else storedValue = value ?? null;
     const oldValue = existing[field];
 
     if (String(oldValue ?? '') !== String(storedValue ?? '')) {

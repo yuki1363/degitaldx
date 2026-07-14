@@ -8,7 +8,7 @@ import { json } from './_lib/http.js';
 // /api/me は Service Worker にキャッシュされない（middlewareで認証必須のAPI）ため、
 // この値＝いま本番で動いている Functions のバージョン。UIキャッシュの新旧に関わらず、
 // 「最新のコードがデプロイ済みか」をホーム画面下部の表示で確認できる。
-export const APP_VERSION = 'v1.5.0';
+export const APP_VERSION = 'v1.6.0';
 
 export function onRequestGet({ data }) {
   return json({ user: data.user, version: APP_VERSION });

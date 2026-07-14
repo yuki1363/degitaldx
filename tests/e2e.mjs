@@ -249,6 +249,58 @@ const previewHasDueDate = await page.evaluate(() => document.querySelector('.mod
 check('発注メール: 納期を入力すると本文プレビューに反映される', previewHasDueDate);
 await page.click('.modal button:has-text("閉じる")');
 
+// ---------- 6.6 業務依頼: 優先度・期限 ----------
+section('6.6 業務依頼（優先度・期限超過）');
+const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('sv-SE');
+const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('sv-SE');
+
+// 優先度を指定せず登録 → 既定値「中」になる
+const rDefault = await api('/api/repairs', { method: 'POST', body: { title: 'E2E業務依頼-既定優先度' } });
+check('業務依頼: 優先度未指定で登録（201）', rDefault.status === 201, `status=${rDefault.status}`);
+const rDefaultGet = await api(`/api/repairs/${rDefault.json?.id}`);
+check('業務依頼: 優先度の既定値は「中」', rDefaultGet.json?.repair?.priority === '中', `priority=${rDefaultGet.json?.repair?.priority}`);
+
+// 期限切れ（昨日）＋未完了 → is_overdue: true
+const rOverdue = await api('/api/repairs', { method: 'POST', body: { title: 'E2E業務依頼-期限超過', priority: '高', due_date: yesterday } });
+check('業務依頼: 優先度・期限付きで登録（201）', rOverdue.status === 201, `status=${rOverdue.status}`);
+const rOverdueGet = await api(`/api/repairs/${rOverdue.json?.id}`);
+check('業務依頼: 優先度が保存される', rOverdueGet.json?.repair?.priority === '高', `priority=${rOverdueGet.json?.repair?.priority}`);
+check('業務依頼: 期限切れ・未完了は is_overdue', rOverdueGet.json?.repair?.is_overdue === true, `is_overdue=${rOverdueGet.json?.repair?.is_overdue}`);
+const rList = await api('/api/repairs');
+const rOverdueInList = (rList.json?.repairs || []).find((r) => r.id === rOverdue.json?.id);
+check('業務依頼: 一覧GETにも is_overdue が反映される', rOverdueInList?.is_overdue === true, `is_overdue=${rOverdueInList?.is_overdue}`);
+
+// 完了にすると is_overdue は false になる（期限切れでも「未完了」の間だけ超過扱い）
+await api(`/api/repairs/${rOverdue.json?.id}`, { method: 'PUT', body: { status: 'done', expected_updated_at: rOverdueGet.json?.repair?.updated_at } });
+const rDoneGet = await api(`/api/repairs/${rOverdue.json?.id}`);
+check('業務依頼: 完了にすると is_overdue が解除される', rDoneGet.json?.repair?.is_overdue === false, `is_overdue=${rDoneGet.json?.repair?.is_overdue}`);
+
+// 期限が未来なら is_overdue は false
+const rFuture = await api('/api/repairs', { method: 'POST', body: { title: 'E2E業務依頼-期限未来', due_date: tomorrow } });
+const rFutureGet = await api(`/api/repairs/${rFuture.json?.id}`);
+check('業務依頼: 期限が未来なら is_overdue は false', rFutureGet.json?.repair?.is_overdue === false, `is_overdue=${rFutureGet.json?.repair?.is_overdue}`);
+
+// 不正な日付形式は400
+const rBadDate = await api('/api/repairs', { method: 'POST', body: { title: 'E2E業務依頼-不正日付', due_date: '2026/08/15' } });
+check('業務依頼: 不正な期限形式は400', rBadDate.status === 400, `status=${rBadDate.status}`);
+
+// UI: 登録フォームに優先度・期限の入力欄がある
+await page.goto(`${BASE}/pages/repair?new=1`, { waitUntil: 'networkidle' });
+const repairFormFields = await page.evaluate(() => ({
+  priority: !!document.querySelector('select')?.querySelector('option[value="高"]'),
+  dueDate: !!document.querySelector('input[type="date"]'),
+}));
+check('業務依頼フォーム: 優先度セレクトがある', repairFormFields.priority);
+check('業務依頼フォーム: 対応期限の入力欄がある', repairFormFields.dueDate);
+
+// UI: 詳細ページに優先度バッジ・期限超過バッジが表示される
+// （rOverdue は上で完了済みにしたため、未完了のまま確認できる別の期限超過依頼を用意する）
+const rOverdue2 = await api('/api/repairs', { method: 'POST', body: { title: 'E2E業務依頼-表示確認', priority: '高', due_date: yesterday } });
+await page.goto(`${BASE}/pages/repair?id=${rOverdue2.json?.id}`, { waitUntil: 'networkidle' });
+const detailBadges = await page.evaluate(() => document.body.innerText);
+check('業務依頼詳細: 優先度バッジが表示される', detailBadges.includes('高'));
+check('業務依頼詳細: 期限超過バッジが表示される', detailBadges.includes('期限超過'));
+
 // ---------- 7. 週表示: 期間予定が全日に出る ----------
 section('7. 保全計画 週表示（期間予定）');
 const weekPlan = await page.evaluate(async () => {

@@ -8,7 +8,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
@@ -20,6 +20,17 @@ const STATUS = {
   waiting_parts: { label: '部品待ち', color: '#6b21a8', bg: '#f3e8ff' },
   done:          { label: '完了',    color: '#15803d', bg: '#dcfce7' },
 };
+
+// 優先度バッジ（部品在庫05の重要度と同じ色・クラスを再利用。高=赤/中=橙/低=無色）
+const IMP_CLASS = { '高': 'imp-high', '中': 'imp-mid', '低': 'imp-low' };
+function priorityBadge(v) {
+  if (!v || v === '中') return null; // 既定値は視覚的なノイズを避けるため表示しない
+  return el('span', { class: `imp-badge ${IMP_CLASS[v] || ''}` }, v);
+}
+function overdueBadge(r) {
+  if (!r.is_overdue) return null;
+  return el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '⚠期限超過');
+}
 
 // 起票元（トラブル/点検）の表示ラベルと遷移先
 const SOURCE_LABELS = { trouble_record: 'トラブル記録', inspection_result: '点検記録' };
@@ -72,6 +83,8 @@ async function renderList(equipmentId) {
             el('div', { class: 'list-item-sub' }, [
               el('span', { class: 'status-badge', style: `background:${s.bg};color:${s.color}` }, s.label),
               formatDateTime(r.created_at),
+              priorityBadge(r.priority),
+              overdueBadge(r),
             ]),
             el('div', { class: 'list-item-title' }, r.title),
             el('div', { class: 'list-item-sub' }, [
@@ -264,11 +277,14 @@ async function renderDetail(id) {
   render(app, [
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('h2', { class: 'card-title' }, repair.title),
+        el('h2', { class: 'card-title' }, [repair.title, priorityBadge(repair.priority)]),
         el('span', { class: 'status-badge', style: `background:${s.bg};color:${s.color}` }, s.label),
       ]),
       infoRow('設備', repair.equipment_name ? `${repair.equipment_code} ${repair.equipment_name}` : null),
       infoRow('担当者', repair.assignee_name),
+      infoRow('対応期限', repair.due_date
+        ? el('span', {}, [formatDate(repair.due_date), ' ', overdueBadge(repair)])
+        : null),
       infoRow('登録日時', formatDateTime(repair.created_at)),
       // 起票元（トラブル/点検から作成された依頼なら、その記録へ戻れる）
       repair.source_table && repair.source_id
@@ -366,6 +382,9 @@ async function renderForm(existing, prefill = null) {
       placeholder: '担当者名（自由入力・任意）',
       list: 'repair-assignee-options',
     }),
+    priority: el('select', {}, ['中', '高', '低'].map((v) =>
+      el('option', { value: v, selected: (init.priority || '中') === v }, v))),
+    due_date: el('input', { type: 'date', value: init.due_date || '' }),
     description: el('textarea', { placeholder: '状況・症状の詳細' }, init.description || ''),
   };
   // 登録済みユーザー名を候補として表示（自由入力は可）
@@ -381,6 +400,8 @@ async function renderForm(existing, prefill = null) {
       title: f.title.value.trim(),
       equipment_id: f.equipment_id.value ? Number(f.equipment_id.value) : null,
       assignee_name: f.assignee_name.value.trim() || null,
+      priority: f.priority.value,
+      due_date: f.due_date.value || null,
       description: f.description.value.trim() || null,
       // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
       ...(existing ? { expected_updated_at: existing.updated_at } : {}),
@@ -432,6 +453,10 @@ async function renderForm(existing, prefill = null) {
         ]),
       ]),
       el('div', { class: 'field' }, [el('label', {}, '担当者'), f.assignee_name, assigneeOptions]),
+      el('div', { class: 'field-pair' }, [
+        field('優先度', f.priority),
+        field('対応期限（任意）', f.due_date),
+      ]),
       field('詳細・症状', f.description),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: save }, '保存'),

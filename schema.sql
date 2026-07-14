@@ -814,3 +814,10 @@ CREATE TABLE IF NOT EXISTS plan_reset_log (
   csv_snapshot   TEXT                        -- 実施状況の CSV（UTF-8）。大きくなれば別テーブルへ分離可
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_reset_log_fy ON plan_reset_log (fiscal_year);
+
+-- repair_request: 優先度・対応期限
+--   priority は部品在庫(05)の重要度と同じ 高/中/低（未指定は中）。due_date は任意（YYYY-MM-DD）。
+--   期限超過の判定は status 列を書き換えず、GET時に is_overdue として別途返す
+--   （status の4値enum: open/in_progress/waiting_parts/done は変更しない）。
+ALTER TABLE repair_request ADD COLUMN priority TEXT;
+ALTER TABLE repair_request ADD COLUMN due_date TEXT;
