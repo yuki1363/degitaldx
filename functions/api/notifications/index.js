@@ -10,12 +10,16 @@
 //   閲覧は全ログインユーザー可（確認操作のみ editor 以上）。
 
 import { json } from '../_lib/http.js';
+import { checkOverdueAndNotify } from '../_lib/overdue-notify.js';
 
 // 保存は UTC ISO 8601、表示は JST。月別フィルタも JST 基準（+9時間）で揃える。
 const JST_MONTH = `strftime('%Y-%m', created_at, '+9 hours')`;
 
-export async function onRequestGet({ request, env }) {
+export async function onRequestGet({ request, env, waitUntil }) {
   const db = env.DB;
+  // 保全計画・業務依頼の期限超過を通知化する（1時間に1回・裏実行・失敗しても一覧表示は止めない）。
+  // このAPIはホーム画面表示のたびに呼ばれるため、アプリを開けば1時間以内に反映される。
+  if (typeof waitUntil === 'function') waitUntil(checkOverdueAndNotify(env).catch(() => {}));
   const sp = new URL(request.url).searchParams;
   const status = sp.get('status');           // 'unread' | null
   const type = sp.get('type');               // parts_zero / inspection_abnormal / trouble

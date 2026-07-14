@@ -301,6 +301,16 @@ const detailBadges = await page.evaluate(() => document.body.innerText);
 check('業務依頼詳細: 優先度バッジが表示される', detailBadges.includes('高'));
 check('業務依頼詳細: 期限超過バッジが表示される', detailBadges.includes('期限超過'));
 
+// ---------- 6.7 通知センター: 期限超過フィルタ ----------
+// 通知の自動生成（checkOverdueAndNotify）は1時間に1回の裏実行のため、E2E実行中の
+// タイミングに依存させず（テストの都度アプリを開いた直後だけ判定される仕様のため、
+// wrangler dev の1プロセス内では最初の1回しか走らない）、ここではフィルタUIの存在のみ確認する。
+// 実際に通知が生成されることは手元検証で確認済み（チャットの10日自動削除と同じ検証方針）。
+section('6.7 通知センター（期限超過フィルタ）');
+await page.goto(`${BASE}/pages/notifications`, { waitUntil: 'networkidle' });
+const hasOverdueFilter = await page.evaluate(() => document.body.innerText.includes('期限超過'));
+check('通知センター: 「⏰ 期限超過」フィルタが表示される', hasOverdueFilter);
+
 // ---------- 7. 週表示: 期間予定が全日に出る ----------
 section('7. 保全計画 週表示（期間予定）');
 const weekPlan = await page.evaluate(async () => {

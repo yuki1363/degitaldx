@@ -38,6 +38,7 @@
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
 - **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期
+- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過は `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
 - **プッシュ通知（将来拡張）**: 異常値アラート等に Web Push を利用可能。Phase 1 では画面内通知のみ
 ### バージョン復元（3層の安全網）— 必須要件
 「編集してアプリが動かなくなる」事故に備え、以下を必ず運用・実装する。

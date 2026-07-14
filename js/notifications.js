@@ -15,6 +15,7 @@ const TOPICS = [
   { key: 'parts_zero,parts_low,parts_restock', label: '📦 部品' }, // 在庫切れ・発注アラート・入庫
   { key: 'inspection_abnormal',   label: '✅ 点検' },
   { key: 'trouble',               label: '⚠️ トラブル' },
+  { key: 'plan_overdue,repair_overdue', label: '⏰ 期限超過' }, // 保全計画・業務依頼の期限超過
 ];
 
 // レベルごとの色とラベル
