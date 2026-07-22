@@ -116,6 +116,35 @@ export async function insertMaintenancePlan(db, cols, vals) {
   throw new Error('予定の登録に失敗しました（列の不一致）。');
 }
 
+export const addDays = (dateStr, n) => {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+// 期間予定を分割するとき、新しいレコードに引き継ぐ列と値を組み立てる
+// （id・監査列・日付は個別に指定）。POST /api/plans の登録時と同じ列セット
+// （旧FKの equipment_id/assignee_id は含めない）。
+// overrideStatus を指定すると status 列だけ元の予定と変えて登録する
+// （例: 1日だけ完了にする → その日の新レコードだけ 'done' にする）。
+export function buildCloneColumns(plan, userEmail, now, newStart, newEnd, overrideStatus) {
+  const cols = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'line_name',
+    'equipment_name', 'assignee_name', 'status', 'note', 'recurrence_rule'];
+  const vals = [
+    plan.title, newStart, newEnd, plan.plan_type, plan.line_name,
+    plan.equipment_name, plan.assignee_name, overrideStatus ?? plan.status, plan.note, plan.recurrence_rule,
+  ];
+  if (plan.inspector_name) { cols.push('inspector_name'); vals.push(plan.inspector_name); }
+  if (plan.unscheduled) { cols.push('unscheduled'); vals.push(plan.unscheduled); }
+  if (plan.annual_only) { cols.push('annual_only'); vals.push(plan.annual_only); }
+  if (plan.form_values_json != null) { cols.push('form_values_json'); vals.push(plan.form_values_json); }
+  if (plan.source_plan_id != null) { cols.push('source_plan_id'); vals.push(plan.source_plan_id); }
+  if (plan.on_calendar) { cols.push('on_calendar'); vals.push(plan.on_calendar); }
+  cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
+  vals.push(userEmail, now, userEmail, now);
+  return { cols, vals };
+}
+
 // 帳票の入力値（{タグ名:値} のJSON）を検証・正規化する。
 //   戻り値: { value: 文字列|null } または { error }
 export function normalizeFormValues(raw) {

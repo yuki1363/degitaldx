@@ -445,6 +445,63 @@ const pRangeCheck = await api('/api/plans', { method: 'POST', body: { title: 'E2
 const delOutOfRange = await api(`/api/plans/${pRangeCheck.json?.id}/delete-day`, { method: 'POST', body: { date: dd(10) } });
 check('日別削除: 期間外の日付指定は400', delOutOfRange.status === 400, `status=${delOutOfRange.status}`);
 
+// ---------- 7.6 保全計画: 期間予定の「1日だけ完了」----------
+section('7.6 保全計画（期間予定の1日だけ完了）');
+
+// 先頭日を完了 → その日は完了済みの単日レコードに切り出され、残りは未完了のまま開始日が進む
+const cHead = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-先頭', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(4) } });
+const compHead = await api(`/api/plans/${cHead.json?.id}/complete-day`, { method: 'POST', body: { date: dd(0) } });
+check('日別完了: 先頭日完了（200・split）', compHead.status === 200 && compHead.json?.mode === 'split' && !!compHead.json?.done_id, `status=${compHead.status} mode=${compHead.json?.mode}`);
+const cHeadAfter = await api(`/api/plans/${cHead.json?.id}`);
+check('日別完了: 先頭日完了後、残りは未完了のまま開始日が1日進む', cHeadAfter.json?.plan?.status === 'pending' && cHeadAfter.json?.plan?.planned_date?.slice(0, 10) === dd(1), `status=${cHeadAfter.json?.plan?.status} planned_date=${cHeadAfter.json?.plan?.planned_date}`);
+const cHeadDone = await api(`/api/plans/${compHead.json?.done_id}`);
+check('日別完了: 切り出された日は完了済みの単日レコード', cHeadDone.json?.plan?.status === 'done' && cHeadDone.json?.plan?.planned_date?.slice(0, 10) === dd(0) && !cHeadDone.json?.plan?.planned_end_date, `plan=${JSON.stringify(cHeadDone.json?.plan)}`);
+
+// 末尾日を完了 → 終了日が1日戻り、残りは未完了のまま
+const cTail = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-末尾', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(4) } });
+const compTail = await api(`/api/plans/${cTail.json?.id}/complete-day`, { method: 'POST', body: { date: dd(4) } });
+check('日別完了: 末尾日完了（200・split）', compTail.status === 200 && compTail.json?.mode === 'split', `status=${compTail.status} mode=${compTail.json?.mode}`);
+const cTailAfter = await api(`/api/plans/${cTail.json?.id}`);
+check('日別完了: 末尾日完了後、残りは未完了のまま終了日が1日戻る', cTailAfter.json?.plan?.status === 'pending' && cTailAfter.json?.plan?.planned_end_date?.slice(0, 10) === dd(3), `status=${cTailAfter.json?.plan?.status} planned_end_date=${cTailAfter.json?.plan?.planned_end_date}`);
+
+// 途中の日を完了 → 前後は未完了のまま2件に分割され、間に完了済みの単日レコードが挟まる
+const cMid = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-分割', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(4) } });
+const compMid = await api(`/api/plans/${cMid.json?.id}/complete-day`, { method: 'POST', body: { date: dd(2) } });
+check('日別完了: 途中の日完了（200・split）', compMid.status === 200 && compMid.json?.mode === 'split' && !!compMid.json?.done_id && !!compMid.json?.tail_id, `status=${compMid.status} mode=${compMid.json?.mode}`);
+const cMidHead = await api(`/api/plans/${cMid.json?.id}`);
+const cMidDone = await api(`/api/plans/${compMid.json?.done_id}`);
+const cMidTail = await api(`/api/plans/${compMid.json?.tail_id}`);
+check('日別完了: 分割後、前半は未完了のまま終了日が完了日の前日', cMidHead.json?.plan?.status === 'pending' && cMidHead.json?.plan?.planned_end_date?.slice(0, 10) === dd(1), `plan=${JSON.stringify(cMidHead.json?.plan)}`);
+check('日別完了: 分割後、完了日は完了済みの単日レコード', cMidDone.json?.plan?.status === 'done' && cMidDone.json?.plan?.planned_date?.slice(0, 10) === dd(2) && !cMidDone.json?.plan?.planned_end_date, `plan=${JSON.stringify(cMidDone.json?.plan)}`);
+check('日別完了: 分割後、後半は未完了のまま元の終了日を保持', cMidTail.json?.plan?.status === 'pending' && cMidTail.json?.plan?.planned_date?.slice(0, 10) === dd(3) && cMidTail.json?.plan?.planned_end_date?.slice(0, 10) === dd(4), `plan=${JSON.stringify(cMidTail.json?.plan)}`);
+const midCompleteRange = await api(`/api/plans?from=${dd(0)}&to=${dd(5)}`);
+const midCompleteTitles = (midCompleteRange.json?.plans || []).filter((p) => p.title === 'E2E日別完了-分割');
+check('日別完了: 分割後、範囲取得に3件（前半・完了日・後半）とも含まれる', midCompleteTitles.length === 3, `count=${midCompleteTitles.length}`);
+
+// 単日予定は「1日だけ完了」＝全体完了と同じ扱い（分割しない）
+const cSingle = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-単日', plan_type: 'other', planned_date: dd(6) } });
+const compSingle = await api(`/api/plans/${cSingle.json?.id}/complete-day`, { method: 'POST', body: { date: dd(6) } });
+check('日別完了: 単日予定は全体完了扱い（200・done）', compSingle.status === 200 && compSingle.json?.mode === 'done', `status=${compSingle.status} mode=${compSingle.json?.mode}`);
+const cSingleAfter = await api(`/api/plans/${cSingle.json?.id}`);
+check('日別完了: 単日予定完了後はstatus=done（同一レコード）', cSingleAfter.json?.plan?.status === 'done', `status=${cSingleAfter.json?.plan?.status}`);
+
+// 2日間の期間で片方を完了すると、残りは単日になり planned_end_date が null になる
+const cTwoDay = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-2日間', plan_type: 'other', planned_date: dd(7), planned_end_date: dd(8) } });
+await api(`/api/plans/${cTwoDay.json?.id}/complete-day`, { method: 'POST', body: { date: dd(7) } });
+const cTwoDayAfter = await api(`/api/plans/${cTwoDay.json?.id}`);
+check('日別完了: 2日間の先頭完了後、残りは単日になりplanned_end_dateがnull', cTwoDayAfter.json?.plan?.planned_date?.slice(0, 10) === dd(8) && !cTwoDayAfter.json?.plan?.planned_end_date, `plan=${JSON.stringify(cTwoDayAfter.json?.plan)}`);
+
+// 期間外の日付を指定すると400エラー
+const cRangeCheck = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-範囲外', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(2) } });
+const compOutOfRange = await api(`/api/plans/${cRangeCheck.json?.id}/complete-day`, { method: 'POST', body: { date: dd(10) } });
+check('日別完了: 期間外の日付指定は400', compOutOfRange.status === 400, `status=${compOutOfRange.status}`);
+
+// すでに完了済みの予定への日別完了は400エラー
+const cAlreadyDone = await api('/api/plans', { method: 'POST', body: { title: 'E2E日別完了-完了済み', plan_type: 'other', planned_date: dd(0), planned_end_date: dd(2) } });
+await api(`/api/plans/${cAlreadyDone.json?.id}`, { method: 'PUT', body: { status: 'done' } });
+const compAlreadyDone = await api(`/api/plans/${cAlreadyDone.json?.id}/complete-day`, { method: 'POST', body: { date: dd(0) } });
+check('日別完了: すでに完了済みの予定は400', compAlreadyDone.status === 400, `status=${compAlreadyDone.status}`);
+
 // UI操作: カレンダーの日付シートから🗑で「その日だけ削除」→前後の日程は残る
 const uiPlan = await page.evaluate(async () => {
   const now = new Date();
@@ -489,6 +546,49 @@ const afterUiDelete = await page.evaluate((title) =>
   [...document.querySelectorAll('.cal-week-col')].filter((c) => c.innerText.includes(title)).length,
 'E2EUI日別削除');
 check('UI日別削除: 削除した日だけ消え、前後の日は残る', afterUiDelete === 2, `hits=${afterUiDelete}`);
+
+// UI操作: カレンダーの日付シートから✓で「その日だけ完了」→他の日程は未完了のまま残る
+const uiCompletePlan = await page.evaluate(async () => {
+  const now = new Date();
+  const sun = new Date(now); sun.setDate(now.getDate() - now.getDay());
+  const f = (n) => { const d = new Date(sun); d.setDate(sun.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+  const r = await fetch('/api/plans', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'E2EUI日別完了', plan_type: 'construction', planned_date: f(2), planned_end_date: f(4) }), // 火〜木
+  });
+  return { status: r.status, wed: f(3) };
+});
+check('UI日別完了テスト用の期間予定登録', uiCompletePlan.status === 201, `status=${uiCompletePlan.status}`);
+
+await page.goto(`${BASE}/pages/plan`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => !!document.querySelector('.cal-grid'), { timeout: 10000 }).catch(() => {});
+await page.click('button:has-text("週")');
+await page.waitForFunction(
+  () => [...document.querySelectorAll('.cal-week-col')].some((c) => c.innerText.includes('E2EUI日別完了')),
+  { timeout: 10000 }
+).catch(() => {});
+
+// 完了する日（水曜）の日付ボタンをクリックしてシートを開く
+const wedDayNum2 = String(Number(uiCompletePlan.wed.slice(-2)));
+await page.evaluate((num) => {
+  const target = [...document.querySelectorAll('.cal-day-num')].find((b) => b.textContent.trim() === num);
+  target?.click();
+}, wedDayNum2);
+await page.waitForFunction(
+  () => [...document.querySelectorAll('.day-plan-row')].some((r) => r.textContent.includes('E2EUI日別完了') && r.querySelector('.day-plan-done-btn')),
+  { timeout: 5000 }
+).catch(() => {});
+await page.locator('.day-plan-row', { hasText: 'E2EUI日別完了' }).locator('.day-plan-done-btn').click();
+// confirm() は自動承諾される。シートが閉じ、完了日が単日レコードとして切り出され3日分（火・水・木）表示になるまで待つ
+await page.waitForFunction((title) => {
+  if (document.querySelector('.sheet-backdrop')) return false;
+  const cols = [...document.querySelectorAll('.cal-week-col')];
+  return cols.filter((c) => c.innerText.includes(title)).length === 3;
+}, 'E2EUI日別完了', { timeout: 10000 }).catch(() => {});
+const afterUiComplete = await page.evaluate((title) =>
+  [...document.querySelectorAll('.cal-week-col')].filter((c) => c.innerText.includes(title)).length,
+'E2EUI日別完了');
+check('UI日別完了: 完了した日は完了済みの単日レコードとして残り、他の日も未完了のまま残る', afterUiComplete === 3, `hits=${afterUiComplete}`);
 
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');

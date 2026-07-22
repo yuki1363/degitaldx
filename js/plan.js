@@ -106,6 +106,7 @@ function showDaySheet(fullDate, dateLabel, dayPlans, refresh) {
       const canStart = p.plan_type === 'inspection' && p.status !== 'done' && canEdit;
       // 複数日にまたがる予定かどうか（判定用。単日なら「削除」＝全期間削除と同じ）
       const isPeriod = p.planned_end_date && p.planned_end_date.slice(0, 10) !== p.planned_date.slice(0, 10);
+      const canComplete = p.status !== 'done' && canEdit;
       return el('div', { class: 'day-plan-row' }, [
         el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
           el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
@@ -120,6 +121,27 @@ function showDaySheet(fullDate, dateLabel, dayPlans, refresh) {
                 window.location.href = await buildInspectionStartUrl(p, fullDate);
               },
             }, '✅')
+          : null,
+        canComplete
+          ? el('button', {
+              class: 'day-plan-done-btn',
+              title: isPeriod ? 'この日だけ完了にする（他の日程は未完了のまま残ります）' : '完了にする',
+              onclick: async (e) => {
+                const msg = isPeriod
+                  ? `「${p.title}」の${dateLabel}だけ完了にしますか？\n他の日程は未完了のまま残ります（全期間を完了にしたい場合は詳細画面から）。`
+                  : `「${p.title}」を完了にしますか？`;
+                if (!confirm(msg)) return;
+                e.currentTarget.disabled = true;
+                try {
+                  await api.post(`/api/plans/${p.id}/complete-day`, { date: fullDate });
+                  close();
+                  refresh?.();
+                } catch (err) {
+                  alert(err.message);
+                  e.currentTarget.disabled = false;
+                }
+              },
+            }, '✓')
           : null,
         canEdit
           ? el('button', {
@@ -367,8 +389,8 @@ async function renderDetail(id, fromAnnual = false) {
   ]);
   const canEdit = hasRole(currentUser, 'editor');
   const type = PLAN_TYPES[plan.plan_type] || PLAN_TYPES.other;
-  // 複数日にまたがる期間予定か（このページの「削除」は常に全期間削除。1日だけの削除は
-  // カレンダーの日付シートから行う）
+  // 複数日にまたがる期間予定か（このページの「削除」「完了にする」は常に全期間が対象。
+  // 1日だけの削除・完了はカレンダーの日付シートから行う）
   const isPeriodPlan = !!(plan.planned_end_date && plan.planned_end_date.slice(0, 10) !== plan.planned_date.slice(0, 10));
 
   // 時間帯・工事連絡書（帳票）の入力状態を form_values_json から算出
@@ -458,11 +480,16 @@ async function renderDetail(id, fromAnnual = false) {
           plan.status !== 'done'
             ? el('button', {
                 class: plan.plan_type === 'inspection' ? 'btn' : 'btn btn-primary',
+                title: isPeriodPlan ? `${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)} の全期間を完了にします` : undefined,
                 onclick: async () => {
+                  if (isPeriodPlan) {
+                    const msg = `「${plan.title}」の全期間（${formatDate(plan.planned_date)} 〜 ${formatDate(plan.planned_end_date)}）を完了にしますか？\n1日だけ完了にしたい場合はカレンダーの日付をタップして完了にしてください。`;
+                    if (!confirm(msg)) return;
+                  }
                   await api.put(`/api/plans/${id}`, { status: 'done' });
                   go(`?id=${id}`);
                 },
-              }, '✓ 完了にする')
+              }, isPeriodPlan ? '🏁 全期間を完了にする' : '✓ 完了にする')
             : null,
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}${fromAnnual ? '&from=annual' : ''}`) }, '編集'),
           el('button', { class: 'btn', onclick: () => openExcelExport('construction_notice', plan) }, '📄 帳票(Excel)出力'),
