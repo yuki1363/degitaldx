@@ -662,6 +662,44 @@ async function renderForm(existing) {
     note: el('textarea', { value: existing?.note || '' }),
   };
 
+  // ---- 類似部品のヒント（あいまい検索で重複登録を防ぐ。保存は妨げない） ----
+  //   型番は設計上重複可（ライン/機器ごとに別行）なので「重複」ではなく「類似」と表現する。
+  const dupBox = el('div', {});
+  let dupTimer = null;
+  const checkDuplicates = () => {
+    clearTimeout(dupTimer);
+    dupTimer = setTimeout(async () => {
+      const q = [f.name.value.trim(), f.model_no.value.trim()].filter(Boolean).join(' ');
+      if (q.length < 2) { render(dupBox, []); return; }
+      try {
+        const params = new URLSearchParams({ q });
+        if (existing) params.set('exclude_id', String(existing.id)); // 編集中は自分自身を除外
+        const { parts } = await api.get(`/api/parts?${params}`);
+        const hits = (parts || []).slice(0, 5);
+        if (hits.length === 0) { render(dupBox, []); return; }
+        render(dupBox, el('div', { class: 'notice is-warning' }, [
+          el('div', { style: 'font-weight:600;margin-bottom:6px' }, '類似の部品が見つかりました（型番・部品名が近い登録があります）'),
+          el('div', { class: 'row-list' }, hits.map((p) =>
+            el('a', { class: 'list-item', href: `/pages/parts?id=${p.id}`, target: '_blank', rel: 'noopener' }, [
+              el('div', { class: 'list-item-main' }, [
+                el('div', { class: 'list-item-title' }, [p.name, importanceBadge(p.importance)].filter(Boolean)),
+                el('div', { class: 'list-item-sub' },
+                  [
+                    p.model_no ? `型番: ${p.model_no}` : '',
+                    [p.line_name, p.equipment_name].filter(Boolean).join(' '),
+                    `在庫: ${p.quantity ?? 0}`,
+                  ].filter(Boolean).join(' / ')),
+              ]),
+              el('span', { class: 'chevron' }, '›'),
+            ])
+          )),
+        ]));
+      } catch { render(dupBox, []); } // 取得失敗時は非表示で継続
+    }, 300);
+  };
+  f.name.addEventListener('input', checkDuplicates);
+  f.model_no.addEventListener('input', checkDuplicates);
+
   const save = async () => {
     const body = {
       line_name: f.line_name.value.trim() || null,
@@ -698,6 +736,7 @@ async function renderForm(existing) {
       field('機器名', f.equipment_name),
       field('部品名（必須）', f.name),
       field('型番', f.model_no),
+      dupBox,
       field('在庫場所', f.location),
       existing
         ? field('必要数（発注アラート基準）', f.safety_stock)
@@ -715,6 +754,9 @@ async function renderForm(existing) {
       ]),
     ]),
   ]);
+
+  // 編集時は初期の部品名・型番で類似部品を出す（新規は空欄なので何も出ない）
+  checkDuplicates();
 }
 
 // ---------------- CSVインポート ----------------

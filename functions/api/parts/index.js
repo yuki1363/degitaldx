@@ -13,6 +13,7 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
+import { buildKeywordClauses } from '../_lib/fuzzy.js';
 
 const IMPORTANCE_VALUES = ['高', '中', '低'];
 
@@ -33,18 +34,28 @@ const toInt = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Math.trunc(Numb
 export async function onRequestGet({ env, request }) {
   const { DB } = env;
   const url = new URL(request.url);
-  const q = url.searchParams.get('q') || '';
+  const q = (url.searchParams.get('q') || '').trim();
   const lowStock = url.searchParams.get('low_stock') === '1';
+  const excludeId = url.searchParams.get('exclude_id'); // 類似部品ヒントで自分自身を除外（編集時）
 
   let where = 'deleted_at IS NULL';
   const binds = [];
   if (q) {
-    where += ' AND (model_no LIKE ?1 OR name LIKE ?1 OR line_name LIKE ?1 OR equipment_name LIKE ?1)';
-    binds.push(`%${q}%`);
+    // 横断検索と同じあいまい検索（全角半角・ひらがなカタカナのゆれを吸収）。
+    // 複数語はAND（型番・部品名の絞り込み）。キーワードは3語まで
+    // （列4 × バリアント最大8 × 3語 = 96 < D1のbind上限100）。
+    const tokens = q.split(/\s+/).filter(Boolean).slice(0, 3);
+    const cols = ['model_no', 'name', 'line_name', 'equipment_name'];
+    const { clauses, binds: kwBinds } = buildKeywordClauses(tokens, cols);
+    if (clauses.length) { where += ' AND ' + clauses.join(' AND '); binds.push(...kwBinds); }
   }
   if (lowStock) {
     // 要発注 = 在庫数 < 必要数
     where += ' AND quantity < safety_stock';
+  }
+  if (excludeId) {
+    where += ' AND id != ?';
+    binds.push(excludeId);
   }
 
   const stmt = DB.prepare(

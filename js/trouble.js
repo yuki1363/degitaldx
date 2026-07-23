@@ -5,7 +5,7 @@
 //        /pages/trouble?id=N       … 詳細
 
 import { api } from '/js/api.js';
-import { getCurrentUser, hasRole } from '/js/auth.js';
+import { getCurrentUser, hasRole, getAiEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
 import { buildCsvText, downloadCsv, excelText } from '/js/csv.js';
@@ -168,6 +168,51 @@ function infoRow(label, value) {
   ]);
 }
 
+// 類似トラブル事例のカードを box に描画する（現象テキストからあいまい検索。AI不要・常時無料）。
+//   現象が2文字未満・取得失敗・0件のときは何も描画しない（入力を止めない＝点検の前回値と同じ流儀）。
+//   newTab=true のときは各項目を新規タブで開く（フォーム入力中に遷移して内容を失わないため）。
+async function loadSimilarInto(box, { phenomenon, excludeId, equipmentId, newTab }) {
+  const text = (phenomenon || '').trim();
+  if (text.length < 2) { render(box, []); return; }
+  let similar = [];
+  try {
+    const params = new URLSearchParams({ phenomenon: text });
+    if (excludeId) params.set('exclude_id', String(excludeId));
+    if (equipmentId) params.set('equipment_id', String(equipmentId));
+    const res = await api.get(`/api/troubles/similar?${params}`);
+    similar = res.similar || [];
+  } catch {
+    render(box, []); // 取得失敗時は非表示で継続
+    return;
+  }
+  if (similar.length === 0) { render(box, []); return; }
+  render(box, el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title' }, `類似のトラブル事例（${similar.length}件）`),
+    el('p', { class: 'hint', style: 'margin:-4px 0 8px' }, '現象が似た過去の記録です。原因・対策の参考にしてください。'),
+    el('div', { class: 'row-list' }, similar.map((s) =>
+      el('a', {
+        class: 'list-item',
+        href: `/pages/trouble?id=${s.id}`,
+        ...(newTab ? { target: '_blank', rel: 'noopener' } : {}),
+      }, [
+        el('div', { class: 'list-item-main' }, [
+          el('div', { class: 'list-item-sub' }, [
+            formatDate(s.occurred_at),
+            s.category_name ? el('span', { class: 'cat-badge' }, s.category_name) : null,
+          ]),
+          el('div', { class: 'list-item-title' }, s.phenomenon),
+          el('div', { class: 'list-item-sub' },
+            [
+              s.equipment_name ? `${s.equipment_code || ''} ${s.equipment_name}`.trim() : '',
+              s.cause ? `原因: ${s.cause}` : '',
+            ].filter(Boolean).join(' / ')),
+        ]),
+        el('span', { class: 'chevron' }, '›'),
+      ])
+    )),
+  ]));
+}
+
 async function renderDetail(id) {
   const { trouble, files, history } = await api.get(`/api/troubles/${id}`);
   // このトラブルから作成された業務依頼（相互リンクの逆引き）。列未追加の環境でも落ちないよう握りつぶす。
@@ -227,6 +272,15 @@ async function renderDetail(id) {
     },
   });
 
+  // 類似のトラブル事例（詳細では読み取り専用・一発取得）。0件・取得失敗時は非表示のまま。
+  const similarBox = el('div', {});
+  loadSimilarInto(similarBox, {
+    phenomenon: trouble.phenomenon,
+    excludeId: id,
+    equipmentId: trouble.equipment_id || undefined,
+    newTab: false,
+  });
+
   render(app, [
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
@@ -240,6 +294,7 @@ async function renderDetail(id) {
       ...parseCustomValues(trouble.custom_fields_json).map((v) => infoRow(v.name, v.value)),
       infoRow('記録者', trouble.reporter_name || trouble.creator_name || maskEmail(trouble.created_by)),
     ]),
+    similarBox,
     canEdit
       ? el('div', { class: 'action-row' }, [
           // このトラブルを業務依頼へエスカレーション（設備・現象・原因・対策をプリフィル＋起票元リンク）
@@ -419,6 +474,21 @@ async function renderForm(existing, prefill = null) {
     users.map((u) => el('option', { value: u.name || u.email }))
   );
 
+  // ---- 類似トラブル事例（あいまい検索・常時表示・AI不要） ----
+  //   現象欄の入力に追従して過去の似た記録を表示する（300msデバウンス）。
+  const similarBox = el('div', {});
+  const refreshSimilar = () => loadSimilarInto(similarBox, {
+    phenomenon: f.phenomenon.value,
+    excludeId: existing?.id,
+    equipmentId: f.equipment_id.value ? Number(f.equipment_id.value) : undefined,
+    newTab: true,
+  });
+  let similarTimer = null;
+  f.phenomenon.addEventListener('input', () => {
+    clearTimeout(similarTimer);
+    similarTimer = setTimeout(refreshSimilar, 300);
+  });
+
   // カスタム項目（管理画面で定義した追加入力欄）
   const existingCustom = parseCustomValues(existing?.custom_fields_json);
   const customInputs = customFields.map((fld) => {
@@ -535,6 +605,7 @@ async function renderForm(existing, prefill = null) {
     }
     Object.assign(reportValues, d.report || {});
     renderReportSection();
+    refreshSimilar(); // 復元した現象で類似事例も出し直す
   };
   const draft = existing ? null : createDraft('trouble-new', collectDraft);
   const guard = installUnsavedGuard(); // 新規・編集とも離脱時に警告（新規はさらに下書きでも守る）
@@ -618,6 +689,56 @@ async function renderForm(existing, prefill = null) {
   };
   const saveBtn = el('button', { class: 'btn btn-primary', onclick: () => save() }, '保存');
 
+  // ---- AI提案（原因・対策のヒント） ----
+  //   Workers AI が未構成なら getAiEnabled() が false → ボタン自体を出さない
+  //   （VAPID公開鍵と同じ考え方。E2E環境は [ai] を外すため常に非表示になる）。
+  const aiBox = el('div', {});
+  const applyAiSuggestion = (s) => {
+    const hasContent = f.cause.value.trim() || f.countermeasure.value.trim();
+    if (hasContent && !confirm('原因・対策欄に入力済みの内容がありますが、AIの提案で上書きしますか？')) return;
+    if (s.cause) { f.cause.value = s.cause; f.cause.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (s.countermeasure) { f.countermeasure.value = s.countermeasure; f.countermeasure.dispatchEvent(new Event('input', { bubbles: true })); }
+  };
+  const renderAiResult = (s) => {
+    const conf = { high: ['高', 'imp-high'], medium: ['中', 'imp-mid'], low: ['低', 'imp-low'] }[s.confidence] || ['—', 'imp-low'];
+    render(aiBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
+      el('div', { class: 'card-title-row' }, [
+        el('h4', { style: 'margin:0;font-size:14px;color:#374151' }, '🤖 AIの提案'),
+        el('span', { class: `imp-badge ${conf[1]}` }, `確度: ${conf[0]}`),
+      ]),
+      s.cause ? infoRow('推定原因', s.cause) : null,
+      s.countermeasure ? infoRow('推奨対策', s.countermeasure) : null,
+      (s.cause || s.countermeasure)
+        ? el('div', { class: 'action-row', style: 'margin-top:8px' }, [
+            el('button', { class: 'btn btn-sm', type: 'button', onclick: () => applyAiSuggestion(s) }, '⬇ 原因・対策欄に反映'),
+          ])
+        : el('p', { class: 'hint', style: 'margin-top:8px' }, 'AIから有効な提案が得られませんでした。'),
+      el('p', { class: 'hint', style: 'margin-top:4px' }, '※ AIの提案です。内容を確認してから保存してください。'),
+    ]));
+  };
+  const aiBtn = getAiEnabled()
+    ? el('button', {
+        class: 'btn', type: 'button',
+        onclick: async () => {
+          const phenomenon = f.phenomenon.value.trim();
+          if (!phenomenon) { alert('先に現象を入力してください。'); return; }
+          aiBtn.disabled = true;
+          const label = aiBtn.textContent;
+          aiBtn.textContent = '🤖 AIが考え中…';
+          render(aiBox, el('p', { class: 'loading' }, 'AIが過去事例をもとに考えています…'));
+          try {
+            const { suggestion } = await api.post('/api/ai/suggest-trouble', { phenomenon });
+            renderAiResult(suggestion || {});
+          } catch (err) {
+            render(aiBox, el('p', { class: 'notice is-error' }, err.message || 'AIの処理に失敗しました。'));
+          } finally {
+            aiBtn.disabled = false;
+            aiBtn.textContent = label;
+          }
+        },
+      }, '🤖 AIに原因・対策のヒントをもらう')
+    : null;
+
   render(app, [
     draftBanner,
     el('div', { class: 'card' }, [
@@ -635,6 +756,9 @@ async function renderForm(existing, prefill = null) {
         ]),
       ]),
       field('現象（必須）', f.phenomenon),
+      similarBox,
+      aiBtn ? el('div', { class: 'action-row', style: 'margin:4px 0' }, [aiBtn]) : null,
+      aiBox,
       field('原因', f.cause),
       field('対策', f.countermeasure),
       field('記録者', f.reporter_name),
@@ -659,6 +783,9 @@ async function renderForm(existing, prefill = null) {
       ]),
     ]),
   ]);
+
+  // 初期表示（編集・プリフィルで現象に初期値があれば）類似事例を出す
+  refreshSimilar();
 }
 
 // ---------------- 起動 ----------------

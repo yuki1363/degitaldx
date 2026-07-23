@@ -164,6 +164,71 @@ const hasCsvBtn = await page.evaluate(() =>
 );
 check('横断検索: 結果にCSV出力ボタンが出る', hasCsvBtn);
 
+// ---------- 2.5 類似トラブル事例・AI提案 ----------
+section('2.5 類似トラブル事例・AI提案');
+// 現象が重なる2件を作る（あいまい/OR検索の確認用）
+const simA = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E類似 コンプレッサ 異音', cause: 'ベアリング摩耗', countermeasure: 'ベアリング交換' } });
+const simB = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E類似 コンプレッサ 停止', cause: '過負荷', countermeasure: 'リセット' } });
+check('類似検索用トラブルの登録（201）', simA.status === 201 && simB.status === 201, `a=${simA.status} b=${simB.status}`);
+
+const sim1 = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('コンプレッサ 異音')}`);
+check('類似トラブル: 現象キーワードでヒット', (sim1.json?.similar || []).some((s) => s.id === simA.json?.id));
+// OR検索なので「コンプレッサ」を含むもう1件も拾う（再現率重視）
+check('類似トラブル: OR検索で関連事例も拾う', (sim1.json?.similar || []).some((s) => s.id === simB.json?.id));
+
+const sim2 = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('コンプレッサ')}&exclude_id=${simA.json?.id}`);
+check('類似トラブル: exclude_idで自分を除外', Array.isArray(sim2.json?.similar) && !sim2.json.similar.some((s) => s.id === simA.json?.id));
+
+// あいまい: ひらがなで入力してもカタカナ登録がヒットする
+const sim3 = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('こんぷれっさ')}`);
+check('類似トラブル: あいまい（かなゆれ）でヒット', (sim3.json?.similar || []).length > 0);
+
+// 現象2文字未満はノイズ防止で空配列
+const sim4 = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('あ')}`);
+check('類似トラブル: 1文字は空配列（ノイズ防止）', Array.isArray(sim4.json?.similar) && sim4.json.similar.length === 0);
+
+// フォームUI: 現象を入力すると類似事例パネルが出る
+await page.goto(`${BASE}/pages/trouble?new=1`, { waitUntil: 'networkidle' });
+await page.fill('textarea[placeholder*="異音"]', 'コンプレッサ 異音');
+await page.waitForFunction(() => document.body.innerText.includes('類似のトラブル事例'), { timeout: 5000 }).catch(() => {});
+check('類似トラブル: フォームにパネルが表示される', await page.evaluate(() => document.body.innerText.includes('類似のトラブル事例')));
+
+// [ai] 未構成のE2E環境では ai_enabled:false → AIボタンを出さない
+const meAiRes = await api('/api/me');
+check('/api/me: ai_enabled が false（[ai]未構成）', meAiRes.json?.ai_enabled === false, `ai_enabled=${meAiRes.json?.ai_enabled}`);
+check('類似トラブル: AI未構成ならAIボタンを出さない',
+  !(await page.evaluate(() => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('AIに原因・対策')))));
+
+// POST /api/ai/suggest-trouble は [ai] 未構成なら 503
+const aiRes = await api('/api/ai/suggest-trouble', { method: 'POST', body: { phenomenon: 'コンプレッサ 異音' } });
+check('AI提案: [ai]未構成なら503', aiRes.status === 503, `status=${aiRes.status}`);
+await page.evaluate(() => localStorage.removeItem('draft:trouble-new')); // 後続の下書きテストに影響させない
+
+// ---------- 2.6 類似部品検索（あいまい） ----------
+section('2.6 類似部品検索（あいまい）');
+// 型番・部品名が近い2件（型番は設計上重複可＝別ラインに同じ部品）
+const dupPa = await api('/api/parts', { method: 'POST', body: { name: 'E2E類似ベアリング', model_no: '6205ZZ', line_name: 'JP1号', quantity: 3, safety_stock: 1 } });
+const dupPb = await api('/api/parts', { method: 'POST', body: { name: 'E2E類似ベアリング', model_no: '6205ZZ', line_name: 'JP2号', quantity: 5, safety_stock: 1 } });
+check('類似部品用の登録（201）', dupPa.status === 201 && dupPb.status === 201, `a=${dupPa.status} b=${dupPb.status}`);
+
+// スペース入りの複数語がAND検索でヒットする（旧実装は substring 一致で実質0件だった不具合の回帰）
+const pq1 = await api(`/api/parts?q=${encodeURIComponent('ベアリング 6205')}`);
+check('類似部品: 複数語ANDでヒット（スペース入り）',
+  (pq1.json?.parts || []).filter((p) => p.name === 'E2E類似ベアリング').length === 2,
+  `count=${(pq1.json?.parts || []).filter((p) => p.name === 'E2E類似ベアリング').length}`);
+
+// exclude_id で自分を除外（もう1件は残る）
+const pq2 = await api(`/api/parts?q=${encodeURIComponent('6205ZZ')}&exclude_id=${dupPa.json?.id}`);
+check('類似部品: exclude_idで自分を除外',
+  !(pq2.json?.parts || []).some((p) => p.id === dupPa.json?.id) && (pq2.json?.parts || []).some((p) => p.id === dupPb.json?.id));
+
+// フォームUI: 部品名を入力すると類似部品ヒントが出る（保存は妨げない）
+await page.goto(`${BASE}/pages/parts?new=1`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(300);
+await page.fill('input[placeholder*="ベアリング 6205"]', 'E2E類似ベアリング');
+await page.waitForFunction(() => document.body.innerText.includes('類似の部品が見つかりました'), { timeout: 5000 }).catch(() => {});
+check('類似部品: フォームにヒントが表示される', await page.evaluate(() => document.body.innerText.includes('類似の部品が見つかりました')));
+
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');
 const cur = await api(`/api/troubles/${troubleId}`);
