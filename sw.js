@@ -15,7 +15,7 @@
  *   push イベントでプッシュ通知を表示し、notificationclick でアプリの該当画面を開く。
  *   ペイロードは functions/api/_lib/notify.js が { title, body, url } のJSONで送る。
  */
-const CACHE_VERSION = 'v1.10.0';
+const CACHE_VERSION = 'v1.11.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -115,6 +115,11 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/cdn-cgi/')) return;
+
+  // 再認証用ナビゲーション（?reauth=付き）は SW が介入せず、ブラウザのネイティブ遷移に任せる。
+  // 静的キャッシュを返してしまうと Cloudflare Access のログインリダイレクトが発生せず
+  // 再認証できないため（js/api.js の tryReauthNavigate から来る）。
+  if (request.mode === 'navigate' && url.searchParams.has('reauth')) return;
 
   // API: ネットワークのみ。オフライン時は JSON エラー（フロントで offline 判定に使う）
   if (url.pathname.startsWith('/api/')) {
