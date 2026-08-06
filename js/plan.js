@@ -111,7 +111,9 @@ function showDaySheet(fullDate, dateLabel, dayPlans, refresh) {
         el('a', { class: 'day-plan-item', href: `/pages/plan?id=${p.id}` }, [
           el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
           el('span', { class: 'day-plan-title' }, p.title),
-          el('span', { class: 'day-plan-status' }, STATUS_LABELS[p.status] || p.status),
+          p.status === 'overdue'
+            ? el('span', { class: 'abn-badge is-abn', style: 'font-size:10px;padding:1px 6px' }, '⚠期限超過')
+            : el('span', { class: 'day-plan-status' }, STATUS_LABELS[p.status] || p.status),
         ]),
         canStart
           ? el('button', {
@@ -164,11 +166,73 @@ function showDaySheet(fullDate, dateLabel, dayPlans, refresh) {
               },
             }, '🗑')
           : null,
+        canEdit
+          ? el('button', {
+              class: 'day-plan-copy-btn',
+              title: '別の日付にコピー',
+              onclick: () => { close(); showCopySheet(p, () => refresh?.()); },
+            }, '📋')
+          : null,
       ]);
     })),
     canEdit
       ? el('button', { class: 'sheet-btn', onclick: () => { close(); go(`?new=1&date=${fullDate}`); } }, '＋ この日に予定を追加')
       : null,
+    el('button', { class: 'sheet-btn sheet-cancel', onclick: close }, '閉じる'),
+  ]);
+  backdrop.appendChild(sheet);
+  document.body.appendChild(backdrop);
+}
+
+// 予定を別の日付へコピーする（単日として複製）。onDone(newId) で呼び出し元が後処理する。
+function showCopySheet(plan, onDone) {
+  const type = PLAN_TYPES[plan.plan_type] || PLAN_TYPES.other;
+  // 初期値はコピー元の予定日の翌日
+  const base = new Date(`${plan.planned_date.slice(0, 10)}T00:00:00`);
+  base.setDate(base.getDate() + 1);
+  const dateInput = el('input', { type: 'date', value: dateToStr(base) });
+
+  const backdrop = el('div', { class: 'sheet-backdrop' });
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+
+  const doCopy = async (btn) => {
+    const target = dateInput.value;
+    if (!target) { alert('コピー先の日付を選んでください。'); return; }
+    btn.disabled = true;
+    try {
+      // 期間予定でも単日として複製。状態は常に未実施から。source_plan_id/annual_only 等は引き継がない
+      const { id } = await api.post('/api/plans', {
+        title: plan.title,
+        plan_type: plan.plan_type,
+        planned_date: target,
+        planned_end_date: null,
+        line_name: plan.line_name || null,
+        equipment_name: plan.equipment_name || null,
+        inspector_name: plan.inspector_name || null,
+        assignee_name: plan.assignee_name || null,
+        status: 'pending',
+        note: plan.note || null,
+        recurrence_rule: null,
+        form_values_json: plan.form_values_json || null,
+      });
+      close();
+      onDone?.(id);
+    } catch (err) {
+      alert(err.message);
+      btn.disabled = false;
+    }
+  };
+
+  const sheet = el('div', { class: 'sheet' }, [
+    el('div', { class: 'sheet-title' }, '予定をコピー'),
+    el('div', { class: 'day-plan-row', style: 'border-bottom:none;margin-bottom:8px' }, [
+      el('span', { class: 'annual-type-badge', style: `background:${type.bg};color:${type.color}` }, type.label),
+      el('span', { class: 'day-plan-title' }, plan.title),
+    ]),
+    field('コピー先の日付', dateInput),
+    el('p', { class: 'hint', style: 'margin:0 0 8px' }, '選んだ日付に、この予定を「未実施」の単日予定として複製します。'),
+    el('button', { class: 'sheet-btn', onclick: (e) => doCopy(e.currentTarget) }, '📋 この日にコピー'),
     el('button', { class: 'sheet-btn sheet-cancel', onclick: close }, '閉じる'),
   ]);
   backdrop.appendChild(sheet);
@@ -208,10 +272,10 @@ async function renderMonthCalendar(year, month) {
         el('button', { class: 'cal-day-num is-clickable', onclick: handleDayClick }, String(d)),
         ...dayPlans.slice(0, 3).map((p) =>
           el('a', {
-            class: 'cal-event',
+            class: `cal-event${p.status === 'overdue' ? ' is-overdue' : ''}`,
             href: `/pages/plan?id=${p.id}`,
             style: `background:${PLAN_TYPES[p.plan_type]?.bg || '#f3f4f6'};color:${PLAN_TYPES[p.plan_type]?.color || '#374151'}`,
-          }, p.title)
+          }, p.status === 'overdue' ? `⚠${p.title}` : p.title)
         ),
         dayPlans.length > 3
           ? el('button', { class: 'cal-more', onclick: handleDayClick }, `他${dayPlans.length - 3}件`)
@@ -251,6 +315,10 @@ async function renderMonthCalendar(year, month) {
       ...Object.entries(PLAN_TYPES).map(([, { label, color, bg }]) =>
         el('span', { class: 'cal-legend-item', style: `background:${bg};color:${color}` }, label)
       ),
+      el('span', {
+        class: 'cal-legend-item',
+        style: 'background:#fff;color:var(--color-danger);box-shadow:inset 0 0 0 1.5px var(--color-danger);font-weight:700',
+      }, '⚠ 期限超過'),
     ]),
   ]);
 }
@@ -306,10 +374,10 @@ async function renderWeekCalendar(weekStart) {
       ]),
       ...dayPlans.map((p) =>
         el('a', {
-          class: 'cal-event',
+          class: `cal-event${p.status === 'overdue' ? ' is-overdue' : ''}`,
           href: `/pages/plan?id=${p.id}`,
           style: `background:${PLAN_TYPES[p.plan_type]?.bg || '#f3f4f6'};color:${PLAN_TYPES[p.plan_type]?.color || '#374151'};display:block;margin:2px 0`,
-        }, p.title)
+        }, p.status === 'overdue' ? `⚠${p.title}` : p.title)
       ),
       dayPlans.length === 0
         ? el('div', { class: 'cal-week-empty' }, '')
@@ -340,6 +408,10 @@ async function renderWeekCalendar(weekStart) {
       ...Object.entries(PLAN_TYPES).map(([, { label, color, bg }]) =>
         el('span', { class: 'cal-legend-item', style: `background:${bg};color:${color}` }, label)
       ),
+      el('span', {
+        class: 'cal-legend-item',
+        style: 'background:#fff;color:var(--color-danger);box-shadow:inset 0 0 0 1.5px var(--color-danger);font-weight:700',
+      }, '⚠ 期限超過'),
     ]),
   ]);
 }
@@ -492,6 +564,7 @@ async function renderDetail(id, fromAnnual = false) {
               }, isPeriodPlan ? '🏁 全期間を完了にする' : '✓ 完了にする')
             : null,
           el('button', { class: 'btn', onclick: () => go(`?edit=${id}${fromAnnual ? '&from=annual' : ''}`) }, '編集'),
+          el('button', { class: 'btn', onclick: () => showCopySheet(plan, (newId) => go(`?id=${newId}`)) }, '📋 コピー'),
           el('button', { class: 'btn', onclick: () => openExcelExport('construction_notice', plan) }, '📄 帳票(Excel)出力'),
           el('button', {
             class: 'btn btn-danger',
