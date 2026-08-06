@@ -1032,6 +1032,11 @@ input.is-abnormal {
   text-decoration: none;
   color: inherit;
 }
+/* 期限超過の予定は赤枠＋太字で強調（種別の背景色は保持する） */
+.cal-event.is-overdue {
+  box-shadow: inset 0 0 0 1.5px var(--color-danger);
+  font-weight: 700;
+}
 
 .cal-day-num.is-clickable {
   background: none; border: none; padding: 0; margin: 0;
@@ -1076,6 +1081,12 @@ input.is-abnormal {
   line-height: 1; cursor: pointer;
 }
 .day-plan-done-btn:hover { background: #bfdbfe; }
+.day-plan-copy-btn {
+  flex-shrink: 0; padding: 4px 8px; border-radius: 6px; font-size: 15px;
+  background: #f1f5f9; border: 1px solid #e2e8f0;
+  line-height: 1; cursor: pointer;
+}
+.day-plan-copy-btn:hover { background: #e2e8f0; }
 
 .cal-legend {
   display: flex;
