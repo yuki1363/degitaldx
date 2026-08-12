@@ -1,5 +1,5 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { textModel } from '../_lib/ai-models.js';
+import { textModel, aiResponseText } from '../_lib/ai-models.js';
 import { buildPageContext } from '../_lib/ai-context.js';
 
 // AIチャットボット — Cloudflare Workers AI（無料枠）
@@ -57,7 +57,7 @@ ${pageContext}
 
   try {
     const result = await ai.run(textModel(env), { messages, max_tokens: 512 });
-    const reply = result?.response || result?.result?.response || '回答を生成できませんでした。';
+    const reply = aiResponseText(result) || '回答を生成できませんでした。';
     return json({ reply });
   } catch (err) {
     return jsonError(500, `AI の処理に失敗しました: ${err.message}`);

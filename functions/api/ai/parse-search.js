@@ -1,5 +1,5 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { textModel } from '../_lib/ai-models.js';
+import { textModel, extractAiJson } from '../_lib/ai-models.js';
 
 // 自然言語で横断検索 — 日本語クエリを構造化された検索条件に変換する
 export async function onRequestPost({ request, env, data }) {
@@ -31,12 +31,9 @@ export async function onRequestPost({ request, env, data }) {
 
   try {
     const result = await env.AI.run(textModel(env), { messages, max_tokens: 200 });
-    const raw = result?.response || result?.result?.response || '';
-    const match = raw.match(/\{[\s\S]*?\}/);
+    const obj = extractAiJson(result);
     let parsed = { keywords: query, from: null, to: null, equipment: null, types: null };
-    if (match) {
-      try { parsed = { ...parsed, ...JSON.parse(match[0]) }; } catch { /* JSONパース失敗 */ }
-    }
+    if (obj) parsed = { ...parsed, ...obj };
     return json({ parsed, original_query: query });
   } catch (err) {
     return jsonError(500, `AI の処理に失敗しました: ${err.message}`);
