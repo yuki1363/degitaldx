@@ -1,5 +1,5 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { textModel } from '../_lib/ai-models.js';
+import { textModel, aiResponseText, extractAiJson } from '../_lib/ai-models.js';
 
 // トラブル分析 — 入力されたトラブル内容 + PDF報告書の本文 + 過去の類似事例をまとめてAIが分析する
 //   出力: 根本原因の推定 / 再発防止策 / 確認ポイント / 類似事例からの教訓
@@ -79,12 +79,10 @@ ${pastText}`;
 
   try {
     const result = await env.AI.run(textModel(env), { messages, max_tokens: 700 });
-    const raw = result?.response || result?.result?.response || '';
-    const match = raw.match(/\{[\s\S]*\}/);
+    const raw = aiResponseText(result);
+    const parsed = extractAiJson(result);
     let analysis = { root_cause: '', prevention: '', checkpoints: '', lessons: '' };
-    if (match) {
-      try { analysis = { ...analysis, ...JSON.parse(match[0]) }; } catch { /* JSONパース失敗時は生テキストを所見に */ }
-    }
+    if (parsed) analysis = { ...analysis, ...parsed };
     // JSONが取れなかった場合は生テキストを総合所見として返す
     if (!analysis.root_cause && !analysis.prevention && !analysis.checkpoints && raw.trim()) {
       analysis.root_cause = raw.trim().slice(0, 600);

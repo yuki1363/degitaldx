@@ -1,5 +1,5 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { textModel } from '../_lib/ai-models.js';
+import { textModel, extractAiJson } from '../_lib/ai-models.js';
 import { requireRole } from '../_lib/auth.js';
 import { findSimilarTroubles } from '../_lib/trouble-similar.js';
 
@@ -46,12 +46,9 @@ export async function onRequestPost({ request, env, data }) {
 
   try {
     const result = await env.AI.run(textModel(env), { messages, max_tokens: 300 });
-    const raw = result?.response || result?.result?.response || '';
-    const match = raw.match(/\{[\s\S]*?\}/);
+    const parsed = extractAiJson(result);
     let suggestion = { cause: '', countermeasure: '', confidence: 'low' };
-    if (match) {
-      try { suggestion = { ...suggestion, ...JSON.parse(match[0]) }; } catch { /* JSONパース失敗 */ }
-    }
+    if (parsed) suggestion = { ...suggestion, ...parsed };
     return json({ suggestion, similar_cases: pastCases });
   } catch (err) {
     return jsonError(500, `AI の処理に失敗しました: ${err.message}`);
