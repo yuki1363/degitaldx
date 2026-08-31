@@ -37,34 +37,48 @@ export async function onRequestGet({ env, request }) {
   const q = (url.searchParams.get('q') || '').trim();
   const lowStock = url.searchParams.get('low_stock') === '1';
   const excludeId = url.searchParams.get('exclude_id'); // 類似部品ヒントで自分自身を除外（編集時）
+  const includeSimilar = url.searchParams.get('include_similar') === '1'; // 類似の在庫も返す（在庫検索用）
 
-  let where = 'deleted_at IS NULL';
-  const binds = [];
-  if (q) {
-    // 横断検索と同じあいまい検索（全角半角・ひらがなカタカナのゆれを吸収）。
-    // 複数語はAND（型番・部品名の絞り込み）。キーワードは3語まで
-    // （列4 × バリアント最大8 × 3語 = 96 < D1のbind上限100）。
-    const tokens = q.split(/\s+/).filter(Boolean).slice(0, 3);
-    const cols = ['model_no', 'name', 'line_name', 'equipment_name'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(tokens, cols);
-    if (clauses.length) { where += ' AND ' + clauses.join(' AND '); binds.push(...kwBinds); }
-  }
-  if (lowStock) {
-    // 要発注 = 在庫数 < 必要数
-    where += ' AND quantity < safety_stock';
-  }
-  if (excludeId) {
-    where += ' AND id != ?';
-    binds.push(excludeId);
-  }
+  // 横断検索と同じあいまい検索（全角半角・ひらがなカタカナのゆれを吸収）。キーワードは3語まで
+  // （列4 × バリアント最大8 × 3語 = 96 < D1のbind上限100）。
+  const cols = ['model_no', 'name', 'line_name', 'equipment_name'];
+  const tokens = q ? q.split(/\s+/).filter(Boolean).slice(0, 3) : [];
+  const { clauses, binds: kwBinds } = tokens.length
+    ? buildKeywordClauses(tokens, cols)
+    : { clauses: [], binds: [] };
 
+  // 検索以外の絞り込み（論理削除・要発注・自分自身の除外）は完全一致・類似の両方に共通で効かせる
+  const baseParts = ['deleted_at IS NULL'];
+  const baseBinds = [];
+  if (lowStock) baseParts.push('quantity < safety_stock'); // 要発注 = 在庫数 < 必要数
+  if (excludeId) { baseParts.push('id != ?'); baseBinds.push(excludeId); }
+
+  // --- 完全一致寄り（全キーワードを含む＝AND・従来どおり）---
+  let where = baseParts.join(' AND ');
+  const binds = [...baseBinds];
+  if (clauses.length) { where += ' AND ' + clauses.join(' AND '); binds.push(...kwBinds); }
   const stmt = DB.prepare(
-    `SELECT * FROM parts_inventory
-      WHERE ${where}
-      ORDER BY line_name, equipment_name, name`
+    `SELECT * FROM parts_inventory WHERE ${where} ORDER BY line_name, equipment_name, name`
   );
   const { results } = await (binds.length ? stmt.bind(...binds) : stmt).all();
-  return json({ parts: results });
+  const parts = results || [];
+
+  if (!includeSimilar) return json({ parts });
+
+  // --- 類似の在庫（いずれかのキーワードに一致＝OR・再現率重視）---
+  //   2語以上で検索したときだけ。1語のときは AND と OR が同じ結果になり別枠にならないため。
+  //   完全一致で既に出た部品は除外し、最大30件に絞る。
+  let similar = [];
+  if (clauses.length >= 2) {
+    const sWhere = baseParts.join(' AND ') + ' AND (' + clauses.join(' OR ') + ')';
+    const sBinds = [...baseBinds, ...kwBinds];
+    const { results: sResults } = await DB.prepare(
+      `SELECT * FROM parts_inventory WHERE ${sWhere} ORDER BY line_name, equipment_name, name LIMIT 60`
+    ).bind(...sBinds).all();
+    const exactIds = new Set(parts.map((p) => p.id));
+    similar = (sResults || []).filter((p) => !exactIds.has(p.id)).slice(0, 30);
+  }
+  return json({ parts, similar });
 }
 
 export async function onRequestPost({ env, data, request }) {

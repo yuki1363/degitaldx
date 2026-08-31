@@ -533,6 +533,9 @@ async function renderDetail(id, fromAnnual = false) {
             el('span', { class: 'info-value' }, [permitStatusEl]),
           ])
         : null,
+      showConstructionInfo
+        ? infoRow('工事連絡書 印刷日', plan.printed_at ? formatDate(plan.printed_at) : '未印刷')
+        : null,
       showConstructionInfo ? permitDetailsEl : null,
       infoRow('備考', plan.note),
     ]),

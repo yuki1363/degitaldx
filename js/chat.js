@@ -354,12 +354,16 @@ function renderForm() {
 
   const sendBtn = el('button', { class: 'btn btn-primary', style: 'align-self:flex-end', onclick: () => send() }, '送信');
 
+  let sending = false; // 送信中フラグ。ボタンの disabled とは別に、Ctrl+Enter連打や
+  //                      端末の二度押しなど「ボタンを経由しない多重起動」も確実に止める
   const send = async () => {
+    if (sending) return; // 送信中の多重起動を防ぐ（二重投稿の保険）
     const body = textarea.value.trim();
     if (!body && pendingFiles.length === 0) return;
     if (body && detectPersonalInfo(body)) {
       if (!confirm('電話番号・メールアドレス・郵便番号などの個人情報が含まれている可能性があります。このまま送信しますか？')) return;
     }
+    sending = true;
     sendBtn.disabled = true;
     try {
       const fileIds = [...pendingFiles];
@@ -371,6 +375,7 @@ function renderForm() {
     } catch (err) {
       alert(err.message);
     } finally {
+      sending = false;
       sendBtn.disabled = false;
       textarea.focus();
     }

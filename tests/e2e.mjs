@@ -229,6 +229,25 @@ await page.fill('input[placeholder*="ベアリング 6205"]', 'E2E類似ベア�
 await page.waitForFunction(() => document.body.innerText.includes('類似の部品が見つかりました'), { timeout: 5000 }).catch(() => {});
 check('類似部品: フォームにヒントが表示される', await page.evaluate(() => document.body.innerText.includes('類似の部品が見つかりました')));
 
+// 在庫検索: 「類似の在庫」（キーワードの一部一致＝OR）も返す（include_similar=1）
+const ptSimA = await api('/api/parts', { method: 'POST', body: { name: 'E2ESIMfilter', model_no: 'ZZQ-777', line_name: 'SIMライン', quantity: 1, safety_stock: 0 } });
+const ptSimB = await api('/api/parts', { method: 'POST', body: { name: 'E2ESIMpump', model_no: 'ZZQ-888', line_name: 'SIMライン', quantity: 1, safety_stock: 0 } });
+check('類似在庫用の登録（201）', ptSimA.status === 201 && ptSimB.status === 201, `a=${ptSimA.status} b=${ptSimB.status}`);
+const ptSimQ = encodeURIComponent('E2ESIMfilter E2ESIMpump'); // 両方の語を含む部品は無い
+const ptSimRes = await api(`/api/parts?q=${ptSimQ}&include_similar=1`);
+const ptExactIds = new Set((ptSimRes.json?.parts || []).map((p) => p.id));
+const ptSimIds = new Set((ptSimRes.json?.similar || []).map((p) => p.id));
+check('類似在庫: 完全一致(AND)には出ない', !ptExactIds.has(ptSimA.json?.id) && !ptExactIds.has(ptSimB.json?.id), `parts=${[...ptExactIds]}`);
+check('類似在庫: 類似(OR)に両方の在庫が出る', ptSimIds.has(ptSimA.json?.id) && ptSimIds.has(ptSimB.json?.id), `similar=${[...ptSimIds]}`);
+const ptNoSim = await api(`/api/parts?q=${ptSimQ}`);
+check('類似在庫: include_similar無しでは similar を返さない（従来の呼び出しに非影響）', ptNoSim.json?.similar === undefined, `similar=${JSON.stringify(ptNoSim.json?.similar)}`);
+// UI: 一覧の検索で「類似の在庫」見出しが表示される
+await page.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(300);
+await page.fill('input[type="search"]', 'E2ESIMfilter E2ESIMpump');
+await page.waitForFunction(() => document.body.innerText.includes('類似の在庫'), { timeout: 5000 }).catch(() => {});
+check('類似在庫: 一覧に「類似の在庫」見出しが表示される', await page.evaluate(() => document.body.innerText.includes('類似の在庫')));
+
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');
 const cur = await api(`/api/troubles/${troubleId}`);
@@ -655,6 +674,19 @@ const afterUiComplete = await page.evaluate((title) =>
 'E2EUI日別完了');
 check('UI日別完了: 完了した日は完了済みの単日レコードとして残り、他の日も未完了のまま残る', afterUiComplete === 3, `hits=${afterUiComplete}`);
 
+// ---------- 7.7 工事連絡書の印刷記録 ----------
+section('7.7 工事連絡書の印刷記録（POST /api/plans/:id/printed）');
+const prPlan = await api('/api/plans', { method: 'POST', body: { title: 'E2E印刷記録', plan_type: 'construction', planned_date: addDaysStr(new Date(), 2) } });
+check('印刷記録: テスト用の工事予定登録', prPlan.status === 201, `status=${prPlan.status}`);
+const prBefore = await api(`/api/plans/${prPlan.json?.id}`);
+check('印刷記録: 登録直後は printed_at が未設定', !prBefore.json?.plan?.printed_at, `printed_at=${prBefore.json?.plan?.printed_at}`);
+const prPost = await api(`/api/plans/${prPlan.json?.id}/printed`, { method: 'POST' });
+check('印刷記録: 印刷記録API（200・printed_at返却）', prPost.status === 200 && !!prPost.json?.printed_at, `status=${prPost.status} printed_at=${prPost.json?.printed_at}`);
+const prAfter = await api(`/api/plans/${prPlan.json?.id}`);
+check('印刷記録: 記録後は詳細に printed_at が入る', !!prAfter.json?.plan?.printed_at, `printed_at=${prAfter.json?.plan?.printed_at}`);
+const prMissing = await api('/api/plans/99999999/printed', { method: 'POST' });
+check('印刷記録: 存在しない計画は404', prMissing.status === 404, `status=${prMissing.status}`);
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
@@ -744,12 +776,46 @@ await page.waitForFunction(() => !!document.querySelector('.chat-msg img.chat-th
 const hasThumb = await page.evaluate(() => !!document.querySelector('.chat-msg img.chat-thumb'));
 check('画像添付がサムネイル表示される（バグ修正）', hasThumb);
 
-// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）
+// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）。
+// POLL_MS=5秒。since は >= 比較のため境界の投稿が毎周期返るので、2周期以上またいで
+// 待つ（el の dataset 未対応で data-id が付かず重複ガードが外れると、周期ごとに増える）。
 await api('/api/chat', { method: 'POST', body: { body: 'E2Eポーリング新着', channel: 'general' } });
-await page.waitForTimeout(6500);
+await page.waitForTimeout(11500);
 const pollCount = await page.evaluate(() =>
   [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2Eポーリング新着').length);
-check('ポーリングで新着が1回だけ表示される', pollCount === 1, `count=${pollCount}`);
+check('ポーリングで新着が1回だけ表示される（2周期後も重複しない）', pollCount === 1, `count=${pollCount}`);
+// メッセージ行に data-id 属性が付いている（重複ガード・削除・ピンジャンプの前提）
+const hasDataId = await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg')].every((r) => !!r.getAttribute('data-id')));
+check('チャット行に data-id が付与される（el の dataset 対応）', hasDataId);
+
+// 削除: ✕ をタップするとリロードせずに消える（row.remove()）
+await api('/api/chat', { method: 'POST', body: { body: 'E2E削除テスト', channel: 'general' } });
+await page.waitForFunction(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
+  { timeout: 8000 }).catch(() => {});
+check('削除テスト用メッセージが表示される', await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 1));
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.chat-msg')].find((r) => r.querySelector('.chat-body')?.textContent === 'E2E削除テスト');
+  row?.querySelector('button[title="削除"]')?.click(); // confirm は自動承諾
+});
+await page.waitForFunction(() =>
+  ![...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
+  { timeout: 8000 }).catch(() => {});
+check('削除すると画面更新なしで消える', await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 0));
+
+// UI送信: 実際のボタンで1回送信 → DBに1件だけ（二重POSTの回帰）
+await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+const uiBody = 'E2EUI二重送信-' + Date.now();
+await page.fill('textarea', uiBody);
+await page.click('button:has-text("送信")');
+await page.waitForTimeout(1500);
+const uiRows = await api(`/api/chat?channel=general&limit=50`);
+const uiDbCount = (uiRows.json?.messages || []).filter((m) => m.body === uiBody).length;
+check('UI送信: 1回の送信でDBに1件だけ（二重POSTなし）', uiDbCount === 1, `count=${uiDbCount}`);
 
 // ---------- 9.5 機能強化: 点検の前回値表示・部品の棚卸モード ----------
 section('9.5 機能強化（前回値表示・棚卸モード）');

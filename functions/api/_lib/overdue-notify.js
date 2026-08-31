@@ -13,6 +13,7 @@
 import { notifyTeam } from './notify.js';
 import { deriveOverdue } from '../plans/index.js';
 import { ensureRepairSchema, isOverdueRepair } from '../repairs/index.js';
+import { ensureColumns } from './db-compat.js';
 
 let lastCheckAt = 0;
 const CHECK_INTERVAL_MS = 3600_000; // 1時間
@@ -85,6 +86,55 @@ async function notifyOverdueRepairs(env) {
   }
 }
 
+// 工事連絡書の未印刷リマインド — 工事予定（plan_type='construction'）が3日以内に迫っているのに
+// まだ帳票（工事連絡書）を印刷（出力）していない計画を検知して通知する。
+//   ・対象: 未実施(status='pending')・日付未定でない・printed_at が未設定の工事予定で、
+//           予定日（開始日）が「今日〜3日後」の範囲（JST基準）
+//   ・重複防止: 同じ計画に未確認の plan_print_reminder が既にあれば作り直さない
+//              （印刷すれば printed_at が入り、以降は対象外になる）
+async function notifyUnprintedConstruction(env) {
+  const db = env.DB;
+  // printed_at/printed_by 列が無い旧DBでもクエリが落ちないよう自己修復する
+  await ensureColumns(db, 'maintenance_plan_printed', [
+    'ALTER TABLE maintenance_plan ADD COLUMN printed_at TEXT',
+    'ALTER TABLE maintenance_plan ADD COLUMN printed_by TEXT',
+  ]);
+  const nowJstMs = Date.now() + 9 * 3600_000;
+  const todayJst = new Date(nowJstMs).toISOString().slice(0, 10);
+  const limitJst = new Date(nowJstMs + 3 * 86400_000).toISOString().slice(0, 10); // 3日後（両端含む）
+  const { results } = await db
+    .prepare(
+      `SELECT id, title, planned_date
+         FROM maintenance_plan
+        WHERE deleted_at IS NULL AND status = 'pending'
+          AND plan_type = 'construction'
+          AND (unscheduled IS NULL OR unscheduled = 0)
+          AND printed_at IS NULL
+          AND substr(planned_date, 1, 10) >= ?1
+          AND substr(planned_date, 1, 10) <= ?2`
+    )
+    .bind(todayJst, limitJst)
+    .all();
+  for (const p of results ?? []) {
+    if (await hasUnacknowledgedNotification(db, 'maintenance_plan', p.id, 'plan_print_reminder')) continue;
+    const dateStr = (p.planned_date || '').slice(0, 10);
+    const days = Math.round(
+      (new Date(dateStr + 'T00:00:00Z') - new Date(todayJst + 'T00:00:00Z')) / 86400_000
+    );
+    const whenText = days <= 0 ? '本日' : `あと${days}日`;
+    await notifyTeam(env, null, {
+      type: 'plan_print_reminder',
+      level: 'warning',
+      title: `工事連絡書 未印刷: ${p.title}`,
+      body: `工事予定日（${dateStr}）まで${whenText}です。工事連絡書がまだ印刷されていません`,
+      relatedTable: 'maintenance_plan',
+      relatedId: p.id,
+      linkUrl: `/pages/plan?id=${p.id}`,
+      createdBy: 'system:print-reminder',
+    });
+  }
+}
+
 export async function checkOverdueAndNotify(env) {
   if (Date.now() - lastCheckAt < CHECK_INTERVAL_MS) return;
   lastCheckAt = Date.now();
@@ -97,5 +147,10 @@ export async function checkOverdueAndNotify(env) {
     await notifyOverdueRepairs(env);
   } catch (err) {
     console.error('checkOverdueAndNotify (repairs) failed:', err && err.stack ? err.stack : err);
+  }
+  try {
+    await notifyUnprintedConstruction(env);
+  } catch (err) {
+    console.error('checkOverdueAndNotify (unprinted construction) failed:', err && err.stack ? err.stack : err);
   }
 }

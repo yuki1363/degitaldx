@@ -38,7 +38,7 @@
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
 - **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期
-- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過は `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
+- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
 - **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する
 ### バージョン復元（3層の安全網）— 必須要件
 「編集してアプリが動かなくなる」事故に備え、以下を必ず運用・実装する。
@@ -97,8 +97,8 @@
 - **複数日にまたがる期間予定の完了も2通り**: カレンダーの日付タップ→日程シートの✓で**その日だけ完了**（その日を完了済みの単日レコードとして切り出し、残りの日程は未完了のまま残る。先頭/末尾/途中の日いずれも delete-day と同じ分割方式）／計画詳細の「🏁 全期間を完了にする」で**全期間を一括完了**。単日予定はどちらも同じ（`POST /api/plans/:id/complete-day`、`js/plan.js`）
 - 予定から点検実施画面（02）へワンタップで遷移
 - **年間計画表のCSV取込・出力**: 行=タスク／列=12ヶ月の表形式でCSV入出力。出力は各月の完了状態（完了／未実施／期限超過）を含む。取込は同形式を `/api/plans/batch` で一括登録（`js/plan-import.js`）
-- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）
-**テーブル**: `maintenance_plan`（id, equipment_id, plan_type[inspection/parts/construction/other], title, planned_date, recurrence_rule, assignee_id, status, +共通監査列）
+- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）。**出力（＝印刷）した日時を記録**し（`printed_at`/`printed_by`、`POST /api/plans/:id/printed`）、計画詳細に「工事連絡書 印刷日（未印刷）」を表示する。用紙に `{{印刷日}}` タグを置けば出力日が差し込まれる。**工事予定（`plan_type='construction'`）の3日前までに未印刷なら通知**する（`plan_print_reminder`・`overdue-notify.js`。印刷すれば `printed_at` が入り対象外になる）
+**テーブル**: `maintenance_plan`（id, equipment_id, plan_type[inspection/parts/construction/other], title, planned_date, recurrence_rule, assignee_id, status, printed_at, printed_by, +共通監査列）
 ### 02. 点検実施（スマホ入力・報告）
 - 点検項目をチェックリスト形式で表示し、スマホから簡単入力（OK/NG/数値/選択式）
 - **前回値の表示**: 数値項目の入力欄に、同じ設備の直近の点検記録から「前回値（日付）と今回との差分（↑↓→）」を表示（基準内でも劣化の兆候に気づける。`buildItemInput` の第3引数 `lastInfo`、取得失敗時は表示なしで入力継続）
@@ -132,7 +132,7 @@
 - **棚卸モード**: 一覧の「📋 棚卸」で行が「帳簿数 → 実数入力」に切り替わり、差異のある行だけ赤表示。「差異N件を一括確定」で棚卸調整（`type=adjust`・note=棚卸）として入出庫履歴に記録（editor以上。入力値はフィルタ変更をまたいで保持）
 - **発注状態管理**: 発注メール作成時に「📨 発注中」バッジを付与（`parts_inventory.ordered_at/ordered_by`・API `/api/parts/:id/order`）。入庫（type=in）で自動解除。二重発注・発注漏れの防止。詳細画面から手動解除も可
 - **発注メールの宛先自動入力・納期指定**: 部品マスタに登録済みの仕入先メール（`supplier_email`）を発注メール作成時の宛先へ自動セット（未登録なら空欄）。希望納期（任意）を入力すると本文に追記される（`js/parts.js` の `openOrderDialog`/`buildOrderEmail`）
-- **あいまい検索・類似部品の表示**: 一覧の検索ボックス（`GET /api/parts?q=`）は横断検索11と同じあいまい検索（全角半角・ひらがなカタカナのゆれを吸収・複数語はAND・`functions/api/_lib/fuzzy.js` を共有）。登録・編集フォームで部品名・型番を入力すると、型番・部品名が近い既存部品を最大5件ヒント表示し、うっかり重複登録を防ぐ（`exclude_id` で自分自身を除外。**保存は妨げない**＝型番は設計上重複可のため「重複」ではなく「類似」と表現する）
+- **あいまい検索・類似部品の表示**: 一覧の検索ボックス（`GET /api/parts?q=`）は横断検索11と同じあいまい検索（全角半角・ひらがなカタカナのゆれを吸収・複数語はAND・`functions/api/_lib/fuzzy.js` を共有）。**在庫検索は完全一致（全キーワードを含む＝AND）に加え、「類似の在庫」（いずれかのキーワードに一致＝OR）を別枠で表示する**（`include_similar=1` のとき `similar` 配列を返す。2語以上で検索したときだけ・完全一致で出た分は除外・最大30件。1語検索は AND と OR が同じになるため類似枠は出ない）。登録・編集フォームで部品名・型番を入力すると、型番・部品名が近い既存部品を最大5件ヒント表示し、うっかり重複登録を防ぐ（`exclude_id` で自分自身を除外。**保存は妨げない**＝型番は設計上重複可のため「重複」ではなく「類似」と表現する）
 - **既存 PowerApps 部品管理アプリからのデータ移行機能**:
   - SharePoint リストを CSV エクスポート → 管理画面の「CSVインポート」で取り込み
   - インポート画面で CSV列 ↔ アプリ項目の**列マッピングUI**を提供（文字コードは UTF-8 / Shift_JIS 両対応）
