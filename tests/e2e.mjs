@@ -655,6 +655,19 @@ const afterUiComplete = await page.evaluate((title) =>
 'E2EUI日別完了');
 check('UI日別完了: 完了した日は完了済みの単日レコードとして残り、他の日も未完了のまま残る', afterUiComplete === 3, `hits=${afterUiComplete}`);
 
+// ---------- 7.7 工事連絡書の印刷記録 ----------
+section('7.7 工事連絡書の印刷記録（POST /api/plans/:id/printed）');
+const prPlan = await api('/api/plans', { method: 'POST', body: { title: 'E2E印刷記録', plan_type: 'construction', planned_date: addDaysStr(new Date(), 2) } });
+check('印刷記録: テスト用の工事予定登録', prPlan.status === 201, `status=${prPlan.status}`);
+const prBefore = await api(`/api/plans/${prPlan.json?.id}`);
+check('印刷記録: 登録直後は printed_at が未設定', !prBefore.json?.plan?.printed_at, `printed_at=${prBefore.json?.plan?.printed_at}`);
+const prPost = await api(`/api/plans/${prPlan.json?.id}/printed`, { method: 'POST' });
+check('印刷記録: 印刷記録API（200・printed_at返却）', prPost.status === 200 && !!prPost.json?.printed_at, `status=${prPost.status} printed_at=${prPost.json?.printed_at}`);
+const prAfter = await api(`/api/plans/${prPlan.json?.id}`);
+check('印刷記録: 記録後は詳細に printed_at が入る', !!prAfter.json?.plan?.printed_at, `printed_at=${prAfter.json?.plan?.printed_at}`);
+const prMissing = await api('/api/plans/99999999/printed', { method: 'POST' });
+check('印刷記録: 存在しない計画は404', prMissing.status === 404, `status=${prMissing.status}`);
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });

@@ -425,6 +425,15 @@ export async function openExcelExport(type, record) {
 
   try {
     await fillAndDownload(template, type, record, inputValues);
+    // 工事連絡書を出力したら「印刷した」ものとして計画に記録する
+    // （計画詳細の「印刷日」表示・工事3日前の未印刷通知に使う）。出力自体は成功しているので、
+    // 記録失敗（権限・通信）ではユーザーを止めない（best-effort）。
+    if (type === 'construction_notice' && record && record.id != null) {
+      try {
+        const { printed_at } = await api.post(`/api/plans/${record.id}/printed`);
+        record.printed_at = printed_at; // 開いたままの詳細画面でも再取得なしで反映できるように
+      } catch { /* 印刷記録の失敗は無視（帳票は出力済み） */ }
+    }
   } catch (err) {
     alert(`帳票の出力に失敗しました: ${err.message}`);
   }

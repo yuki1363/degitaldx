@@ -835,3 +835,10 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_email);
+
+-- maintenance_plan: 工事連絡書の印刷記録（01）
+--   帳票（工事連絡書）を Excel 出力（＝印刷）した日時・人を記録する。
+--   計画詳細に「印刷日」を表示し、工事予定日の3日前までに未印刷なら通知するために使う
+--   （通知は functions/api/_lib/overdue-notify.js が1時間ごとに判定。type='plan_print_reminder'）。
+ALTER TABLE maintenance_plan ADD COLUMN printed_at TEXT;  -- 工事連絡書を最後に出力（印刷）した日時
+ALTER TABLE maintenance_plan ADD COLUMN printed_by TEXT;  -- 出力した人（メール）

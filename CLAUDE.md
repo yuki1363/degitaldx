@@ -38,7 +38,7 @@
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
 - **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期
-- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過は `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
+- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
 - **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する
 ### バージョン復元（3層の安全網）— 必須要件
 「編集してアプリが動かなくなる」事故に備え、以下を必ず運用・実装する。
@@ -97,8 +97,8 @@
 - **複数日にまたがる期間予定の完了も2通り**: カレンダーの日付タップ→日程シートの✓で**その日だけ完了**（その日を完了済みの単日レコードとして切り出し、残りの日程は未完了のまま残る。先頭/末尾/途中の日いずれも delete-day と同じ分割方式）／計画詳細の「🏁 全期間を完了にする」で**全期間を一括完了**。単日予定はどちらも同じ（`POST /api/plans/:id/complete-day`、`js/plan.js`）
 - 予定から点検実施画面（02）へワンタップで遷移
 - **年間計画表のCSV取込・出力**: 行=タスク／列=12ヶ月の表形式でCSV入出力。出力は各月の完了状態（完了／未実施／期限超過）を含む。取込は同形式を `/api/plans/batch` で一括登録（`js/plan-import.js`）
-- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）
-**テーブル**: `maintenance_plan`（id, equipment_id, plan_type[inspection/parts/construction/other], title, planned_date, recurrence_rule, assignee_id, status, +共通監査列）
+- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）。**出力（＝印刷）した日時を記録**し（`printed_at`/`printed_by`、`POST /api/plans/:id/printed`）、計画詳細に「工事連絡書 印刷日（未印刷）」を表示する。用紙に `{{印刷日}}` タグを置けば出力日が差し込まれる。**工事予定（`plan_type='construction'`）の3日前までに未印刷なら通知**する（`plan_print_reminder`・`overdue-notify.js`。印刷すれば `printed_at` が入り対象外になる）
+**テーブル**: `maintenance_plan`（id, equipment_id, plan_type[inspection/parts/construction/other], title, planned_date, recurrence_rule, assignee_id, status, printed_at, printed_by, +共通監査列）
 ### 02. 点検実施（スマホ入力・報告）
 - 点検項目をチェックリスト形式で表示し、スマホから簡単入力（OK/NG/数値/選択式）
 - **前回値の表示**: 数値項目の入力欄に、同じ設備の直近の点検記録から「前回値（日付）と今回との差分（↑↓→）」を表示（基準内でも劣化の兆候に気づける。`buildItemInput` の第3引数 `lastInfo`、取得失敗時は表示なしで入力継続）
