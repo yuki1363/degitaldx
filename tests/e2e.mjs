@@ -806,6 +806,17 @@ await page.waitForFunction(() =>
 check('削除すると画面更新なしで消える', await page.evaluate(() =>
   [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 0));
 
+// UI送信: 実際のボタンで1回送信 → DBに1件だけ（二重POSTの回帰）
+await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+const uiBody = 'E2EUI二重送信-' + Date.now();
+await page.fill('textarea', uiBody);
+await page.click('button:has-text("送信")');
+await page.waitForTimeout(1500);
+const uiRows = await api(`/api/chat?channel=general&limit=50`);
+const uiDbCount = (uiRows.json?.messages || []).filter((m) => m.body === uiBody).length;
+check('UI送信: 1回の送信でDBに1件だけ（二重POSTなし）', uiDbCount === 1, `count=${uiDbCount}`);
+
 // ---------- 9.5 機能強化: 点検の前回値表示・部品の棚卸モード ----------
 section('9.5 機能強化（前回値表示・棚卸モード）');
 // 前回値: 数値項目の入力欄に、直近の点検の値と差分が表示される
