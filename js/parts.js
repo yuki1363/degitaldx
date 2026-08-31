@@ -147,6 +147,7 @@ async function renderList() {
   let selectedLine = '';  // 設備名フィルタ（空 = 未選択／プロンプト表示）
   let selectedEquip = ''; // 機器名フィルタ（設備選択後に有効。ALL_EQUIPS = その設備の全機器）
   let allParts = [];
+  let similarParts = []; // 在庫検索の「類似の在庫」（キーワードの一部に一致）
   let timer = null;
 
   // 棚卸モード: 一覧の行を「帳簿数 → 実数入力」に切り替え、差異だけを一括で
@@ -318,14 +319,9 @@ async function renderList() {
     renderParts();
   };
 
-  // 部品配列を 設備名→機器名 でグループ化して listBox に描画する
-  //   （APIは line_name, equipment_name, name 順でソート済み）
-  const renderGroups = (parts) => {
-    if (parts.length === 0) {
-      render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
-      return;
-    }
-    const rowBuilder = stocktakeMode ? makeStocktakeRow : makePartRow;
+  // 部品配列を 設備名→機器名 でグループ化したノード配列を作る（APIはソート済み）。
+  //   rowBuilder を差し替えられるようにして、通常行・棚卸行・閲覧専用行を使い分ける。
+  const buildGroupNodes = (parts, rowBuilder) => {
     const lineMap = new Map();
     for (const p of parts) {
       const line = p.line_name || '';
@@ -343,6 +339,37 @@ async function renderList() {
         nodes.push(el('div', { class: 'row-list' }, equipParts.map(rowBuilder)));
       }
     }
+    return nodes;
+  };
+
+  // 部品配列を listBox に描画する
+  const renderGroups = (parts) => {
+    if (parts.length === 0) {
+      render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
+      return;
+    }
+    render(listBox, buildGroupNodes(parts, stocktakeMode ? makeStocktakeRow : makePartRow));
+  };
+
+  // 検索結果を「一致した在庫」＋「類似の在庫」の2段で描画する（在庫検索）。
+  //   類似はキーワードの一部だけ一致する在庫。棚卸対象にはしない（閲覧専用の行で表示）。
+  const renderSearchResults = () => {
+    if (allParts.length === 0 && similarParts.length === 0) {
+      render(listBox, el('p', { class: 'empty' }, '部品が見つかりません。'));
+      return;
+    }
+    const nodes = [];
+    if (allParts.length > 0) {
+      nodes.push(...buildGroupNodes(allParts, stocktakeMode ? makeStocktakeRow : makePartRow));
+    }
+    if (similarParts.length > 0) {
+      nodes.push(el('div', {
+        class: 'similar-divider',
+        style: 'margin:16px 0 4px;padding-top:10px;border-top:1px dashed var(--color-border,#d1d5db);font-weight:600;color:var(--color-text-sub,#6b7280);font-size:13px',
+      }, `類似の在庫（キーワードの一部に一致・${similarParts.length}件）`));
+      // 類似は閲覧専用の行（makePartRow）で表示する（棚卸の入力・集計対象にしない）
+      nodes.push(...buildGroupNodes(similarParts, makePartRow));
+    }
     render(listBox, nodes);
   };
 
@@ -351,7 +378,7 @@ async function renderList() {
   //   ・設備未選択: 要発注フィルタ中のみ全件、それ以外は設備選択を促す
   //   ・設備を選んでも、機器を選ぶまでは部品を表示しない（「すべての機器」で設備全件）
   const renderParts = () => {
-    if (searchQuery) { renderGroups(allParts); return; }
+    if (searchQuery) { renderSearchResults(); return; }
 
     if (!selectedLine) {
       if (filterLow) { renderGroups(allParts); return; }
@@ -419,10 +446,11 @@ async function renderList() {
   const load = async () => {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
     const params = new URLSearchParams();
-    if (searchQuery) params.set('q', searchQuery);
+    if (searchQuery) { params.set('q', searchQuery); params.set('include_similar', '1'); }
     if (filterLow) params.set('low_stock', '1');
-    const { parts } = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
-    allParts = parts;
+    const resp = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
+    allParts = resp.parts;
+    similarParts = resp.similar || [];
     refreshLineOptions();
     refreshEquipOptions();
     renderParts();

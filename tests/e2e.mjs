@@ -229,6 +229,25 @@ await page.fill('input[placeholder*="ベアリング 6205"]', 'E2E類似ベア�
 await page.waitForFunction(() => document.body.innerText.includes('類似の部品が見つかりました'), { timeout: 5000 }).catch(() => {});
 check('類似部品: フォームにヒントが表示される', await page.evaluate(() => document.body.innerText.includes('類似の部品が見つかりました')));
 
+// 在庫検索: 「類似の在庫」（キーワードの一部一致＝OR）も返す（include_similar=1）
+const ptSimA = await api('/api/parts', { method: 'POST', body: { name: 'E2ESIMfilter', model_no: 'ZZQ-777', line_name: 'SIMライン', quantity: 1, safety_stock: 0 } });
+const ptSimB = await api('/api/parts', { method: 'POST', body: { name: 'E2ESIMpump', model_no: 'ZZQ-888', line_name: 'SIMライン', quantity: 1, safety_stock: 0 } });
+check('類似在庫用の登録（201）', ptSimA.status === 201 && ptSimB.status === 201, `a=${ptSimA.status} b=${ptSimB.status}`);
+const ptSimQ = encodeURIComponent('E2ESIMfilter E2ESIMpump'); // 両方の語を含む部品は無い
+const ptSimRes = await api(`/api/parts?q=${ptSimQ}&include_similar=1`);
+const ptExactIds = new Set((ptSimRes.json?.parts || []).map((p) => p.id));
+const ptSimIds = new Set((ptSimRes.json?.similar || []).map((p) => p.id));
+check('類似在庫: 完全一致(AND)には出ない', !ptExactIds.has(ptSimA.json?.id) && !ptExactIds.has(ptSimB.json?.id), `parts=${[...ptExactIds]}`);
+check('類似在庫: 類似(OR)に両方の在庫が出る', ptSimIds.has(ptSimA.json?.id) && ptSimIds.has(ptSimB.json?.id), `similar=${[...ptSimIds]}`);
+const ptNoSim = await api(`/api/parts?q=${ptSimQ}`);
+check('類似在庫: include_similar無しでは similar を返さない（従来の呼び出しに非影響）', ptNoSim.json?.similar === undefined, `similar=${JSON.stringify(ptNoSim.json?.similar)}`);
+// UI: 一覧の検索で「類似の在庫」見出しが表示される
+await page.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(300);
+await page.fill('input[type="search"]', 'E2ESIMfilter E2ESIMpump');
+await page.waitForFunction(() => document.body.innerText.includes('類似の在庫'), { timeout: 5000 }).catch(() => {});
+check('類似在庫: 一覧に「類似の在庫」見出しが表示される', await page.evaluate(() => document.body.innerText.includes('類似の在庫')));
+
 // ---------- 3. 同時編集の競合ガード ----------
 section('3. 同時編集の競合ガード');
 const cur = await api(`/api/troubles/${troubleId}`);
