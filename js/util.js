@@ -80,6 +80,12 @@ export function el(tag, attrs = {}, children = []) {
       node.value = value;
     } else if (key === 'checked' || key === 'disabled' || key === 'selected' || key === 'hidden' || key === 'multiple') {
       node[key] = Boolean(value);
+    } else if (key === 'dataset' && value && typeof value === 'object') {
+      // dataset: { id: '5' } → data-id="5"。オブジェクトのまま setAttribute すると
+      // "[object Object]" になり data-* が付かない（チャットの重複描画ガードが効かない不具合の原因）。
+      for (const [dk, dv] of Object.entries(value)) {
+        if (dv !== undefined && dv !== null) node.dataset[dk] = String(dv);
+      }
     } else {
       node.setAttribute(key, String(value));
     }

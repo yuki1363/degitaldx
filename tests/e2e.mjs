@@ -776,12 +776,35 @@ await page.waitForFunction(() => !!document.querySelector('.chat-msg img.chat-th
 const hasThumb = await page.evaluate(() => !!document.querySelector('.chat-msg img.chat-thumb'));
 check('画像添付がサムネイル表示される（バグ修正）', hasThumb);
 
-// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）
+// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）。
+// POLL_MS=5秒。since は >= 比較のため境界の投稿が毎周期返るので、2周期以上またいで
+// 待つ（el の dataset 未対応で data-id が付かず重複ガードが外れると、周期ごとに増える）。
 await api('/api/chat', { method: 'POST', body: { body: 'E2Eポーリング新着', channel: 'general' } });
-await page.waitForTimeout(6500);
+await page.waitForTimeout(11500);
 const pollCount = await page.evaluate(() =>
   [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2Eポーリング新着').length);
-check('ポーリングで新着が1回だけ表示される', pollCount === 1, `count=${pollCount}`);
+check('ポーリングで新着が1回だけ表示される（2周期後も重複しない）', pollCount === 1, `count=${pollCount}`);
+// メッセージ行に data-id 属性が付いている（重複ガード・削除・ピンジャンプの前提）
+const hasDataId = await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg')].every((r) => !!r.getAttribute('data-id')));
+check('チャット行に data-id が付与される（el の dataset 対応）', hasDataId);
+
+// 削除: ✕ をタップするとリロードせずに消える（row.remove()）
+await api('/api/chat', { method: 'POST', body: { body: 'E2E削除テスト', channel: 'general' } });
+await page.waitForFunction(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
+  { timeout: 8000 }).catch(() => {});
+check('削除テスト用メッセージが表示される', await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 1));
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('.chat-msg')].find((r) => r.querySelector('.chat-body')?.textContent === 'E2E削除テスト');
+  row?.querySelector('button[title="削除"]')?.click(); // confirm は自動承諾
+});
+await page.waitForFunction(() =>
+  ![...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
+  { timeout: 8000 }).catch(() => {});
+check('削除すると画面更新なしで消える', await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 0));
 
 // ---------- 9.5 機能強化: 点検の前回値表示・部品の棚卸モード ----------
 section('9.5 機能強化（前回値表示・棚卸モード）');
