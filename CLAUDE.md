@@ -97,7 +97,7 @@
 - **複数日にまたがる期間予定の完了も2通り**: カレンダーの日付タップ→日程シートの✓で**その日だけ完了**（その日を完了済みの単日レコードとして切り出し、残りの日程は未完了のまま残る。先頭/末尾/途中の日いずれも delete-day と同じ分割方式）／計画詳細の「🏁 全期間を完了にする」で**全期間を一括完了**。単日予定はどちらも同じ（`POST /api/plans/:id/complete-day`、`js/plan.js`）
 - 予定から点検実施画面（02）へワンタップで遷移
 - **年間計画表のCSV取込・出力**: 行=タスク／列=12ヶ月の表形式でCSV入出力。出力は各月の完了状態（完了／未実施／期限超過）を含む。取込は同形式を `/api/plans/batch` で一括登録（`js/plan-import.js`）
-- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）。**出力（＝印刷）した日時を記録**し（`printed_at`/`printed_by`、`POST /api/plans/:id/printed`）、計画詳細に「工事連絡書 印刷日（未印刷）」を表示する。用紙に `{{印刷日}}` タグを置けば出力日が差し込まれる。**工事予定（`plan_type='construction'`）の3日前までに未印刷なら通知**する（`plan_print_reminder`・`overdue-notify.js`。印刷すれば `printed_at` が入り対象外になる）
+- **帳票出力（工事連絡書）**: 計画詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（Excel→PDF化の手順は後述「帳票テンプレート」）。**出力（＝印刷）した日時を記録**し（`printed_at`/`printed_by`、`POST /api/plans/:id/printed`）、計画詳細に「工事連絡書 印刷日（未印刷）」を表示する。用紙に `{{印刷日}}` タグを置けば出力日が差し込まれる。**工事予定（`plan_type='construction'`）の3日前までに未印刷なら通知**する（`plan_print_reminder`・`overdue-notify.js`。印刷すれば `printed_at` が入り対象外になる）。**担当者印の自動押印**: シーバイエス担当名（`担当`タグ）に苗字が入っていれば、用紙の担当者欄に置いた `{{担当印}}` セルへ赤シャチハタ印を自動生成して押す（専用のハンコ入力欄は不要。姓＋名なら姓だけを使う。`js/excel-fill.js`＝`担当`の値から `makeHankoPngBase64`→`embedHankos`）
 **テーブル**: `maintenance_plan`（id, equipment_id, plan_type[inspection/parts/construction/other], title, planned_date, recurrence_rule, assignee_id, status, printed_at, printed_by, +共通監査列）
 ### 02. 点検実施（スマホ入力・報告）
 - 点検項目をチェックリスト形式で表示し、スマホから簡単入力（OK/NG/数値/選択式）

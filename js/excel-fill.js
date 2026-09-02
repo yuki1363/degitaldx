@@ -321,6 +321,17 @@ async function fillAndDownload(template, type, record, inputValues) {
     values[f.tag] = '';
     if (surname) hankoItems.push({ tag: f.tag, base64: makeHankoPngBase64(surname) });
   }
+  // 工事連絡書: 専用のハンコ入力欄は設けず、シーバイエス担当名(担当)に入った苗字から
+  // 担当者印(担当印)の赤シャチハタを自動生成して押す。用紙の担当者欄に {{担当印}} を置いておくと、
+  // 担当名を入れるだけで印鑑が押される（別途ハンコ入力は不要）。姓＋名なら姓だけを使う。
+  if (type === 'construction_notice') {
+    const surname = String(values['担当'] || '').trim().split(/[\s　]+/)[0];
+    if (surname && !hankoItems.some((h) => h.tag === '担当印')) {
+      values['担当印'] = ''; // 用紙に残る {{担当印}} タグ文字は消す（印影画像で表現するため）
+      hankoItems.push({ tag: '担当印', base64: makeHankoPngBase64(surname) });
+    }
+  }
+
   if (hankoItems.length) {
     try { await embedHankos(zip, hankoItems); }
     catch (e) { console.error('ハンコ画像の埋め込みに失敗しました:', e); }
