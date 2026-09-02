@@ -9,6 +9,10 @@
 
 const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const STAMP_EMU = 470000; // 約1.3cm四方（1cm = 360000 EMU）
+// セル左上からの押印位置オフセット（EMU）。＋で右・下へ寄る（1mm = 36000 EMU）。
+// セル角にべったり付かないよう、少し内側（右・下）へ寄せる。位置調整はこの2値だけ変えればよい。
+const STAMP_COL_OFF = 108000; // 右へ約3mm
+const STAMP_ROW_OFF = 108000; // 下へ約3mm
 
 /**
  * items: [{ tag, base64 }] のハンコ画像を、タグのあるセルに埋め込む。
@@ -205,7 +209,7 @@ function decodeXml(s) {
 
 function anchorXml(col, row, cid, rid) {
   return '<xdr:oneCellAnchor>'
-    + `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>`
+    + `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>${STAMP_COL_OFF}</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>${STAMP_ROW_OFF}</xdr:rowOff></xdr:from>`
     + `<xdr:ext cx="${STAMP_EMU}" cy="${STAMP_EMU}"/>`
     + '<xdr:pic>'
     + `<xdr:nvPicPr><xdr:cNvPr id="${cid}" name="hanko${cid}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>`
