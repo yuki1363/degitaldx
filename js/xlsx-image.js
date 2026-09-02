@@ -132,11 +132,14 @@ function findTagCell(tag, sharedTexts, sheetPaths, sheetXmls) {
 
   for (const sheetPath of sheetPaths) {
     const xml = sheetXmls[sheetPath];
-    const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+    // 自己完結セル <c .../>（空セル）と通常セル <c ...>...</c> の両方に対応する。
+    // 旧 /<c\b([^>]*)>([\s\S]*?)<\/c>/ は空セルの末尾 "/>" を開始タグと誤認し、
+    // 直後のタグ付きセル（例 {{担当印}} のある W2）を前の空セルに飲み込んで取りこぼしていた。
+    const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
     let m;
     while ((m = cellRe.exec(xml)) !== null) {
       const attrs = m[1];
-      const inner = m[2];
+      const inner = m[2] || '';
       const refM = /\br="([A-Z]+\d+)"/.exec(attrs);
       if (!refM) continue;
       if (/\bt="s"/.test(attrs)) {
