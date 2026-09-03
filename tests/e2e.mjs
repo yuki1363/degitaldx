@@ -904,9 +904,13 @@ const utOil = byName('油面確認1');
 const utComp = byName('空気圧縮機運転号機');
 const utStart = byName('運転開始時間');
 const utOrder = utItems.json.items.filter((i) => i.section === '圧縮機・温水').map((i) => i.name);
-check('ユーティリティ: 総運転時間がヘッダー圧力の直後に号機順で並ぶ',
-  utOrder.slice(0, 5).join(',') === '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,総運転時間2,総運転時間3',
+check('ユーティリティ: 総運転時間と油面確認が号機ごとに1組で並ぶ',
+  utOrder.slice(0, 8).join(',') ===
+    '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3',
   utOrder.join(','));
+const utSorts = utItems.json.items.map((i) => i.sort_order);
+check('ユーティリティ: sort_orderが重複しない（セクション分断の防止）',
+  new Set(utSorts).size === utSorts.length, utSorts.join(','));
 check('ユーティリティ: 総運転時間は数値入力（単位hr）',
   utItems.json.items.filter((i) => i.name.startsWith('総運転時間'))
     .every((i) => i.input_type === 'number' && i.unit === 'hr'));
@@ -998,6 +1002,21 @@ check('ユーティリティ: 入力画面が pageerror なく表示', pageError
 check('ユーティリティ: 点検項目が描画される',
   await page.evaluate(() => document.querySelectorAll('.check-item').length >= 30),
   String(await page.evaluate(() => document.querySelectorAll('.check-item').length)));
+// 項目名は先頭のテキストノード（基準値ヒントの span を除く）で比べる
+const utCards = await page.evaluate(() => [...document.querySelectorAll('#app .card')]
+  .map((c) => ({
+    title: c.querySelector('.card-title')?.textContent || '',
+    items: [...c.querySelectorAll('.check-item-name')].map((n) => (n.childNodes[0]?.textContent || '').trim()),
+  }))
+  .filter((c) => c.items.length));
+check('ユーティリティ: 同じセクションが1枚のカードにまとまる',
+  new Set(utCards.map((c) => c.title)).size === utCards.length,
+  utCards.map((c) => c.title).join(','));
+check('ユーティリティ: 圧縮機セクションが号機ごとに1組で並ぶ（画面）',
+  (utCards.find((c) => c.title === '圧縮機・温水')?.items || []).join(',') ===
+    '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3,' +
+    '温水ポンプ運転号機,温水ポンプ圧力,温水タンク容量,温水タンク内温度',
+  JSON.stringify(utCards.find((c) => c.title === '圧縮機・温水')?.items));
 const utHints = await page.evaluate(() =>
   [...document.querySelectorAll('.check-item')].map((c) => ({
     name: c.querySelector('.check-item-name')?.textContent || '',

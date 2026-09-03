@@ -189,24 +189,23 @@ async function renderForm(existing) {
     oninput: () => draft.touch(),
   }, existing?.note || '');
 
-  // セクションごとに1枚のカードにまとめ、縦1カラムで並べる（375px幅基準）
-  //（el() は呼び出し時点の子要素しか取り込まないため、入れ物を先に作って追記していく）
+  // セクションごとに1枚のカードにまとめ、縦1カラムで並べる（375px幅基準）。
+  //（el() は呼び出し時点の子要素しか取り込まないため、入れ物を先に作って追記していく。
+  //   同じセクション名は1枚にまとめる＝管理画面で並び順が前後してもカードが分断されない）
   const inputs = [];
   const sections = [];
-  let currentSection = null;
-  let currentBody = null;
+  const bodyBySection = new Map();
   for (const item of items) {
-    if (item.section !== currentSection || currentBody === null) {
-      currentSection = item.section;
-      currentBody = el('div', {}, []);
-      sections.push(el('div', { class: 'card' }, [
-        el('h2', { class: 'card-title' }, currentSection || 'その他'),
-        currentBody,
-      ]));
+    const name = item.section || 'その他';
+    let body = bodyBySection.get(name);
+    if (!body) {
+      body = el('div', {}, []);
+      bodyBySection.set(name, body);
+      sections.push(el('div', { class: 'card' }, [el('h2', { class: 'card-title' }, name), body]));
     }
     const built = buildItemInput(item, existingValues.get(item.id), lastValues.get(item.id));
     inputs.push({ item, getValue: built.getValue });
-    currentBody.appendChild(built.box);
+    body.appendChild(built.box);
   }
 
   const notice = el('p', { class: 'notice is-error', hidden: true }, '');
@@ -287,17 +286,16 @@ async function renderDetail(id) {
   const { report, history } = await api.get(`/api/utility-reports/${id}`);
 
   // セクションごとにカード化し、02 点検の詳細と同じ result-row で値を並べる
+  //（入力画面と同じく、同じセクション名は1枚にまとめる）
   const cards = [];
-  let section = null;
-  let rows = null;
+  const rowsBySection = new Map();
   for (const v of report.values || []) {
-    if (v.section !== section || rows === null) {
-      section = v.section;
+    const section = v.section || 'その他';
+    let rows = rowsBySection.get(section);
+    if (!rows) {
       rows = el('div', { class: 'row-list' }, []);
-      cards.push(el('div', { class: 'card' }, [
-        el('h2', { class: 'card-title' }, section || 'その他'),
-        rows,
-      ]));
+      rowsBySection.set(section, rows);
+      cards.push(el('div', { class: 'card' }, [el('h2', { class: 'card-title' }, section), rows]));
     }
     rows.appendChild(el('div', { class: v.abnormal ? 'result-row is-abn' : 'result-row' }, [
       el('span', { class: 'result-name' }, v.name),
