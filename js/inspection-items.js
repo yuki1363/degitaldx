@@ -200,6 +200,17 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
     }
   }
 
+  // 数値以外（選択式・複数選択・時刻・自由記述）の前回値表示。
+  // 差分は出せないので「前回 ○○（日付）」だけを入力欄の下に添える（13 ユーティリティ日報）。
+  // 02 点検は数値項目にしか lastInfo を渡さないため、既存の表示は変わらない。
+  if (!lastHint && lastInfo != null && lastInfo.value !== undefined
+      && lastInfo.value !== null && lastInfo.value !== '') {
+    const prev = Array.isArray(lastInfo.value) ? lastInfo.value.join('、') : String(lastInfo.value);
+    const dateStr = lastInfo.date ? `（${String(lastInfo.date).slice(0, 10).replace(/-/g, '/')}）` : '';
+    lastHint = el('p', { class: 'hint last-value-hint' },
+      `前回 ${prev}${master.unit ? ' ' + master.unit : ''}${dateStr}`);
+  }
+
   const box = el('div', { class: 'check-item' }, [
     el('div', { class: 'check-item-name' }, [
       master.name,

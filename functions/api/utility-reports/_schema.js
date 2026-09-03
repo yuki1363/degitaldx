@@ -12,7 +12,7 @@ import { ensureColumns } from '../_lib/db-compat.js';
 export const INPUT_TYPES = ['number', 'select', 'multi', 'time', 'text'];
 
 /** 表示グループ（入力画面のカード見出し・並び順） */
-export const SECTIONS = ['灯油系統', '圧縮機・温水', '各種タンク', '蒸気ボイラー・ドレン', '運転時間・油面'];
+export const SECTIONS = ['灯油系統', '圧縮機・温水', '各種タンク', '蒸気ボイラー・ドレン', '油面確認'];
 
 const UNITS = ['1号機', '2号機', '3号機'];
 const OIL_LEVEL = ['OK', '要補充', '異常'];
@@ -26,10 +26,14 @@ export const UTILITY_ITEMS = [
 
   { section: '圧縮機・温水', name: '空気圧縮機運転号機', input_type: 'multi', options: UNITS, sort_order: 10 },
   { section: '圧縮機・温水', name: 'ヘッダー圧力', input_type: 'number', unit: 'MPa', sort_order: 11 },
-  { section: '圧縮機・温水', name: '温水ポンプ運転号機', input_type: 'multi', options: UNITS, sort_order: 12 },
-  { section: '圧縮機・温水', name: '温水ポンプ圧力', input_type: 'number', unit: 'MPa', sort_order: 13 },
-  { section: '圧縮機・温水', name: '温水タンク容量', input_type: 'number', unit: '㎥', sort_order: 14 },
-  { section: '圧縮機・温水', name: '温水タンク内温度', input_type: 'number', unit: '℃', sort_order: 15 },
+  // 空気圧縮機の号機別 総運転時間。ヘッダー圧力の直後に置き、号機の入力を1か所にまとめる
+  { section: '圧縮機・温水', name: '総運転時間1', input_type: 'number', unit: 'hr', sort_order: 12 },
+  { section: '圧縮機・温水', name: '総運転時間2', input_type: 'number', unit: 'hr', sort_order: 13 },
+  { section: '圧縮機・温水', name: '総運転時間3', input_type: 'number', unit: 'hr', sort_order: 14 },
+  { section: '圧縮機・温水', name: '温水ポンプ運転号機', input_type: 'multi', options: UNITS, sort_order: 15 },
+  { section: '圧縮機・温水', name: '温水ポンプ圧力', input_type: 'number', unit: 'MPa', sort_order: 16 },
+  { section: '圧縮機・温水', name: '温水タンク容量', input_type: 'number', unit: '㎥', sort_order: 17 },
+  { section: '圧縮機・温水', name: '温水タンク内温度', input_type: 'number', unit: '℃', sort_order: 18 },
 
   { section: '各種タンク', name: '中水タンク容量', input_type: 'number', unit: '㎥', sort_order: 20 },
   { section: '各種タンク', name: '飲料水タンク容量', input_type: 'number', unit: '㎥', sort_order: 21 },
@@ -48,12 +52,28 @@ export const UTILITY_ITEMS = [
   { section: '蒸気ボイラー・ドレン', name: 'ドレン電導度', input_type: 'number', unit: 'μS/cm', sort_order: 34 },
   { section: '蒸気ボイラー・ドレン', name: 'ドレンポンプ圧力', input_type: 'number', unit: 'MPa', sort_order: 35 },
 
-  { section: '運転時間・油面', name: '総運転時間1', input_type: 'number', unit: 'hr', sort_order: 40 },
-  { section: '運転時間・油面', name: '油面確認1', input_type: 'select', options: OIL_LEVEL, alert_options: ['要補充', '異常'], sort_order: 41 },
-  { section: '運転時間・油面', name: '総運転時間2', input_type: 'number', unit: 'hr', sort_order: 42 },
-  { section: '運転時間・油面', name: '油面確認2', input_type: 'select', options: OIL_LEVEL, alert_options: ['要補充', '異常'], sort_order: 43 },
-  { section: '運転時間・油面', name: '総運転時間3', input_type: 'number', unit: 'hr', sort_order: 44 },
-  { section: '運転時間・油面', name: '油面確認3', input_type: 'select', options: OIL_LEVEL, alert_options: ['要補充', '異常'], sort_order: 45 },
+  { section: '油面確認', name: '油面確認1', input_type: 'select', options: OIL_LEVEL, alert_options: ['要補充', '異常'], sort_order: 41 },
+  { section: '油面確認', name: '油面確認2', input_type: 'select', options: OIL_LEVEL, alert_options: ['要補充', '異常'], sort_order: 43 },
+  { section: '油面確認', name: '油面確認3', input_type: 'select', options: OIL_LEVEL, alert_options: ['要補充', '異常'], sort_order: 45 },
+];
+
+/**
+ * 既に31項目を投入済みのDBを、上の並びへ合わせ直す一度きりの移行。
+ *   - 総運転時間1〜3 を「圧縮機・温水」のヘッダー圧力直後へ移す
+ *   - 押し出される温水ポンプ系の並び順を繰り下げる
+ *   - 総運転時間が抜けた「運転時間・油面」を「油面確認」に改称する
+ * どれも「移動前の値」を条件に含めるため、一度動いた後は何度実行しても no-op になる
+ * （管理画面で並び替えた内容を後から上書きしない）。
+ */
+export const UTILITY_MIGRATIONS = [
+  `UPDATE utility_item SET sort_order = 15 WHERE name = '温水ポンプ運転号機' AND sort_order = 12`,
+  `UPDATE utility_item SET sort_order = 16 WHERE name = '温水ポンプ圧力'     AND sort_order = 13`,
+  `UPDATE utility_item SET sort_order = 17 WHERE name = '温水タンク容量'     AND sort_order = 14`,
+  `UPDATE utility_item SET sort_order = 18 WHERE name = '温水タンク内温度'   AND sort_order = 15 AND section = '圧縮機・温水'`,
+  `UPDATE utility_item SET section = '圧縮機・温水', sort_order = 12 WHERE name = '総運転時間1' AND section = '運転時間・油面'`,
+  `UPDATE utility_item SET section = '圧縮機・温水', sort_order = 13 WHERE name = '総運転時間2' AND section = '運転時間・油面'`,
+  `UPDATE utility_item SET section = '圧縮機・温水', sort_order = 14 WHERE name = '総運転時間3' AND section = '運転時間・油面'`,
+  `UPDATE utility_item SET section = '油面確認' WHERE name IN ('油面確認1', '油面確認2', '油面確認3') AND section = '運転時間・油面'`,
 ];
 
 const sq = (v) => (v === null || v === undefined ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`);
@@ -114,5 +134,6 @@ export async function ensureUtilitySchema(db) {
     `CREATE INDEX IF NOT EXISTS idx_utility_report_date ON utility_report (report_date)`,
     `CREATE INDEX IF NOT EXISTS idx_utility_item_sort ON utility_item (sort_order, id)`,
     ...UTILITY_ITEMS.map(itemSeedSql),
+    ...UTILITY_MIGRATIONS,
   ]);
 }

@@ -903,6 +903,13 @@ const utHeader = byName('ヘッダー圧力');
 const utOil = byName('油面確認1');
 const utComp = byName('空気圧縮機運転号機');
 const utStart = byName('運転開始時間');
+const utOrder = utItems.json.items.filter((i) => i.section === '圧縮機・温水').map((i) => i.name);
+check('ユーティリティ: 総運転時間がヘッダー圧力の直後に号機順で並ぶ',
+  utOrder.slice(0, 5).join(',') === '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,総運転時間2,総運転時間3',
+  utOrder.join(','));
+check('ユーティリティ: 総運転時間は数値入力（単位hr）',
+  utItems.json.items.filter((i) => i.name.startsWith('総運転時間'))
+    .every((i) => i.input_type === 'number' && i.unit === 'hr'));
 check('ユーティリティ: 複数選択・時刻・異常選択肢の定義がある',
   utComp?.input_type === 'multi' && utStart?.input_type === 'time' &&
   Array.isArray(utOil?.alert_options) && utOil.alert_options.includes('異常'),
@@ -976,7 +983,10 @@ const utDel = await api(`/api/utility-reports/${utId}`, { method: 'DELETE' });
 check('ユーティリティ: DELETE（200）', utDel.status === 200, `status=${utDel.status}`);
 const utList2 = await api(`/api/utility-reports?from=${utDate}&to=${utDate}`);
 check('ユーティリティ: 削除後は一覧に出ない（論理削除）', (utList2.json?.reports ?? []).length === 0);
-const utReAdd = await api('/api/utility-reports', { method: 'POST', body: { report_date: utDate, values: {} } });
+const utReAdd = await api('/api/utility-reports', {
+  method: 'POST',
+  body: { report_date: utDate, values: { [utOil.id]: 'OK', [utStart.id]: '07:00', [utHeader.id]: 0.7 } },
+});
 check('ユーティリティ: 削除した日は再登録できる', utReAdd.status === 201, `status=${utReAdd.status}`);
 
 // 入力画面が pageerror なく開く
@@ -988,6 +998,18 @@ check('ユーティリティ: 入力画面が pageerror なく表示', pageError
 check('ユーティリティ: 点検項目が描画される',
   await page.evaluate(() => document.querySelectorAll('.check-item').length >= 30),
   String(await page.evaluate(() => document.querySelectorAll('.check-item').length)));
+const utHints = await page.evaluate(() =>
+  [...document.querySelectorAll('.check-item')].map((c) => ({
+    name: c.querySelector('.check-item-name')?.textContent || '',
+    hint: c.querySelector('.last-value-hint')?.textContent || '',
+  })).filter((x) => x.hint));
+check('ユーティリティ: 数値項目に前回値が出る',
+  utHints.some((h) => h.name.includes('ヘッダー圧力') && h.hint.includes('前回 0.7')),
+  JSON.stringify(utHints));
+check('ユーティリティ: 選択式・時刻にも前回値が出る',
+  utHints.some((h) => h.name.includes('油面確認1') && h.hint.includes('前回 OK')) &&
+  utHints.some((h) => h.name.includes('運転開始時間') && h.hint.includes('前回 07:00')),
+  JSON.stringify(utHints));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

@@ -146,14 +146,16 @@ async function renderForm(existing) {
 
   const reportDate = existing ? existing.report_date : todayStr();
 
-  // 前回値（この日より前の直近の記録）。取得に失敗しても入力は続けられる
+  // 前回値（この日より前の直近の記録）。数値は差分（↑↓→）付き、
+  // 選択式・複数選択・時刻は「前回 ○○（日付）」を入力欄の下に表示する。
+  // 取得に失敗しても入力は続けられる。
   const lastValues = new Map();
   try {
     const p = new URLSearchParams({ before: reportDate });
     if (existing) p.set('exclude_id', String(existing.id));
     const { report: prev } = await api.get(`/api/utility-reports/latest?${p}`);
     for (const v of prev?.values || []) {
-      if (v.input_type === 'number' && v.value !== null && v.value !== undefined) {
+      if (v.value !== null && v.value !== undefined && v.value !== '') {
         lastValues.set(v.item_id, { value: v.value, date: prev.report_date });
       }
     }
