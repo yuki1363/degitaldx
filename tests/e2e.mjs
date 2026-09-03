@@ -859,7 +859,8 @@ const elRec = {
   id: elClientId, equipmentType: 'main', date: '2026-09-03', inspector: 'E2E点検者',
   facility: '第1キュービクル', weather: '晴', room_temp: '22', humidity: '55',
   statuses: { g_noise: 'good', tr_dmg: 'caution', cu_water: 'repair' },
-  measurements: { tr_v1: ['6600', '6600', '6598'], tr_ot: '42' },
+  measurements: { tr_v1: ['6600', '6600', '6598'], tr_ot: '42', whm: '1234' },
+  qualifiers: { c_i: '未満' }, // main版の未満/以上（record_jsonに保持されること）
   categoryRemarks: {}, remarks: 'E2E特記', config: [], savedAt: new Date().toISOString(),
 };
 const elPost = await api('/api/electrical-inspections', { method: 'POST', body: elRec });
@@ -869,11 +870,15 @@ check('電気点検: client_idキーで取得できる', !!elGet.json?.records?.
 check('電気点検: measurements/statusesが往復する',
   elGet.json?.records?.[elClientId]?.statuses?.cu_water === 'repair' &&
   Array.isArray(elGet.json?.records?.[elClientId]?.measurements?.tr_v1));
-// 設定の往復（admin）
-const elCfgPut = await api('/api/electrical-config', { method: 'PUT', body: { equipment_type: 'battery', config: [{ id: 'c1', title: 'E2Eカテゴリ', checks: [], measurements: [] }] } });
+check('電気点検: qualifiers（未満/以上）が往復する（main版）',
+  elGet.json?.records?.[elClientId]?.qualifiers?.c_i === '未満');
+// 設定の往復（admin）。乗数(multiplier)・未満以上(qualifier)フィールドが保持されること
+const elCfgPut = await api('/api/electrical-config', { method: 'PUT', body: { equipment_type: 'battery', config: [{ id: 'c1', title: 'E2Eカテゴリ', checks: [], measurements: [{ key: 'w1', label: 'WHM', unit: 'kwh', phases: 1, multiplier: 2400 }, { key: 'i1', label: '電流', unit: 'A', phases: 3, qualifier: true }] }] } });
 check('電気点検: 設定PUT（admin・200）', elCfgPut.status === 200, `status=${elCfgPut.status}`);
 const elCfgGet = await api('/api/electrical-config');
 check('電気点検: 設定がGETで戻る', elCfgGet.json?.battery?.[0]?.title === 'E2Eカテゴリ', JSON.stringify(elCfgGet.json?.battery));
+check('電気点検: 乗数×2400が設定に保持される', elCfgGet.json?.battery?.[0]?.measurements?.[0]?.multiplier === 2400);
+check('電気点検: qualifier=trueが設定に保持される', elCfgGet.json?.battery?.[0]?.measurements?.[1]?.qualifier === true);
 // 論理削除 → 一覧から消える
 const elDel = await api(`/api/electrical-inspections/${encodeURIComponent(elClientId)}`, { method: 'DELETE' });
 check('電気点検: 記録DELETE（200）', elDel.status === 200, `status=${elDel.status}`);
