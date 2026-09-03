@@ -188,22 +188,23 @@ async function renderForm(existing) {
   }, existing?.note || '');
 
   // セクションごとに1枚のカードにまとめ、縦1カラムで並べる（375px幅基準）
+  //（el() は呼び出し時点の子要素しか取り込まないため、入れ物を先に作って追記していく）
   const inputs = [];
   const sections = [];
   let currentSection = null;
-  let currentBoxes = null;
+  let currentBody = null;
   for (const item of items) {
-    if (item.section !== currentSection || currentBoxes === null) {
+    if (item.section !== currentSection || currentBody === null) {
       currentSection = item.section;
-      currentBoxes = [];
+      currentBody = el('div', {}, []);
       sections.push(el('div', { class: 'card' }, [
         el('h2', { class: 'card-title' }, currentSection || 'その他'),
-        el('div', {}, currentBoxes),
+        currentBody,
       ]));
     }
     const built = buildItemInput(item, existingValues.get(item.id), lastValues.get(item.id));
     inputs.push({ item, getValue: built.getValue });
-    currentBoxes.push(built.box);
+    currentBody.appendChild(built.box);
   }
 
   const notice = el('p', { class: 'notice is-error', hidden: true }, '');
@@ -290,13 +291,13 @@ async function renderDetail(id) {
   for (const v of report.values || []) {
     if (v.section !== section || rows === null) {
       section = v.section;
-      rows = [];
+      rows = el('div', { class: 'row-list' }, []);
       cards.push(el('div', { class: 'card' }, [
         el('h2', { class: 'card-title' }, section || 'その他'),
-        el('div', { class: 'row-list' }, rows),
+        rows,
       ]));
     }
-    rows.push(el('div', { class: v.abnormal ? 'result-row is-abn' : 'result-row' }, [
+    rows.appendChild(el('div', { class: v.abnormal ? 'result-row is-abn' : 'result-row' }, [
       el('span', { class: 'result-name' }, v.name),
       el('span', { class: 'result-value' }, [
         displayValue(v),

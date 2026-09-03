@@ -85,7 +85,7 @@
 - エラー修正時は、原因の説明 → 最小限の修正、の順で行う。無関係なリファクタリングを混ぜない
 - この CLAUDE.md と実装が食い違う変更を行った場合は、CLAUDE.md も同時に更新する
 ---
-## 実装する機能一覧（全11機能）
+## 実装する機能一覧（全13機能）
 ### 01. 保全計画策定（カレンダー管理）
 点検・部品交換に加えて**工事予定**も管理する。
 - 予定種別: **点検 / 部品交換 / 工事 / その他**（種別ごとに色分け表示）
@@ -205,6 +205,16 @@
 - **API**: `functions/api/electrical-inspections/`（`index.js` GET一覧`{records:{[client_id]:Record}}`/POST upsert、`[id].js` DELETE論理削除）、`functions/api/electrical-config/`（GET`{main,battery,generator,defaults}`/PUT admin・`master_history`退避）。
 - **スコープ外（後日）**: 写真添付（元アプリに無し）、オフライン書き込みキュー、横断検索(11)・通知への載せ込み（`has_abnormal`が足場）。
 **テーブル**: `electrical_inspection`（client_id, equipment_type[main/battery/generator], inspected_date, has_abnormal, record_json, +共通監査列）、`electrical_config`（equipment_type PK, config_json, default_json, updated_by/at）
+### 13. ユーティリティ日報（工場ユーティリティ設備の日常点検）
+灯油・ボイラー・空気圧縮機・各種タンク・蒸気ボイラー・ドレン・号機別運転時間を、毎日1件の日報として記録する（`/pages/utility`・`js/utility.js`）。元は PowerApps + SharePoint の構想だったが、Cloudflare 完結の方針に合わせて本アプリの機能として実装した（外部サービス非依存）。
+- **項目マスタ方式**: 31項目を `utility_item` マスタで管理し、値は実施時点のスナップショットを `utility_report.values_json` に保存する（02 の items_json・12 の record_json と同じ思想＝マスタを変えても過去記録が壊れない）。マスタは管理者が画面から追加・削除でき（`/pages/utility?items=1`）、変更は `master_history` に退避して復元できる
+- **入力方式**: 数値 / 選択式（1つ） / **複数選択**（例: 空気圧縮機の運転号機 1〜3号機をチップでトグル） / **時刻（HH:MM）** / 自由記述。入力UIは 02 点検の `buildItemInput`（`js/inspection-items.js`）を共有する（`multi`・`time` を追加。02 側のマスタは `ok_ng/number/select/text` のままなので動作は変わらない）
+- **前回値の表示・異常値アラート**: 数値項目に前回値と差分（↑↓→）を表示（`GET /api/utility-reports/latest`。取得失敗時は表示なしで入力継続）。上下限を外れた数値と、`alert_options`（例 油面確認の「要補充」「異常」）を選んだ選択式はその場で警告し、サーバー側でも `has_abnormal` を算出して一覧に「⚠異常あり」を出す
+- **1日1件ガード**: 同じ日の未削除レコードがあると登録APIが 409（`error.detail.existing_id`）を返し、画面は既存記録の編集へ誘導する。一覧のボタンも当日分があれば「✅ 本日入力済み（編集する）」に変わる。論理削除した日は再登録できる（`report_date` に UNIQUE 制約は付けていない）
+- **CSV出力**: 一覧から期間指定でCSV出力（UTF-8/BOM・Shift_JIS を選択可）。列は項目マスタから組み立てる
+- **横断検索(11)**: 種別 `utility` として `values_json`・特記事項・入力者名を検索対象にする
+- **スコープ外**: 写真添付、オフライン送信キュー、未入力リマインド通知
+**テーブル**: `utility_item`（section, name, input_type[number/select/multi/time/text], unit, min_value, max_value, options_json, alert_options_json, sort_order, +共通監査列）、`utility_report`（report_date, inspected_at, reporter_name, has_abnormal, values_json, note, +共通監査列）
 ---
 ## ディレクトリ構成（想定）
 ```
@@ -226,6 +236,7 @@
 │   ├── parts.js            # 05 部品在庫（CSVインポート）
 │   ├── ledger.js           # 06 設備台帳・QR
 │   ├── report.js           # 07 日報
+│   ├── utility.js          # 13 ユーティリティ日報（項目マスタ・CSV出力）
 │   ├── dashboard.js        # 08 グラフ（サマリー/カスタム。抽出→CSVは横断検索へ集約）
 │   ├── admin.js            # 09 管理機能・監査ログ・復元
 │   ├── chat.js             # 10 チャット（個人情報検知）
@@ -235,6 +246,7 @@
 │       ├── equipment/ inspections/ repairs/ troubles/
 │       ├── parts/          # CRUD + import.js（CSV取込）
 │       ├── reports/ plans/
+│       ├── utility-reports/ # 13 ユーティリティ日報（items/ = 項目マスタ）
 │       ├── stats/          # 集計・CSV出力
 │       ├── files/          # R2アップロード/取得
 │       ├── search.js       # 横断検索（キーワード+フィルタ）
