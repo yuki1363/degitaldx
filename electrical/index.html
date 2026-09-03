@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="点検記録">
+<meta name="theme-color" content="#1a5276">
+<title>高圧受電設備 点検記録</title>
+<style>
+:root {
+  --primary: #1a5276;
+  --primary-light: #2e86c1;
+  --good: #1e8449;
+  --caution: #d4ac0d;
+  --repair: #c0392b;
+  --bg: #f4f6f7;
+  --card: #fff;
+  --border: #d5d8dc;
+  --text: #2c3e50;
+  --muted: #7f8c8d;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Hiragino Sans','Meiryo',sans-serif; background: var(--bg); color: var(--text); font-size: 15px; }
+
+header { background: var(--primary); color: #fff; padding: 12px 16px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+header h1 { font-size: 17px; font-weight: bold; }
+header p  { font-size: 13px; opacity: .8; margin-top: 2px; }
+
+.tabs { display: flex; background: var(--primary); }
+.tab  { flex: 1; padding: 14px 8px; text-align: center; color: rgba(255,255,255,.7); cursor: pointer; font-size: 13px; border-bottom: 3px solid transparent; transition: all .2s; min-height: 44px; }
+.tab.active { color: #fff; border-bottom-color: #f39c12; font-weight: bold; }
+
+.page { display: none; padding: 12px; max-width: 700px; margin: 0 auto; }
+.page.active { display: block; }
+
+.card { background: var(--card); border-radius: 8px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: visible; }
+.card-title { font-size: 14px; font-weight: bold; color: var(--primary); border-bottom: 2px solid var(--primary); padding-bottom: 6px; margin-bottom: 12px; }
+
+.form-row { display: flex; align-items: center; margin-bottom: 10px; gap: 8px; flex-wrap: wrap; }
+.form-row label { font-size: 14px; color: var(--muted); min-width: 90px; flex-shrink: 0; }
+.form-row input[type=text],.form-row input[type=date],.form-row input[type=number],.form-row select,.form-row textarea {
+  flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 16px; font-family: inherit; background: #fafafa; min-width: 0;
+}
+.form-row textarea { width: 100%; min-height: 70px; resize: vertical; }
+.unit { font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+.status-group { display: flex; gap: 5px; flex: 1; }
+.status-btn { flex: 1; padding: 11px 8px; border: 1px solid var(--border); border-radius: 6px; text-align: center; cursor: pointer; font-size: 13px; background: #f8f9fa; transition: all .15s; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; min-height: 44px; }
+.status-btn.good.active    { background: var(--good);    color: #fff; border-color: var(--good); }
+.status-btn.caution.active { background: var(--caution); color: #fff; border-color: var(--caution); }
+.status-btn.repair.active  { background: var(--repair);  color: #fff; border-color: var(--repair); }
+.status-btn.na.active      { background: var(--muted);   color: #fff; border-color: var(--muted); }
+
+.btn { display: inline-block; padding: 13px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: bold; text-align: center; width: 100%; margin-top: 6px; font-family: inherit; }
+.btn-primary   { background: var(--primary-light); color: #fff; }
+.btn-success   { background: var(--good);   color: #fff; }
+.btn-danger    { background: var(--repair); color: #fff; }
+.btn-secondary { background: var(--muted);  color: #fff; }
+.btn-warning   { background: var(--caution); color: #fff; }
+.btn-sm { padding: 9px 14px; font-size: 13px; width: auto; border-radius: 6px; margin-top: 0; }
+
+.history-item { background: var(--card); border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1); cursor: pointer; border-left: 4px solid var(--primary-light); }
+.history-item:hover { background: #eaf4fb; }
+.history-date  { font-size: 15px; font-weight: bold; color: var(--primary); }
+.history-meta  { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.history-badges { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+.badge-caution { background: #fef9e7; color: var(--caution); border: 1px solid var(--caution); }
+.badge-repair  { background: #fdedec; color: var(--repair);  border: 1px solid var(--repair); }
+.badge-good    { background: #eafaf1; color: var(--good);    border: 1px solid var(--good); }
+
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; }
+.modal-overlay.active { display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 20px 0; }
+.modal { background: #fff; border-radius: 10px; width: 95%; max-width: 680px; padding: 16px; margin: auto; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 2px solid var(--primary); padding-bottom: 8px; }
+.modal-title  { font-size: 16px; font-weight: bold; color: var(--primary); }
+.close-btn    { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted); line-height: 1; padding: 8px 12px; }
+
+/* 設定画面 */
+.setting-cat { background: var(--card); border-radius: 8px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: hidden; }
+.setting-cat-header { display: flex; align-items: center; padding: 12px 14px; gap: 8px; background: #eaf4fb; cursor: pointer; }
+.setting-cat-title { flex: 1; font-weight: bold; font-size: 14px; color: var(--primary); }
+.setting-cat-body { padding: 12px 14px; display: none; }
+.setting-cat-body.open { display: block; }
+.setting-section-label { font-size: 12px; color: var(--muted); font-weight: bold; margin: 10px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+.setting-item { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.setting-item input[type=text] { flex: 1; min-width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-family: inherit; }
+.setting-item .unit-input { width: 60px; flex: none; }
+.add-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.add-row input[type=text] { flex: 1; min-width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-family: inherit; }
+.add-row .unit-input { width: 60px; flex: none; }
+
+.search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+.search-bar input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 16px; }
+.no-records { text-align: center; color: var(--muted); padding: 30px; font-size: 14px; }
+
+/* Mobile touch */
+.tab, .eq-btn, .btn, .btn-sm, .close-btn,
+.setting-cat-header, .history-item, .status-btn {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+body.modal-open { overflow: hidden; }
+.modal-overlay.active { -webkit-overflow-scrolling: touch; }
+
+/* Print */
+@media print {
+  header,.tabs,.btn,#print-actions,.modal-overlay:not(.active),.eq-bar,.modal-header { display: none !important; }
+  .modal-overlay { display: block !important; position: static !important; padding: 0 !important; background: none !important; overflow: visible !important; }
+  .modal { width: 100% !important; box-shadow: none !important; padding: 0 !important; border-radius: 0 !important; }
+  .close-btn { display: none !important; }
+  body { background: #fff; font-size: 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { display: none !important; }
+  .print-title { display: block !important; font-size: 18px; font-weight: bold; text-align: right; margin-bottom: 10px; }
+  .ptable { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .ptable th,.ptable td { border: 1px solid #333; padding: 4px 7px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sc-good    { color: #1e8449; font-weight: bold; }
+  .sc-caution { color: #d4ac0d; font-weight: bold; }
+  .sc-repair  { color: #c0392b; font-weight: bold; }
+  .sc-na      { color: #7f8c8d; }
+}
+.print-title { display: none; }
+/* Multi-phase grid */
+.meas-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); gap:6px; width:100%; margin-top:4px; }
+.meas-cell { display:flex; flex-direction:column; align-items:center; gap:2px; }
+.meas-lbl  { font-size:11px; color:var(--muted); white-space:nowrap; text-align:center; }
+.meas-cell input { width:100%; text-align:center; padding:5px 2px; font-size:16px; border:1px solid var(--border); border-radius:6px; background:#fafafa; }
+.meas-unit { font-size:12px; color:var(--muted); }
+.prev-val { font-size:12px; color:var(--muted); margin-top:3px; width:100%; }
+/* Equipment selector */
+.eq-bar { display:flex; background:#0e3460; overflow-x:auto; gap:2px; padding:6px 8px; }
+.eq-btn { flex-shrink:0; padding:11px 16px; border:none; border-radius:20px; font-size:13px; cursor:pointer; background:rgba(255,255,255,.15); color:rgba(255,255,255,.8); font-family:inherit; white-space:nowrap; transition:all .2s; }
+.eq-btn.active { background:#f39c12; color:#fff; font-weight:bold; }
+/* Qualifier dropdown */
+.q-sel { font-size:12px; padding:3px 6px; border:1px solid var(--border); border-radius:4px; background:#fff; color:var(--text); margin-left:4px; vertical-align:middle; }
+</style>
+</head>
+<body>
+
+<header style="position:relative">
+  <a href="/" aria-label="ホームへ戻る" style="position:absolute;left:14px;top:14px;color:#fff;text-decoration:none;font-size:18px">🏠</a>
+  <h1 id="main-title" style="padding-left:28px">高圧受電設備 日常点検記録</h1>
+  <p style="padding-left:28px">スマートフォン対応 点検管理システム</p>
+</header>
+
+<!-- file://プロトコル警告バナー -->
+<div id="ls-warning" style="display:none;background:#c0392b;color:#fff;padding:12px 16px;font-size:14px;line-height:1.6;position:sticky;top:0;z-index:150">
+  <strong>⚠ データが保存されません</strong><br>
+  このファイルは <code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px">file://</code> または制限された環境で開かれているため、<strong>入力データが保存されません</strong>。<br>
+  正しく動作させるには <strong>HTTPSのURLからアクセス</strong>してください（GitHub Pages / Netlify 等）。<br>
+  <span style="font-size:12px;opacity:.85">詳しくは README をご覧ください。</span>
+</div>
+
+<!-- 下書きバナー（常に最上部に固定表示） -->
+<div id="draft-banner" style="display:none;background:#fef9e7;border-bottom:2px solid #d4ac0d;padding:10px 16px;font-size:13px;position:sticky;top:0;z-index:140">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;max-width:700px;margin:0 auto">
+    <span id="draft-info" style="color:#7d6608;font-weight:bold"></span>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-warning btn-sm" onclick="restoreDraft()">下書きを読み込む</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearDraft()">破棄</button>
+    </div>
+  </div>
+</div>
+
+<div class="eq-bar" id="eq-bar">
+  <button class="eq-btn active" onclick="switchEquipment('main')">高圧受電設備</button>
+  <button class="eq-btn" onclick="switchEquipment('battery')">蓄電池</button>
+  <button class="eq-btn" onclick="switchEquipment('generator')">発電機</button>
+</div>
+
+<div class="tabs" id="tab-bar">
+  <div class="tab active" onclick="showTab('entry')">新規入力</div>
+  <div class="tab" onclick="showTab('history')">履歴・出力</div>
+  <div class="tab" id="tab-settings" onclick="showTab('settings')">設定</div>
+</div>
+
+<!-- 新規入力 -->
+<div class="page active" id="page-entry">
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">基本情報 <span style="font-size:11px;font-weight:normal;color:var(--muted)">（全設備共通・自動保存）</span></div>
+    <div class="form-row"><label>点検日</label><input type="date" id="date"></div>
+    <div class="form-row"><label>点検者名</label><input type="text" id="inspector" placeholder="氏名を入力"></div>
+    <div class="form-row"><label>設備名称</label><input type="text" id="facility" placeholder="例：第1キュービクル"></div>
+    <div class="form-row">
+      <label>天候</label>
+      <select id="weather"><option>晴</option><option>曇</option><option>雨</option><option>雪</option></select>
+    </div>
+    <div class="form-row" style="flex-wrap:wrap"><label>室温</label><input type="number" inputmode="decimal" id="room_temp" placeholder="—" step="0.1" style="max-width:90px"><span class="unit">℃</span><div class="prev-val" id="prev-room_temp"></div></div>
+    <div class="form-row" style="flex-wrap:wrap"><label>湿度</label><input type="number" inputmode="decimal" id="humidity" placeholder="—" step="1" style="max-width:90px"><span class="unit">%</span><div class="prev-val" id="prev-humidity"></div></div>
+  </div>
+
+  <!-- 計測値・外観点検（統合） -->
+  <div id="entry-form"></div>
+  <div class="card" style="margin-top:4px">
+    <div class="card-title">特記事項</div>
+    <div class="form-row" style="flex-direction:column;align-items:stretch">
+      <textarea id="remarks" placeholder="異常・気になる点・連絡事項などを入力"></textarea>
+    </div>
+  </div>
+  <div class="card" style="margin-top:4px">
+    <div class="card-title">改修内容</div>
+    <div class="form-row" style="flex-direction:column;align-items:stretch">
+      <textarea id="repair-notes" rows="5" placeholder="実施した改修・修理の内容を詳しく入力（部品交換、作業内容、使用資材など）" style="min-height:120px"></textarea>
+    </div>
+  </div>
+  <div id="edit-banner" style="display:none;background:#eafaf1;border:1px solid #1e8449;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <span id="edit-info" style="color:#1e5631;font-weight:bold">✎ 記録を編集中</span>
+      <button class="btn btn-secondary btn-sm" onclick="cancelEdit()">キャンセル</button>
+    </div>
+  </div>
+  <div id="autosave-indicator" style="text-align:right;font-size:11px;color:var(--muted);margin-top:6px;min-height:16px"></div>
+  <button class="btn btn-success" onclick="saveRecord()">保存する</button>
+  <button class="btn btn-primary" style="margin-top:8px" onclick="previewPrint()">この内容をPDF出力</button>
+  <div style="height:20px"></div>
+</div>
+
+<!-- 履歴 -->
+<div class="page" id="page-history">
+  <div style="margin-top:12px">
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="annual-year" placeholder="例: 2026" maxlength="4" style="width:90px;flex:none;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:16px;font-family:inherit">
+      <button class="btn btn-primary btn-sm" onclick="showAnnualReport()">年間報告書（現設備）</button>
+      <button class="btn btn-secondary btn-sm" onclick="showAllAnnualReport()">全設備 年間報告書</button>
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:12px;color:var(--muted)">絞り込み:</span>
+      <button class="btn btn-primary btn-sm" id="hf-all" onclick="setHistoryFilter('all')">全設備</button>
+      <button class="btn btn-secondary btn-sm" id="hf-main" onclick="setHistoryFilter('main')">受電設備</button>
+      <button class="btn btn-secondary btn-sm" id="hf-battery" onclick="setHistoryFilter('battery')">蓄電池</button>
+      <button class="btn btn-secondary btn-sm" id="hf-generator" onclick="setHistoryFilter('generator')">発電機</button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search-month" placeholder="例: 2026-03" maxlength="7" onchange="renderHistory()" style="width:120px;flex:none">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('search-month').value='';renderHistory()">全て</button>
+    </div>
+    <div id="history-list"></div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div class="page" id="page-settings">
+  <div style="margin-top:12px">
+    <div class="card">
+      <div class="card-title">点検項目・計測値の編集</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">カテゴリ・点検項目・計測値フィールドを自由に追加・編集・削除できます。</p>
+      <button class="btn btn-primary btn-sm" onclick="addCategory()" style="margin-bottom:12px">＋ カテゴリを追加</button>
+    </div>
+    <div id="settings-categories"></div>
+    <div class="card" style="margin-top:4px">
+      <div class="card-title" style="font-size:14px;margin-bottom:8px">既定設定</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">設定（点検項目・計測値フィールド）はサーバー(D1)に保存され、全端末で自動的に共有されます。</p>
+      <button class="btn btn-secondary btn-sm" onclick="saveAsDefault()">現在の設定をデフォルトとして保存</button>
+      <button class="btn btn-danger btn-sm" onclick="resetConfig()" style="margin-top:6px">設定をデフォルトに戻す</button>
+    </div>
+  </div>
+</div>
+
+<!-- 詳細モーダル -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">点検記録詳細</span>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    <div id="print-actions" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="window.print()">PDF出力・印刷</button>
+      <button class="btn btn-warning btn-sm" id="repair-btn" onclick="showRepairDoc()">改修推奨資料</button>
+      <button class="btn btn-secondary btn-sm" id="all-eq-btn" onclick="printAllEquipment()" style="display:none">全設備印刷</button>
+      <button class="btn btn-success btn-sm" id="edit-rec-btn" onclick="editRecord(currentRecordId)">編集</button>
+      <button class="btn btn-danger btn-sm" id="delete-rec-btn" onclick="deleteRecord()">削除</button>
+    </div>
+    <div class="print-title" id="print-title"></div>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<script>
+// ===================== デフォルト設定 =====================
+// 既定の点検設定（実運用データに合わせて設定・点検設定_20260903.json 由来）。
+// 乗数(multiplier)・未満/以上(qualifier)を含む。空D1時は getConfig がこれをフォールバック使用する。
+const DEFAULT_CONFIG = [{"id": "cat_1775431238016", "title": "WHM", "checks": [], "measurements": [{"key": "m_1775432706887", "label": "全日電力量", "unit": "kwh", "phases": 1, "multiplier": 2400}, {"key": "m_1775432725134", "label": "P1有効電力量", "unit": "kwh", "phases": 1, "multiplier": 2400}, {"key": "m_1775432741606", "label": "P2無効電力量", "unit": "kwh", "phases": 1, "multiplier": 2400}, {"key": "m_1775432749246", "label": "デマンド", "unit": "kw", "phases": 1, "multiplier": 2400}, {"key": "m_1775432770886", "label": "力率", "unit": "％", "phases": 1}]}, {"id": "cable", "title": "受変電設備", "checks": [], "measurements": [{"key": "m_1774587556653", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774587568926", "label": "電流", "unit": "A", "phases": 3, "qualifier": false}, {"key": "m_1774587599110", "label": "力率", "unit": "％", "phases": 1}, {"key": "m_1774587613655", "label": "周波数", "unit": "Hz", "phases": 1}]}, {"id": "cat_1774587837551", "title": "分岐盤No.1", "checks": [], "measurements": [{"key": "m_1774587910392", "label": "電流（事務棟）", "unit": "A", "phases": 1}, {"key": "m_1774587934319", "label": "電流（低圧電灯盤No.1）", "unit": "A", "phases": 1}]}, {"id": "cat_1774588127414", "title": "分岐盤No.2", "checks": [], "measurements": [{"key": "m_1774588168504", "label": "電流（設備動力１～4）", "unit": "A", "phases": 1}, {"key": "m_1774588190816", "label": "電流（設備動力1～4－2）", "unit": "A", "phases": 1}]}, {"id": "cat_1774588251503", "title": "コンデンサ盤No.1", "checks": [], "measurements": [{"key": "m_1774588251503_8xc48f3q52", "label": "電流", "unit": "A", "phases": 1}]}, {"id": "cat_1774590191572", "title": "低圧設備動力盤NO.1", "checks": [], "measurements": [{"key": "m_1774590191572_42tes70baxo", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590271004", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590307452", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590329406", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590332566", "title": "低圧設備動力盤NO.2", "checks": [], "measurements": [{"key": "m_1774590332566_7piobr3q4b7", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590332566_n2glqjdo27e", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590332566_d6biyptrxtv", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590332566_7vzjeskr5ap", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590332125", "title": "低圧設備動力盤NO.3", "checks": [], "measurements": [{"key": "m_1774590332125_rflxsine3zc", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590332126_9h6buraq9qe", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590332126_zzupvvaov5", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590332126_frmzska2ioe", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590331533", "title": "低圧設備動力盤NO.4", "checks": [], "measurements": [{"key": "m_1774590331533_jo3ak7z3am9", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590331533_kcchnykx54", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590331533_46lbj3e3z36", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590331533_90ho30no61c", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590370926", "title": "低圧生産動力盤NO.1", "checks": [], "measurements": [{"key": "m_1774590370926_8zgu3s5g0am", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590370926_ther1a6fiz", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590370926_uvg82xiyt1l", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590370926_quq38ir6zf", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590373334", "title": "低圧生産動力盤NO.2", "checks": [], "measurements": [{"key": "m_1774590373334_fj7rp3wvr06", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590373334_ggbdqiewrlg", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590373334_u5h2bwpiga9", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590373334_adlbj8514eg", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590373086", "title": "低圧生産動力盤NO.3", "checks": [], "measurements": [{"key": "m_1774590373086_x2hzzqbgri", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590373086_mtqp26owibn", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590373086_4yjefvmmkah", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590373086_6v2ggj9xntk", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590413205", "title": "低圧生産動力盤NO.4", "checks": [], "measurements": [{"key": "m_1774590413205_kg4w1lyikbj", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774590413205_p6kuije80ar", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1774590413205_m5x11ghdleo", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590413205_njbrvdrxkqp", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590435071", "title": "低圧電灯盤No.1", "checks": [], "measurements": [{"key": "m_1774590435071_71lf5cjid5s", "label": "電圧", "unit": "V", "phases": 2}, {"key": "m_1774590435071_1y6xdb0ca1x", "label": "電流", "unit": "A", "phases": 2}, {"key": "m_1774590435071_xovzmbo2jb", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590435071_zh2qpr0v4d", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1774590434647", "title": "非常用電源盤", "checks": [], "measurements": [{"key": "m_1774590434647_7gwovmspyqt", "label": "電圧", "unit": "V", "phases": 2}, {"key": "m_1774590434647_9didrya0gf", "label": "電流(商用）", "unit": "A", "phases": 2}, {"key": "m_1774590488519", "label": "電流（自家発）", "unit": "A", "phases": 2}, {"key": "m_1774590434647_ahlgamceuuo", "label": "漏洩電流", "unit": "ｍA", "phases": 1}, {"key": "m_1774590434647_aw264r8bv8p", "label": "油温", "unit": "℃", "phases": 1}]}, {"id": "cat_1775438146281", "title": "事務棟　高圧", "checks": [], "measurements": [{"key": "m_1775438146281_7j1l0p2z8mq", "label": "電圧", "unit": "V", "phases": 3}]}, {"id": "cat_1774592069361", "title": "事務棟　動力", "checks": [], "measurements": [{"key": "m_1774592069361_xtju4nqu4th", "label": "電圧", "unit": "V", "phases": 3}, {"key": "m_1774592069361_u3hkd7x9qwc", "label": "電流", "unit": "A", "phases": 3}, {"key": "m_1775438488446", "label": "漏洩電流", "unit": "mA", "phases": 1}]}, {"id": "cat_1774592070081", "title": "事務棟　電灯", "checks": [], "measurements": [{"key": "m_1774592070081_lfwi1nxe3le", "label": "電圧", "unit": "V", "phases": 2}, {"key": "m_1774592070081_j0eg0uxrw0d", "label": "電流", "unit": "A", "phases": 2}, {"key": "m_1774592070081_rydu89fgpc", "label": "漏洩電流", "unit": "ｍA", "phases": 1}]}, {"id": "general", "title": "電線・支持物", "checks": [{"key": "ck_1774586757147", "label": "電線の高さ及び他工作物との離隔距離"}, {"key": "ck_1774587494142", "label": "他物との離隔距離"}], "measurements": []}, {"id": "cat_1774588329032", "title": "高圧ケーブル", "checks": [{"key": "ck_1774588329032_qzj1slja4d9", "label": "開閉器箱との接続状態"}, {"key": "ck_1774588329032_9jferxs9qdw", "label": "他物との離隔距離"}], "measurements": []}, {"id": "ds", "title": "断路器 (DS) 　", "checks": [{"key": "ds_cont", "label": "接触部の異常"}, {"key": "ds_noise", "label": "異常音・異臭"}, {"key": "ck_1774587676462", "label": "汚損・異物の付着"}, {"key": "ck_1774587683637", "label": "その他"}], "measurements": []}, {"id": "vcb", "title": "遮断器 (VCB)・開閉器等（LBS/VCS)　", "checks": [{"key": "vcb_disp", "label": "動作表示の確認"}, {"key": "vcb_cnt", "label": "動作回数計の確認"}, {"key": "vcb_noise", "label": "異常音・異臭"}, {"key": "vcb_dmg", "label": "外観異常"}], "measurements": []}, {"id": "cat_1774588620921", "title": "母線　", "checks": [{"key": "ck_1774588655568", "label": "汚損状態"}, {"key": "ck_1774588672816", "label": "接続部の過熱状態"}], "measurements": []}, {"id": "tr", "title": "変圧器 ", "checks": [{"key": "tr_noise", "label": "異常音・異臭"}, {"key": "tr_oil", "label": "漏油の有無"}, {"key": "tr_color", "label": "変色・過熱の有無"}, {"key": "tr_dmg", "label": "外観異常"}, {"key": "ck_1774588743537", "label": "付属装置の取り付け状態・動作状況"}, {"key": "ck_1774588748112", "label": "その他"}], "measurements": []}, {"id": "cat_1774588765328", "title": "計器用変成器", "checks": [{"key": "ck_1774588765328_i5zdwsb3xq", "label": "異常音・異臭"}, {"key": "ck_1774588765328_li8e7dnftnp", "label": "変色・過熱の有無"}, {"key": "ck_1774588765328_5kkw5t5fa6k", "label": "外観異常"}, {"key": "ck_1774588765328_btrkeeop2mi", "label": "ヒューズの状態"}, {"key": "ck_1774588765328_0r182l7u2nmg", "label": "その他"}], "measurements": []}, {"id": "relay", "title": "保護継電器", "checks": [{"key": "ry_disp", "label": "動作表示の確認"}, {"key": "ry_lamp", "label": "表示灯の点灯確認"}, {"key": "ry_abn", "label": "異常表示の有無"}], "measurements": []}, {"id": "la", "title": "避雷器 (LA) 　構内第一柱/キュービクル", "checks": [{"key": "la_dmg", "label": "外観異常（亀裂・汚損）"}, {"key": "la_relay", "label": "その他"}], "measurements": []}, {"id": "sc", "title": "高圧コンデンサ (SC)", "checks": [{"key": "sc_noise", "label": "異常音・異臭"}, {"key": "sc_bulge", "label": "膨らみ・液漏れ"}, {"key": "sc_dmg", "label": "外観異常"}], "measurements": []}, {"id": "cat_1774589271855", "title": "事務棟送り電線及び支持物", "checks": [{"key": "ck_1774589320322", "label": "支持状態"}], "measurements": []}, {"id": "cat_1774589176806", "title": "その他付属設備（DT)", "checks": [{"key": "ck_1774589233816", "label": "外観状態"}, {"key": "ck_1774589240072", "label": "過熱"}, {"key": "ck_1774589249447", "label": "異音・異臭"}], "measurements": []}, {"id": "lv", "title": "低圧盤", "checks": [{"key": "lv_brk", "label": "ブレーカー状態確認"}, {"key": "lv_noise", "label": "異常音・異臭"}, {"key": "lv_dmg", "label": "外観異常"}, {"key": "ck_1774588929617", "label": "過熱"}], "measurements": []}, {"id": "cat_1774589324826", "title": "高圧ケーブル（事務棟送り）", "checks": [{"key": "ck_1774589347717", "label": "接続状態"}, {"key": "ck_1774589353357", "label": "過熱・汚損状態"}], "measurements": []}, {"id": "cat_1774589382661", "title": "電動機その他回転機", "checks": [], "measurements": []}, {"id": "cat_1774589387725", "title": "電熱乾燥装置", "checks": [{"key": "ck_1774589478689", "label": "温度・変形・損傷"}, {"key": "ck_1774589498746", "label": "接続部の変色・過熱・腐食"}], "measurements": []}, {"id": "cat_1774589388398", "title": "照明設備", "checks": [{"key": "ck_1774589526467", "label": "異音・汚損状態"}], "measurements": []}, {"id": "cat_1774589390556", "title": "配線及び配線器具", "checks": [{"key": "ck_1774589562467", "label": "開閉器の汚損・破損状態"}, {"key": "ck_1774589583789", "label": "器具の損傷・腐食・配線の緩み"}, {"key": "ck_1774589587758", "label": "過熱"}], "measurements": []}, {"id": "cat_1774589396743", "title": "原動機関係", "checks": [{"key": "ck_1774589648063", "label": "燃料系統からの油漏れ"}, {"key": "ck_1774589661391", "label": "機関の運転・停止状態"}], "measurements": []}, {"id": "cat_1774589674128", "title": "発電機", "checks": [{"key": "ck_1774589674128_xg8atpwolsm", "label": "燃料系統からの油漏れ"}, {"key": "ck_1774589674128_2o9foz0rn9n", "label": "機関の運転・停止状態"}], "measurements": []}];
+const DEFAULT_CONFIG_BATTERY = [{"id": "bat_vis", "title": "外観点検", "checks": [{"key": "bv1", "label": "外観状態"}, {"key": "bv2", "label": "腐食・漏液の有無"}, {"key": "bv3", "label": "端子の緩み・腐食"}, {"key": "bv4", "label": "ラック・ケースの異常"}, {"key": "bv5", "label": "配線の損傷・断線"}, {"key": "ck_1775435793733", "label": "警報の有無"}], "measurements": []}, {"id": "bat_elec", "title": "電圧測定", "checks": [{"key": "be1", "label": "電圧異常の有無"}], "measurements": [{"key": "bv_total", "label": "交流電圧", "unit": "V", "phases": 1}, {"key": "m_1775435811100", "label": "整流器電圧", "unit": "V", "phases": 1}, {"key": "m_1775435885794", "label": "整流器電流", "unit": "A", "phases": 1}, {"key": "m_1775435752995", "label": "蓄電池電圧", "unit": "V", "phases": 1}, {"key": "m_1775435904262", "label": "蓄電池電流", "unit": "A", "phases": 1}, {"key": "m_1775435864941", "label": "出力電圧", "unit": "V", "phases": 1}, {"key": "m_1775435921663", "label": "出力電流", "unit": "A", "phases": 1}, {"key": "bv_cell", "label": "セル電圧1段目", "unit": "V", "phases": 1}, {"key": "m_1775436269578", "label": "セル電圧2段目", "unit": "V", "phases": 1}, {"key": "m_1774590985772", "label": "セル電圧3段目", "unit": "V", "phases": 1}]}];
+const DEFAULT_CONFIG_GENERATOR = [{"id": "cat_1774591129117", "title": "事前確認", "checks": [{"key": "ck_1774591145956", "label": "自動確認"}, {"key": "ck_1774591152405", "label": "主電源入り"}, {"key": "ck_1774591161652", "label": "バッテリー入り"}], "measurements": []}, {"id": "gen_vis", "title": "外観点検（点検準備）", "checks": [{"key": "gv1", "label": "外観異常・損傷"}, {"key": "gv2", "label": "燃料の量・漏れの有無"}, {"key": "gv3", "label": "冷却水の量・漏れの有無"}, {"key": "gv4", "label": "オイル量・漏れの有無"}, {"key": "gv5", "label": "ファンベルトの状態"}, {"key": "ck_1774591580063", "label": "異常音・異臭"}, {"key": "ck_1774591588399", "label": "異常振動"}, {"key": "ck_1774591603183", "label": "排気の状態"}], "measurements": []}, {"id": "gen_elec", "title": "運転状態・電気出力", "checks": [{"key": "ge1", "label": "出力電圧の正常確認"}, {"key": "ge2", "label": "出力電流の正常確認"}, {"key": "ge3", "label": "周波数の正常確認"}], "measurements": [{"key": "g_v", "label": "出力電圧", "unit": "V", "phases": 1}, {"key": "g_i", "label": "出力電流", "unit": "A", "phases": 1}, {"key": "g_hz", "label": "周波数", "unit": "Hz", "phases": 1}, {"key": "g_kw", "label": "回転数", "unit": "rpm", "phases": 1}, {"key": "m_1775435051821", "label": "水温", "unit": "℃", "phases": 1}, {"key": "m_1774591369302", "label": "油温", "unit": "℃", "phases": 1}, {"key": "m_1774591412173", "label": "油圧力", "unit": "kg/㎡", "phases": 1}, {"key": "m_1775435275800", "label": "運転時間", "unit": "hr", "phases": 1}]}, {"id": "gen_auto", "title": "バッテリーの確認", "checks": [{"key": "ga1", "label": "自動起動装置の動作確認"}, {"key": "ga2", "label": "起動バッテリーの確認"}, {"key": "ga3", "label": "表示灯の確認"}], "measurements": [{"key": "m_1775435153563", "label": "総電圧", "unit": "V", "phases": 1}, {"key": "g_batv", "label": "起動バッテリー電圧１", "unit": "V", "phases": 1}, {"key": "m_1775435134826", "label": "起動バッテリー電圧１", "unit": "V", "phases": 1}, {"key": "m_1774591514567", "label": "起動バッテリー電圧2", "unit": "V", "phases": 1}, {"key": "m_1774591514207", "label": "起動バッテリー電圧3", "unit": "V", "phases": 1}, {"key": "m_1774591513735", "label": "起動バッテリー電圧4", "unit": "V", "phases": 1}, {"key": "m_1774591513263", "label": "起動バッテリー電圧5", "unit": "V", "phases": 1}, {"key": "m_1774591512791", "label": "起動バッテリー電圧6", "unit": "V", "phases": 1}, {"key": "m_1774591511871", "label": "起動バッテリー電圧7", "unit": "V", "phases": 1}, {"key": "m_1774591511311", "label": "起動バッテリー電圧8", "unit": "V", "phases": 1}, {"key": "m_1774591510807", "label": "起動バッテリー電圧9", "unit": "V", "phases": 1}, {"key": "m_1774591510263", "label": "起動バッテリー電圧10", "unit": "V", "phases": 1}, {"key": "m_1774591509727", "label": "起動バッテリー電圧11", "unit": "V", "phases": 1}, {"key": "m_1774591509127", "label": "起動バッテリー電圧12", "unit": "V", "phases": 1}]}, {"id": "cat_1774591177540", "title": "起動後確認", "checks": [{"key": "ck_1774591633078", "label": "ソレノイド復帰"}, {"key": "ck_1774591639967", "label": "警報確認"}, {"key": "ck_1774591650959", "label": "バッテリースイッチ入り"}, {"key": "ck_1774591657776", "label": "主電源入り"}, {"key": "ck_1774591667648", "label": "手動⇒自動切換え"}], "measurements": []}];
+
+const EQ_DEFAULTS = { main: DEFAULT_CONFIG, battery: DEFAULT_CONFIG_BATTERY, generator: DEFAULT_CONFIG_GENERATOR };
+const EQ_NAMES    = { main:'高圧受電設備', battery:'蓄電池', generator:'発電機' };
+
+const SL = { good:'良好', caution:'要注意', repair:'要修理', na:'N/A' };
+
+// ===================== 設定 =====================
+let activeEquipment = 'main';
+
+function cfgKey()  { return activeEquipment==='main' ? 'inspection_config'  : `inspection_config_${activeEquipment}`; }
+function recKey()  { return activeEquipment==='main' ? 'inspection_records' : `inspection_records_${activeEquipment}`; }
+function draftKey(){ return activeEquipment==='main' ? 'inspection_draft'   : `inspection_draft_${activeEquipment}`; }
+
+// ===================== サーバー同期（degitaldx / D1）=====================
+// 記録・設定は localStorage を作業ストアにしつつ、起動時に D1 → localStorage へ充填し（D1が真実）、
+// 書き込み点でだけ D1 にも反映する（write-through）。多数の読み取り/描画コードは localStorage を
+// そのまま読むため無改修。下書き・基本情報の記憶は端末ローカルのまま。
+const SERVER = { user: null, canEditConfig: false, online: true };
+const REC_KEYS_ALL = { main:'inspection_records', battery:'inspection_records_battery', generator:'inspection_records_generator' };
+const CFG_KEYS_ALL = { main:'inspection_config',  battery:'inspection_config_battery',  generator:'inspection_config_generator' };
+const DEF_KEYS_ALL = { main:'inspection_default', battery:'inspection_default_battery', generator:'inspection_default_generator' };
+
+async function api(path, opts) {
+  const res = await fetch('/api' + path, { credentials:'same-origin', headers:{'Content-Type':'application/json'}, ...(opts||{}) });
+  if (!res.ok) { let m='通信エラー'; try { const j=await res.json(); if (j&&j.error&&j.error.message) m=j.error.message; } catch(e){} const err=new Error(m); err.status=res.status; throw err; }
+  return res.json();
+}
+function toast(msg) {
+  let t = document.getElementById('elec-toast');
+  if (!t) { t=document.createElement('div'); t.id='elec-toast'; t.style.cssText='position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#c0392b;color:#fff;padding:10px 16px;border-radius:8px;font-size:15px;z-index:3000;box-shadow:0 2px 8px rgba(0,0,0,.3);max-width:90%'; document.body.appendChild(t); }
+  t.textContent=msg; t.style.display='block'; clearTimeout(toast._t); toast._t=setTimeout(()=>{t.style.display='none';},5000);
+}
+// 起動時: D1 → localStorage 充填（D1 を真実とする）
+async function loadServerData() {
+  try { const me = await api('/me'); SERVER.user=(me&&me.user)||null; SERVER.canEditConfig=!!(me&&me.user&&me.user.role==='admin'); } catch(e){}
+  try {
+    const rr = await api('/electrical-inspections');
+    const records = (rr&&rr.records)||{};
+    const buckets = { main:{}, battery:{}, generator:{} };
+    for (const id in records) { const r=records[id]; const t=(r&&r.equipmentType)||'main'; if (buckets[t]) buckets[t][id]=r; }
+    Object.entries(REC_KEYS_ALL).forEach(([eq,key]) => { try { localStorage.setItem(key, JSON.stringify(buckets[eq])); } catch(e){} });
+    const cfg = await api('/electrical-config');
+    ['main','battery','generator'].forEach(eq => { try {
+      if (cfg && cfg[eq]) localStorage.setItem(CFG_KEYS_ALL[eq], JSON.stringify(cfg[eq])); else localStorage.removeItem(CFG_KEYS_ALL[eq]);
+      if (cfg && cfg.defaults && cfg.defaults[eq]) localStorage.setItem(DEF_KEYS_ALL[eq], JSON.stringify(cfg.defaults[eq])); else localStorage.removeItem(DEF_KEYS_ALL[eq]);
+    } catch(e){} });
+    SERVER.online = true;
+  } catch(e) { SERVER.online = false; toast('オフラインのため、この端末に保存済みのデータを表示しています'); }
+}
+async function pushRecordToServer(rec) { if (!rec || !rec.id) return; await api('/electrical-inspections', { method:'POST', body: JSON.stringify(rec) }); }
+async function deleteRecordFromServer(id) { await api('/electrical-inspections/' + encodeURIComponent(id), { method:'DELETE' }); }
+function pushConfigToServer(eqType, cfg) { if (!SERVER.canEditConfig) return; api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, config: cfg }) }).catch(e => toast('設定をサーバーに保存できませんでした: '+e.message)); }
+function pushDefaultToServer(eqType, def) { if (!SERVER.canEditConfig) return; api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, default: def }) }).catch(e => toast('既定をサーバーに保存できませんでした: '+e.message)); }
+
+function getConfig() {
+  try { const c = JSON.parse(localStorage.getItem(cfgKey())); if (c) return c; } catch(e){}
+  return JSON.parse(JSON.stringify(EQ_DEFAULTS[activeEquipment] || DEFAULT_CONFIG));
+}
+function saveConfig(cfg) { try { localStorage.setItem(cfgKey(), JSON.stringify(cfg)); } catch(e) { alert('設定を保存できませんでした（プライベートモードでは使用できません）'); return; } pushConfigToServer(activeEquipment, cfg); }
+
+function switchEquipment(eq) {
+  activeEquipment = eq;
+  document.querySelectorAll('.eq-btn').forEach((b,i) => b.classList.toggle('active', ['main','battery','generator'][i]===eq));
+  document.getElementById('main-title').textContent = EQ_NAMES[eq] + ' 日常点検記録';
+  currentStatuses = {};
+  buildEntryForm();
+  checkDraftOnLoad();
+  if (!editingRecordId) loadBasicInfo(); // 基本情報を共通復元（編集中は上書きしない）
+  renderHistory();
+  if (document.getElementById('page-settings').classList.contains('active')) renderSettingsPage();
+}
+
+// ===================== 初期化 =====================
+let currentStatuses = {};
+let currentRecordId = null;
+let currentPreviewData = null;
+let editingRecordId = null;
+let _modalScrollY = 0;
+let draftTimer = null;
+let historyFilter = 'all';
+
+// 全設備横断ヘルパー
+const EQ_REC_KEYS = { main:'inspection_records', battery:'inspection_records_battery', generator:'inspection_records_generator' };
+
+function getAllRecordsFlat() {
+  const result = {};
+  Object.entries(EQ_REC_KEYS).forEach(([eq, key]) => {
+    try {
+      Object.entries(JSON.parse(localStorage.getItem(key)||'{}')).forEach(([id, r]) => {
+        result[id] = { ...r, equipmentType: r.equipmentType || eq };
+      });
+    } catch(e) {}
+  });
+  return result;
+}
+
+function findRecord(id) {
+  for (const [eq, key] of Object.entries(EQ_REC_KEYS)) {
+    try {
+      const recs = JSON.parse(localStorage.getItem(key) || '{}');
+      if (recs[id]) return { rec: { ...recs[id], equipmentType: recs[id].equipmentType || eq }, eq, key, recs };
+    } catch(e) {}
+  }
+  return null;
+}
+
+function setHistoryFilter(eq) {
+  historyFilter = eq;
+  ['all','main','battery','generator'].forEach(k => {
+    const btn = document.getElementById('hf-' + k);
+    if (btn) btn.className = k === eq ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+  });
+  renderHistory();
+}
+
+// ===================== localStorage 動作チェック =====================
+function checkLocalStorageAvailable() {
+  try {
+    const key = '__ls_test__';
+    localStorage.setItem(key, '1');
+    const ok = localStorage.getItem(key) === '1';
+    localStorage.removeItem(key);
+    return ok;
+  } catch(e) { return false; }
+}
+
+// スクリプトはbody末尾にあるのでDOMは構築済み。
+// iOS WebView/QuickLook等でreadyState判定が信頼できないため
+// 即時実行とDOMContentLoadedの両方で_init()を呼ぶ
+let _initialized = false;
+async function _init() {
+  if (_initialized) return;
+  _initialized = true;
+  // localStorage が使えない環境（file://、QuickLook等）を検出して警告
+  if (!checkLocalStorageAvailable()) {
+    const w = document.getElementById('ls-warning');
+    if (w) w.style.display = 'block';
+  }
+  try {
+    await loadServerData();                 // D1 から記録・設定・ユーザーを localStorage へ充填
+    document.getElementById('date').value = new Date().toISOString().slice(0,10);
+    loadBasicInfo();
+    var _insp = document.getElementById('inspector');
+    if (_insp && !_insp.value && SERVER.user && SERVER.user.name) _insp.value = SERVER.user.name; // 点検者名の既定
+    var _st = document.getElementById('tab-settings');
+    if (_st && !SERVER.canEditConfig) _st.style.display = 'none'; // 設定タブは管理者のみ
+    buildEntryForm();
+    checkDraftOnLoad();
+    renderHistory();
+    renderSettingsPage();
+    // 基本情報フィールドの変更を自動保存
+    ['inspector','facility','weather'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveBasicInfo);
+    });
+    var pe = document.getElementById('page-entry');
+    if (pe) {
+      pe.addEventListener('input', scheduleDraftSave);
+      pe.addEventListener('change', scheduleDraftSave);
+    }
+  } catch(e) {
+    var errEl = document.getElementById('entry-measurements');
+    if (errEl) errEl.innerHTML = '<div style="color:#c0392b;padding:16px;background:#fdedec;border-radius:8px;margin:12px 0">初期化エラー: ' + String(e) + '<br><small>このエラー内容を開発者に連絡してください</small></div>';
+  }
+}
+document.addEventListener('DOMContentLoaded', _init);
+_init();
+
+// 印刷前後にブラウザヘッダーを非表示にする
+window.addEventListener('beforeprint', () => { document.title = '高圧受電設備等　点検記録'; });
+window.addEventListener('afterprint',  () => { document.title = '高圧受電設備 点検記録'; });
+
+// ===================== 基本情報の保持 =====================
+function saveBasicInfo() {
+  try {
+    localStorage.setItem('inspection_basic_info', JSON.stringify({
+      inspector: document.getElementById('inspector').value,
+      facility:  document.getElementById('facility').value,
+      weather:   document.getElementById('weather').value,
+    }));
+  } catch(e) {}
+}
+
+function loadBasicInfo() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('inspection_basic_info'));
+    if (!saved) return;
+    if (saved.inspector) document.getElementById('inspector').value = saved.inspector;
+    if (saved.facility)  document.getElementById('facility').value  = saved.facility;
+    if (saved.weather) {
+      const sel = document.getElementById('weather');
+      if (sel) sel.value = saved.weather;
+    }
+  } catch(e) {}
+}
+
+// ===================== 下書き =====================
+function checkDraftOnLoad() {
+  const draft = getDraft();
+  if (!draft) return;
+  const banner = document.getElementById('draft-banner');
+  const info = document.getElementById('draft-info');
+  const t = draft.savedAt ? new Date(draft.savedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+  info.textContent = `下書きあり：${fmtDate(draft.date||'')} ${draft.inspector||''} （${t}保存）`;
+  banner.style.display = 'block';
+}
+
+function getDraft() {
+  try { return JSON.parse(localStorage.getItem(draftKey())); } catch(e) { return null; }
+}
+
+function saveDraft() {
+  const data = collectForm();
+  data.savedAt = new Date().toISOString();
+  try { localStorage.setItem(draftKey(), JSON.stringify(data)); } catch(e) { return; }
+  const ind = document.getElementById('autosave-indicator');
+  const t = new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+  ind.textContent = `下書き自動保存済 ${t}`;
+}
+
+function loadDataIntoForm(data) {
+  if (data.date)      document.getElementById('date').value      = data.date;
+  if (data.inspector) document.getElementById('inspector').value = data.inspector;
+  if (data.facility)  document.getElementById('facility').value  = data.facility;
+  if (data.weather) {
+    const sel = document.getElementById('weather');
+    [...sel.options].forEach(o => { if (o.value===data.weather) sel.value=data.weather; });
+  }
+  if (data.room_temp !== undefined && data.room_temp !== '') document.getElementById('room_temp').value = data.room_temp;
+  if (data.humidity  !== undefined && data.humidity  !== '') document.getElementById('humidity').value  = data.humidity;
+  if (data.remarks)     document.getElementById('remarks').value      = data.remarks;
+  if (data.repairNotes) document.getElementById('repair-notes').value = data.repairNotes;
+  if (data.statuses) {
+    Object.entries(data.statuses).forEach(([key, val]) => {
+      currentStatuses[key] = val;
+      document.querySelectorAll('.status-group').forEach(grp => {
+        const btn = grp.querySelector(`[onclick*="'${key}'"][onclick*="'${val}'"]`);
+        if (btn) {
+          grp.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      });
+    });
+  }
+  if (data.measurements) {
+    Object.entries(data.measurements).forEach(([key, val]) => {
+      if (Array.isArray(val)) {
+        val.forEach((v, i) => {
+          const el = document.getElementById(`m_${key}_${i}`);
+          if (el && v !== '') el.value = v;
+        });
+      } else {
+        const el = document.getElementById('m_'+key);
+        if (el) el.value = val;
+      }
+    });
+  }
+  if (data.categoryRemarks) {
+    Object.entries(data.categoryRemarks).forEach(([catId, val]) => {
+      const el = document.getElementById('cat-rem-'+catId);
+      if (el && val) el.value = val;
+    });
+  }
+  if (data.qualifiers) {
+    Object.entries(data.qualifiers).forEach(([key, val]) => {
+      const el = document.getElementById('q_' + key);
+      if (el) el.value = val;
+    });
+  }
+}
+
+function restoreDraft() {
+  const draft = getDraft();
+  if (!draft) return;
+  loadDataIntoForm(draft);
+  document.getElementById('draft-banner').style.display = 'none';
+  document.getElementById('autosave-indicator').textContent = '下書きを読み込みました';
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(draftKey()); } catch(e) {}
+  document.getElementById('draft-banner').style.display = 'none';
+  document.getElementById('autosave-indicator').textContent = '下書きを削除しました';
+}
+
+function scheduleDraftSave() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraft, 5000);
+}
+
+// ===================== 入力フォーム生成 =====================
+function buildEntryForm() {
+  currentStatuses = {};
+  const cfg = getConfig();
+  const formCont = document.getElementById('entry-form');
+  if (!formCont) return;
+  formCont.innerHTML = '';
+
+  // 前回データ取得
+  const lastRec  = Object.values(getRecords()).sort((a,b) => b.date.localeCompare(a.date))[0] || null;
+  const prevMs   = lastRec ? (lastRec.measurements   || {}) : {};
+  const prevSt   = lastRec ? (lastRec.statuses        || {}) : {};
+  const prevCr   = lastRec ? (lastRec.categoryRemarks || {}) : {};
+  const prevDate = lastRec ? `(${lastRec.date.slice(5).replace('-','/')})` : '';
+
+  // 基本情報カードの前回値
+  ['room_temp','humidity'].forEach(field => {
+    const el = document.getElementById(`prev-${field}`);
+    if (!el) return;
+    const unit = field === 'room_temp' ? '℃' : '%';
+    const v = lastRec && lastRec[field] !== '' && lastRec[field] !== undefined && lastRec[field] !== null;
+    el.textContent = v ? `前回${prevDate}: ${lastRec[field]} ${unit}` : '';
+  });
+
+  cfg.forEach(cat => {
+    const hasMeas   = cat.measurements.length > 0;
+    const hasChecks = cat.checks.length > 0;
+    if (!hasMeas && !hasChecks) return;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<div class="card-title">${esc(cat.title)}</div>`;
+
+    // --- 計測値 ---
+    if (hasMeas) {
+      if (hasChecks) {
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'font-size:12px;font-weight:bold;color:var(--primary);margin:4px 0 6px;border-left:3px solid var(--primary);padding-left:6px';
+        lbl.textContent = '計測値';
+        card.appendChild(lbl);
+      }
+      cat.measurements.forEach(m => {
+        const phases = m.phases || 1;
+        const phaseLabels = getPhaseLabels(phases, m.phasePrefix);
+        const row = document.createElement('div');
+        row.className = 'form-row';
+        if (!phaseLabels) {
+          const pv = prevMs[m.key];
+          const prevHtml = (pv !== undefined && pv !== '')
+            ? `<div class="prev-val" style="display:flex;align-items:center;gap:6px;width:100%">
+                <span>前回${prevDate}: ${pv} ${esc(m.unit)}</span>
+                <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0"
+                  onclick="(function(){var e=document.getElementById('m_${m.key}');if(e)e.value='${pv}';})()">前回値コピー</button>
+               </div>` : '';
+          const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
+          row.style.flexWrap = 'wrap';
+          row.innerHTML = `<label>${esc(m.label)}</label>
+            <input type="number" inputmode="decimal" id="m_${m.key}" placeholder="—" step="any" style="max-width:110px">
+            <span class="unit">${esc(m.unit)}</span>
+            ${qualSel}
+            ${prevHtml}`;
+        } else if (phases >= 5) {
+          const pvArr = prevMs[m.key];
+          const copyPairs = phaseLabels.map((lbl, i) => {
+            const pv = Array.isArray(pvArr) ? pvArr[i] : undefined;
+            return (pv !== undefined && pv !== '') ? [`m_${m.key}_${i}`, String(pv)] : null;
+          }).filter(Boolean);
+          const cells = phaseLabels.map((lbl, i) => {
+            const pv = Array.isArray(pvArr) ? pvArr[i] : undefined;
+            const prevCell = (pv !== undefined && pv !== '')
+              ? `<span style="font-size:10px;color:#aaa">前:${pv}</span>` : '';
+            return `<div class="meas-cell">
+               <span class="meas-lbl">${lbl}</span>
+               <input type="number" inputmode="decimal" id="m_${m.key}_${i}" placeholder="—" step="any">
+               <span class="meas-unit">${esc(m.unit)}</span>
+               ${prevCell}
+             </div>`;
+          }).join('');
+          const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel" style="margin-top:4px"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
+          const copyBtn = copyPairs.length ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0;margin-top:4px"
+            onclick="setPrevVals(${JSON.stringify(copyPairs).replace(/"/g, '&quot;')})">前回値コピー</button>` : '';
+          row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
+            <div class="meas-grid">${cells}</div>
+            ${qualSel}${copyBtn}`;
+          row.style.flexWrap = 'wrap';
+        } else {
+          const pvArr = prevMs[m.key];
+          const copyPairs = phaseLabels.map((lbl, i) => {
+            const pv = Array.isArray(pvArr) ? pvArr[i] : (i === 0 && !Array.isArray(pvArr) ? pvArr : undefined);
+            return (pv !== undefined && pv !== '') ? [`m_${m.key}_${i}`, String(pv)] : null;
+          }).filter(Boolean);
+          const inputs = phaseLabels.map((lbl, i) =>
+            `<span style="font-size:12px;color:var(--muted);white-space:nowrap">${lbl}:
+             <input type="number" inputmode="decimal" id="m_${m.key}_${i}" placeholder="—" step="any" style="max-width:80px;display:inline-block">
+             ${esc(m.unit)}</span>`
+          ).join(' ');
+          const pv = prevMs[m.key];
+          const prevText = pv
+            ? (Array.isArray(pv)
+                ? phaseLabels.map((lbl,i) => (pv[i]!==undefined && pv[i]!=='') ? `${lbl}:${pv[i]}${esc(m.unit)}` : '').filter(Boolean).join('　')
+                : `${pv} ${esc(m.unit)}`)
+            : '';
+          const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
+          const copyBtn2 = copyPairs.length ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0"
+            onclick="setPrevVals(${JSON.stringify(copyPairs).replace(/"/g, '&quot;')})">前回値コピー</button>` : '';
+          const prevHtml = prevText ? `<div class="prev-val" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%">
+            <span>前回${prevDate}: ${prevText}</span>${copyBtn2}</div>` : '';
+          row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${inputs}${qualSel}</div>
+            ${prevHtml}`;
+          row.style.flexWrap = 'wrap';
+        }
+        card.appendChild(row);
+      });
+    }
+
+    // --- 外観点検 ---
+    if (hasChecks) {
+      if (hasMeas) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'font-size:12px;font-weight:bold;color:#1e8449;margin:12px 0 6px;border-left:3px solid #1e8449;padding-left:6px';
+        sep.textContent = '外観点検';
+        card.appendChild(sep);
+      }
+      cat.checks.forEach(item => {
+        const cur = currentStatuses[item.key] || null;
+        const ps = prevSt[item.key];
+        const prevHtml = ps ? `<div class="prev-val">前回${prevDate}: ${SL[ps]||ps}</div>` : '';
+        const row = document.createElement('div');
+        row.className = 'form-row';
+        row.style.cssText = 'flex-direction:column;align-items:stretch;gap:4px';
+        row.innerHTML = `<label style="font-size:13px;color:var(--text)">${esc(item.label)}</label>
+          <div class="status-group">
+            <div class="status-btn good    ${cur==='good'    ?'active':''}" onclick="setSt('${item.key}','good',this)">良好</div>
+            <div class="status-btn caution ${cur==='caution' ?'active':''}" onclick="setSt('${item.key}','caution',this)">要注意</div>
+            <div class="status-btn repair  ${cur==='repair'  ?'active':''}" onclick="setSt('${item.key}','repair',this)">要修理</div>
+            <div class="status-btn na      ${cur==='na'      ?'active':''}" onclick="setSt('${item.key}','na',this)">N/A</div>
+          </div>
+          ${prevHtml}`;
+        card.appendChild(row);
+      });
+    }
+
+    // --- カテゴリ備考 ---
+    const pr = prevCr[cat.id];
+    const prevRemHtml = pr ? `<div class="prev-val" style="margin-top:4px">前回備考: ${esc(pr)}</div>` : '';
+    const remRow = document.createElement('div');
+    remRow.style.cssText = 'margin-top:8px';
+    remRow.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:4px">備考</div>
+      <textarea id="cat-rem-${cat.id}" placeholder="このカテゴリの気になる点・メモ"
+        style="width:100%;min-height:52px;resize:vertical;border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:16px;font-family:inherit;background:#fafafa"></textarea>
+      ${prevRemHtml}`;
+    card.appendChild(remRow);
+
+    formCont.appendChild(card);
+  });
+}
+
+function setPrevVals(pairs) {
+  pairs.forEach(([id, val]) => { const e = document.getElementById(id); if (e) e.value = val; });
+}
+
+function setSt(key, val, el) {
+  currentStatuses[key] = val;
+  el.closest('.status-group').querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  scheduleDraftSave();
+}
+
+
+// ===================== タブ =====================
+function showTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['entry','history','settings'][i]===tab));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+tab).classList.add('active');
+  if (tab==='history') renderHistory();
+  if (tab==='settings') renderSettingsPage();
+}
+
+// ===================== 保存 =====================
+async function saveRecord() {
+  const data = collectForm();
+  if (!data.date)      { alert('点検日を入力してください'); return; }
+  if (!data.inspector) { alert('点検者名を入力してください'); return; }
+  const recs = getRecords();
+  let savedId;
+  if (editingRecordId && recs[editingRecordId]) {
+    savedId = editingRecordId;
+    recs[savedId] = { ...recs[savedId], ...data, savedAt: new Date().toISOString() };
+    editingRecordId = null;
+    document.getElementById('edit-banner').style.display = 'none';
+  } else {
+    const existing = Object.values(recs).find(r => r.date === data.date && r.equipmentType === activeEquipment);
+    if (existing) {
+      if (!confirm(`${fmtDate(data.date)} の記録が既に存在します。\n上書き更新しますか？`)) return;
+      savedId = existing.id;
+      recs[savedId] = { ...existing, ...data, savedAt: new Date().toISOString() };
+    } else {
+      savedId = Date.now().toString();
+      recs[savedId] = { id: savedId, equipmentType: activeEquipment, ...data, savedAt: new Date().toISOString() };
+    }
+  }
+  try {
+    localStorage.setItem(recKey(), JSON.stringify(recs));
+  } catch(e) {
+    alert('保存できませんでした（プライベートモードでは使用できません）');
+    return;
+  }
+  try {
+    await pushRecordToServer(recs[savedId]);   // D1 へ write-through
+  } catch(e) {
+    alert('サーバーへ保存できませんでした（通信環境を確認してください）：' + e.message);
+    return;
+  }
+  clearDraft();
+  saveBasicInfo();  // 点検者名・設備名称・天候を次回のデフォルトとして保持
+  alert('保存しました');
+  renderHistory();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function editRecord(id) {
+  if (!id) return;
+  const found = findRecord(id);
+  if (!found) return;
+  const r = found.rec;
+  closeModal();
+  // 設備タイプが違う場合は切り替え
+  if (r.equipmentType && r.equipmentType !== activeEquipment) {
+    switchEquipment(r.equipmentType);
+  }
+  showTab('entry');
+  editingRecordId = id;
+  loadDataIntoForm(r);
+  document.getElementById('edit-banner').style.display = 'block';
+  document.getElementById('edit-info').textContent = `✎ 編集中：${fmtDate(r.date)}　${r.inspector||''}`;
+  document.getElementById('draft-banner').style.display = 'none';
+  window.scrollTo(0, 0);
+}
+
+function cancelEdit() {
+  editingRecordId = null;
+  document.getElementById('edit-banner').style.display = 'none';
+}
+
+function collectForm() {
+  const cfg = getConfig();
+  const measurements = {};
+  cfg.forEach(cat => cat.measurements.forEach(m => {
+    const phases = m.phases || 1;
+    if (phases === 1) {
+      const el = document.getElementById('m_'+m.key);
+      if (el && el.value !== '') measurements[m.key] = el.value;
+    } else {
+      const vals = Array.from({length: phases}, (_, i) => {
+        const el = document.getElementById(`m_${m.key}_${i}`);
+        return el ? el.value : '';
+      });
+      if (vals.some(v => v !== '')) measurements[m.key] = vals;
+    }
+  }));
+  const qualifiers = {};
+  cfg.forEach(cat => cat.measurements.forEach(m => {
+    const el = document.getElementById('q_' + m.key);
+    if (el && el.value) qualifiers[m.key] = el.value;
+  }));
+  return {
+    date: document.getElementById('date').value,
+    inspector: document.getElementById('inspector').value,
+    facility: document.getElementById('facility').value,
+    weather: document.getElementById('weather').value,
+    room_temp: document.getElementById('room_temp').value,
+    humidity: document.getElementById('humidity').value,
+    statuses: {...currentStatuses},
+    measurements,
+    qualifiers,
+    categoryRemarks: Object.fromEntries(cfg.map(cat => {
+      const el = document.getElementById('cat-rem-'+cat.id);
+      return [cat.id, el ? el.value : ''];
+    })),
+    remarks: document.getElementById('remarks').value,
+    repairNotes: document.getElementById('repair-notes').value,
+    config: JSON.parse(JSON.stringify(cfg)),
+  };
+}
+
+function getRecords() {
+  try { return JSON.parse(localStorage.getItem(recKey()) || '{}'); } catch(e) { return {}; }
+}
+
+// ===================== 履歴 =====================
+function renderHistory() {
+  let recsObj;
+  if (historyFilter === 'all') {
+    recsObj = getAllRecordsFlat();
+  } else {
+    const key = EQ_REC_KEYS[historyFilter] || recKey();
+    try { recsObj = JSON.parse(localStorage.getItem(key) || '{}'); } catch(e) { recsObj = {}; }
+  }
+  const list = document.getElementById('history-list');
+  const fm = document.getElementById('search-month').value;
+  let sorted = Object.values(recsObj).sort((a,b) => b.date.localeCompare(a.date));
+  if (fm) sorted = sorted.filter(r => r.date.startsWith(fm));
+  if (!sorted.length) { list.innerHTML = '<div class="no-records">点検記録がありません</div>'; return; }
+  list.innerHTML = sorted.map(r => {
+    const st = r.statuses || {};
+    const vals = Object.values(st);
+    const ca = vals.filter(v=>v==='caution').length;
+    const re = vals.filter(v=>v==='repair').length;
+    const go = vals.filter(v=>v==='good').length;
+    const eqBadge = historyFilter === 'all'
+      ? `<span class="badge" style="background:#2980b9;color:#fff;font-size:11px">${EQ_NAMES[r.equipmentType]||'—'}</span>` : '';
+    const badges = [
+      eqBadge,
+      re ? `<span class="badge badge-repair">要修理 ${re}件</span>` : '',
+      ca ? `<span class="badge badge-caution">要注意 ${ca}件</span>` : '',
+      (!re && !ca && go) ? '<span class="badge badge-good">異常なし</span>' : '',
+      (!re && !ca && !go) ? '<span class="badge" style="background:#f4f6f7;color:var(--muted);border:1px solid var(--border)">未確認</span>' : '',
+    ].join('');
+    return `<div class="history-item" onclick="openRecord('${r.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div class="history-date">${fmtDate(r.date)}</div>
+          <div class="history-meta">${r.inspector||'—'} / ${r.facility||'—'} / ${r.weather||'—'}</div>
+          <div class="history-badges">${badges}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0" onclick="event.stopPropagation()">
+          <button class="btn btn-success btn-sm" style="min-height:44px;padding:8px 14px" onclick="editRecord('${r.id}')">編集</button>
+          <button class="btn btn-danger btn-sm" style="min-height:44px;padding:8px 14px" onclick="deleteRecordById('${r.id}')">削除</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  const [y,m,day] = d.split('-');
+  return `${y}年${+m}月${+day}日`;
+}
+
+// ===================== 詳細モーダル =====================
+function openRecord(id) {
+  const found = findRecord(id);
+  if (!found) return;
+  const r = found.rec;
+  currentRecordId = id;
+  currentPreviewData = null;
+  document.getElementById('modal-title').textContent = `点検記録 ${fmtDate(r.date)}`;
+  document.getElementById('print-title').textContent = '高圧受電設備等　点検記録';
+  document.getElementById('modal-content').innerHTML = buildRecordHTML(r);
+  document.getElementById('repair-btn').textContent = '改修推奨資料';
+  document.getElementById('repair-btn').onclick = showRepairDoc;
+  showDeleteBtn(true);
+  document.getElementById('all-eq-btn').style.display = hasOtherEquipRec(r.date) ? '' : 'none';
+  _modalScrollY = window.scrollY;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+}
+// ===================== 年間報告書 =====================
+function showAnnualReport() {
+  const yearVal = document.getElementById('annual-year').value.trim();
+  const year = yearVal || String(new Date().getFullYear());
+  if (!/^\d{4}$/.test(year)) { alert('年を4桁で入力してください（例: 2026）'); return; }
+  const recs = Object.values(getRecords())
+    .filter(r => r.date && r.date.startsWith(year))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (!recs.length) { alert(`${year}年の記録がありません`); return; }
+  currentRecordId = null;
+  currentPreviewData = null;
+  document.getElementById('modal-title').textContent = `${EQ_NAMES[activeEquipment]} ${year}年 年間点検集計報告書`;
+  document.getElementById('print-title').textContent = `${EQ_NAMES[activeEquipment]} 年間点検集計報告書　${year}年`;
+  document.getElementById('modal-content').innerHTML = buildAnnualHTML(recs, year, activeEquipment);
+  document.getElementById('repair-btn').style.display = 'none';
+  document.getElementById('edit-rec-btn').style.display = 'none';
+  showDeleteBtn(false);
+  document.getElementById('all-eq-btn').style.display = 'none';
+  _modalScrollY = window.scrollY;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+}
+
+function showAllAnnualReport() {
+  const year = (document.getElementById('annual-year').value.trim()) || String(new Date().getFullYear());
+  if (!/^\d{4}$/.test(year)) { alert('年を4桁で入力してください（例: 2026）'); return; }
+  let html = '';
+  ['main','battery','generator'].forEach(eq => {
+    const key = EQ_REC_KEYS[eq];
+    let recs = [];
+    try { recs = Object.values(JSON.parse(localStorage.getItem(key)||'{}')).filter(r => r.date && r.date.startsWith(year)).sort((a,b)=>a.date.localeCompare(b.date)); } catch(e) {}
+    if (!recs.length) return;
+    if (html) html += `<div style="page-break-before:always"></div>`;
+    html += `<div style="font-size:16px;font-weight:bold;text-align:center;margin-bottom:8px">${EQ_NAMES[eq]} 年間点検集計報告書 ${year}年</div>`;
+    html += buildAnnualHTML(recs, year, eq);
+  });
+  if (!html) { alert(`${year}年の記録がありません`); return; }
+  currentRecordId = null; currentPreviewData = null;
+  document.getElementById('modal-title').textContent = `全設備 ${year}年 年間点検集計報告書`;
+  document.getElementById('print-title').textContent = `全設備 年間点検集計報告書　${year}年`;
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('repair-btn').style.display = 'none';
+  document.getElementById('edit-rec-btn').style.display = 'none';
+  showDeleteBtn(false);
+  document.getElementById('all-eq-btn').style.display = 'none';
+  _modalScrollY = window.scrollY;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+}
+
+function buildAnnualHTML(recs, year, eq) {
+  eq = eq || activeEquipment;
+  const cfgStorageKey = eq === 'main' ? 'inspection_config' : `inspection_config_${eq}`;
+  const cfg = JSON.parse(localStorage.getItem(cfgStorageKey)||'null') || JSON.parse(JSON.stringify(EQ_DEFAULTS[eq]));
+  const TH = s => `<th style="padding:5px 7px;border:1px solid #ccc;background:#d6eaf8;white-space:nowrap;text-align:center">${s}</th>`;
+  const TD = (s, style) => `<td style="padding:4px 7px;border:1px solid #ccc${style ? ';' + style : ''}">${s != null && s !== '' ? s : '—'}</td>`;
+
+  // 集計
+  let totalCaution = 0, totalRepair = 0;
+  recs.forEach(r => {
+    Object.values(r.statuses || {}).forEach(v => {
+      if (v === 'caution') totalCaution++;
+      else if (v === 'repair') totalRepair++;
+    });
+  });
+  const facility = (recs[0] && recs[0].facility) || '—';
+
+  // ---- 月別点検実績 ----
+  let monthRows = '';
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, '0');
+    const mRecs = recs.filter(r => r.date.slice(5, 7) === mm);
+    if (!mRecs.length) {
+      monthRows += `<tr>${TD(m + '月', 'text-align:center')}${TD('点検なし', 'color:#aaa;text-align:center')}${TD('', '')}${TD('—', 'text-align:center')}${TD('—', 'text-align:center')}</tr>`;
+    } else {
+      mRecs.forEach((r, ri) => {
+        const st = r.statuses || {};
+        const ca = Object.values(st).filter(v => v === 'caution').length;
+        const re = Object.values(st).filter(v => v === 'repair').length;
+        monthRows += `<tr>
+          ${ri === 0 ? `<td rowspan="${mRecs.length}" style="padding:4px 7px;border:1px solid #ccc;text-align:center;vertical-align:middle">${m}月</td>` : ''}
+          ${TD(fmtDate(r.date))}${TD(esc(r.inspector || '—'))}
+          ${TD(ca > 0 ? ca + '件' : '—', ca > 0 ? 'color:#d4ac0d;text-align:center' : 'text-align:center')}
+          ${TD(re > 0 ? re + '件' : '—', re > 0 ? 'color:#c0392b;text-align:center' : 'text-align:center')}
+        </tr>`;
+      });
+    }
+  }
+
+  // ---- 点検項目別年間集計 ----
+  let checkRows = '';
+  cfg.forEach(cat => {
+    const rows = [];
+    cat.checks.forEach(item => {
+      let good = 0, caution = 0, repair = 0;
+      recs.forEach(r => {
+        const v = (r.statuses || {})[item.key];
+        if (v === 'good') good++;
+        else if (v === 'caution') caution++;
+        else if (v === 'repair') repair++;
+      });
+      if (good + caution + repair === 0) return;
+      rows.push(`<tr>
+        ${TD(esc(item.label))}
+        ${TD(good, 'color:#1e8449;text-align:center')}
+        ${TD(caution || '—', caution > 0 ? 'color:#d4ac0d;text-align:center;font-weight:bold' : 'text-align:center')}
+        ${TD(repair || '—', repair > 0 ? 'color:#c0392b;text-align:center;font-weight:bold' : 'text-align:center')}
+      </tr>`);
+    });
+    if (rows.length) {
+      checkRows += `<tr><td colspan="4" style="padding:4px 7px;border:1px solid #ccc;background:#eaf4fb;font-weight:bold;font-size:12px">${esc(cat.title)}</td></tr>`;
+      checkRows += rows.join('');
+    }
+  });
+
+  // ---- 測定値月別推移 ----
+  const mnums = Array.from({ length: 12 }, (_, i) => i + 1);
+  let measRows = '';
+  cfg.forEach(cat => {
+    cat.measurements.forEach(m => {
+      const pl = getPhaseLabels(m.phases || 1, m.phasePrefix);
+      const mult = m.multiplier || 1;
+      if (!pl) {
+        let row = `<tr>${TD(esc(m.label))}${TD(esc(m.unit), 'text-align:center')}`;
+        mnums.forEach(mo => {
+          const rec = recs.find(r => r.date.slice(5, 7) === String(mo).padStart(2, '0'));
+          const val = rec ? ((rec.measurements || {})[m.key] || '') : '';
+          row += TD(val !== '' ? applyMult(val, mult) : '', 'text-align:center');
+        });
+        measRows += row + '</tr>';
+      } else {
+        pl.forEach((lbl, i) => {
+          let row = `<tr>${TD(esc(m.label) + ' ' + lbl)}${TD(esc(m.unit), 'text-align:center')}`;
+          mnums.forEach(mo => {
+            const rec = recs.find(r => r.date.slice(5, 7) === String(mo).padStart(2, '0'));
+            const vals = rec ? ((rec.measurements || {})[m.key] || []) : [];
+            const val = Array.isArray(vals) ? (vals[i] || '') : '';
+            row += TD(val !== '' ? applyMult(val, mult) : '', 'text-align:center');
+          });
+          measRows += row + '</tr>';
+        });
+      }
+    });
+  });
+
+  const mhdr = mnums.map(i => TH(i + '月')).join('');
+  const sec = t => `<div style="font-weight:bold;font-size:13px;color:#1a5276;border-left:3px solid #1a5276;padding-left:8px;margin:14px 0 6px">${t}</div>`;
+
+  let html = `<div style="font-size:12px;color:#555;padding:8px 10px;background:#f4f6f7;border-radius:6px;margin-bottom:10px;line-height:1.8">
+    設備：<b>${EQ_NAMES[eq]}</b>　設備名称：<b>${esc(facility)}</b>　年度：<b>${year}年</b><br>
+    点検回数：<b>${recs.length}回</b>　要注意累計：<b style="color:#d4ac0d">${totalCaution}件</b>　要修理累計：<b style="color:#c0392b">${totalRepair}件</b>
+  </div>`;
+
+  html += sec('月別点検実績');
+  html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px">
+    <thead><tr>${TH('月')}${TH('点検日')}${TH('点検者')}${TH('要注意')}${TH('要修理')}</tr></thead>
+    <tbody>${monthRows}</tbody>
+  </table>`;
+
+  if (checkRows) {
+    html += sec('点検項目別 年間集計');
+    html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px">
+      <thead><tr>${TH('点検項目')}${TH('良好')}${TH('要注意')}${TH('要修理')}</tr></thead>
+      <tbody>${checkRows}</tbody>
+    </table>`;
+  }
+
+  if (measRows) {
+    html += sec('測定値 月別推移');
+    html += `<div style="overflow-x:auto;margin-bottom:4px">
+      <table style="border-collapse:collapse;font-size:11px;white-space:nowrap">
+        <thead><tr>${TH('測定項目')}${TH('単位')}${mhdr}</tr></thead>
+        <tbody>${measRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  html += `<div style="font-size:11px;color:#aaa;text-align:right;margin-top:10px">作成日時：${new Date().toLocaleString('ja-JP')}</div>`;
+  return html;
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('active');
+  document.body.classList.remove('modal-open');
+  window.scrollTo(0, _modalScrollY);
+  currentRecordId = null;
+  currentPreviewData = null;
+  showDeleteBtn(true);
+  const rb = document.getElementById('repair-btn');
+  rb.style.display = '';
+  rb.textContent = '改修推奨資料';
+  rb.onclick = showRepairDoc;
+  document.getElementById('edit-rec-btn').style.display = '';
+  document.getElementById('all-eq-btn').style.display = 'none';
+}
+
+function buildRecordHTML(r) {
+  const cfg = r.config || getConfigForEquipment(r.equipmentType || activeEquipment);
+  const st = r.statuses || {};
+  const ms = r.measurements || {};
+  const td = (v,w,isLabel) => `<td style="padding:5px 7px;border:1px solid #ccc${w?';width:'+w:''}${isLabel?';background:#f0f7fd':''}">${v}</td>`;
+  const th2 = t => `<tr><th colspan="2" style="padding:6px 8px;border:1px solid #ccc;background:#1a5276;color:#fff;text-align:left;font-size:13px">${t}</th></tr>`;
+
+  let html = `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+    ${th2('基本情報')}
+    <tr>${td('点検日','40%',true)}${td(fmtDate(r.date))}</tr>
+    <tr>${td('点検者','',true)}${td(r.inspector||'—')}</tr>
+    <tr>${td('設備名称','',true)}${td(r.facility||'—')}</tr>
+    <tr>${td('天候','',true)}${td(r.weather||'—')}</tr>
+    <tr>${td('室温','',true)}${td((r.room_temp||'—')+' ℃')}</tr>
+    <tr>${td('湿度','',true)}${td((r.humidity||'—')+' %')}</tr>
+  </table>`;
+
+  // 計測値（カテゴリ別ヘッダー付き・先に表示）
+  const msRows = [];
+  const qs = r.qualifiers || {};
+  cfg.forEach(cat => {
+    const catRows = [];
+    cat.measurements.forEach(m => {
+      const val = ms[m.key];
+      if (val === undefined || val === '') return;
+      const mult = m.multiplier || 1;
+      const q = qs[m.key] ? `　${qs[m.key]}` : '';
+      if (Array.isArray(val)) {
+        const phases = m.phases || val.length;
+        const labels = getPhaseLabels(phases, m.phasePrefix) || val.map((_,i)=>`${i+1}`);
+        const display = val.map((v,i) => v!=='' ? `${labels[i]}: ${applyMult(v,mult)} ${esc(m.unit)}` : '').filter(Boolean).join('　') + q;
+        if (display) catRows.push(`<tr>${td(esc(m.label),'45%',true)}${td(display)}</tr>`);
+      } else {
+        catRows.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%',true)}${td(applyMult(val,mult)+' '+esc(m.unit)+q)}</tr>`);
+      }
+    });
+    if (catRows.length) {
+      msRows.push(`<tr><td colspan="2" style="padding:4px 7px;border:1px solid #ccc;background:#d6eaf8;font-weight:bold;font-size:12px">${esc(cat.title)}</td></tr>`);
+      msRows.push(...catRows);
+    }
+  });
+  // r.configで計測値が取れなかった場合、localStorageの現在のconfigで再試行
+  if (!msRows.length && Object.keys(ms).length > 0) {
+    const fbCfg = getConfigForEquipment(r.equipmentType || activeEquipment);
+    if (fbCfg !== cfg) {
+      fbCfg.forEach(cat => {
+        const catRows2 = [];
+        cat.measurements.forEach(m => {
+          const val = ms[m.key];
+          if (val === undefined || val === '') return;
+          const mult = m.multiplier || 1;
+          const q = qs[m.key] ? `　${qs[m.key]}` : '';
+          if (Array.isArray(val)) {
+            const phases = m.phases || val.length;
+            const labels = getPhaseLabels(phases, m.phasePrefix) || val.map((_,i)=>`${i+1}`);
+            const display = val.map((v,i) => v!=='' ? `${labels[i]}: ${applyMult(v,mult)} ${esc(m.unit)}` : '').filter(Boolean).join('　') + q;
+            if (display) catRows2.push(`<tr>${td(esc(m.label),'45%',true)}${td(display)}</tr>`);
+          } else {
+            catRows2.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%',true)}${td(applyMult(val,mult)+' '+esc(m.unit)+q)}</tr>`);
+          }
+        });
+        if (catRows2.length) {
+          msRows.push(`<tr><td colspan="2" style="padding:4px 7px;border:1px solid #ccc;background:#d6eaf8;font-weight:bold;font-size:12px">${esc(cat.title)}</td></tr>`);
+          msRows.push(...catRows2);
+        }
+      });
+    }
+  }
+  if (msRows.length) {
+    html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+      ${th2('計測値')}${msRows.join('')}</table>`;
+  }
+
+  // 点検結果（外観点検項目があるカテゴリのみ表示）
+  const checkCats = cfg.filter(cat => cat.checks && cat.checks.length > 0);
+  if (checkCats.length > 0) {
+    html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+      ${th2('点検結果')}`;
+    const cr = r.categoryRemarks || {};
+    checkCats.forEach(cat => {
+      html += `<tr><td colspan="2" style="padding:4px 7px;border:1px solid #ccc;background:#d6eaf8;font-weight:bold;font-size:12px">${esc(cat.title)}</td></tr>`;
+      cat.checks.forEach(item => {
+        const v = st[item.key] || 'good';
+        if (v === 'na') return;
+        html += `<tr>${td(esc(item.label),'45%',true)}<td class="sc-${v}" style="padding:5px 7px;border:1px solid #ccc">${SL[v]||v}</td></tr>`;
+      });
+      if (cr[cat.id]) {
+        html += `<tr><td style="padding:4px 7px;border:1px solid #ccc;font-size:12px;color:#666" colspan="2">備考：${esc(cr[cat.id])}</td></tr>`;
+      }
+    });
+    html += '</table>';
+  }
+
+  html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+    ${th2('特記事項')}
+    <tr><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap">${esc(r.remarks||'（なし）')}</td></tr>
+  </table>`;
+  if (r.repairNotes) {
+    html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px">
+      ${th2('改修内容')}
+      <tr><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap">${esc(r.repairNotes)}</td></tr>
+    </table>`;
+  }
+  html += `<div style="margin-top:8px;font-size:11px;color:#aaa;text-align:right">保存日時：${r.savedAt ? new Date(r.savedAt).toLocaleString('ja-JP') : '—'}</div>`;
+  return html;
+}
+
+function previewPrint() {
+  const data = collectForm();
+  if (!data.date) { alert('点検日を入力してください'); return; }
+  data.id = 'preview'; data.savedAt = new Date().toISOString();
+  data.equipmentType = activeEquipment;
+  currentPreviewData = data;
+  currentRecordId = null;
+  document.getElementById('modal-title').textContent = `プレビュー ${fmtDate(data.date)}`;
+  document.getElementById('print-title').textContent = '高圧受電設備等　点検記録';
+  document.getElementById('modal-content').innerHTML = buildRecordHTML(data);
+  document.getElementById('repair-btn').textContent = '改修推奨資料';
+  document.getElementById('repair-btn').onclick = showRepairDoc;
+  showDeleteBtn(false);
+  document.getElementById('all-eq-btn').style.display = 'none';
+  _modalScrollY = window.scrollY;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+  setTimeout(() => { window.print(); clearDraft(); }, 300);
+}
+
+async function deleteRecord() {
+  if (!currentRecordId) return;
+  if (!confirm('この記録を削除しますか？')) return;
+  const id = currentRecordId;
+  const found = findRecord(id);
+  if (!found) return;
+  delete found.recs[id];
+  try { localStorage.setItem(found.key, JSON.stringify(found.recs)); } catch(e) {}
+  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); }
+  closeModal(); renderHistory();
+}
+
+async function deleteRecordById(id) {
+  if (!confirm('この記録を削除しますか？')) return;
+  const found = findRecord(id);
+  if (!found) return;
+  delete found.recs[id];
+  try { localStorage.setItem(found.key, JSON.stringify(found.recs)); } catch(e) {}
+  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); }
+  if (currentRecordId === id) closeModal();
+  renderHistory();
+}
+
+// ===================== 改修推奨資料 =====================
+function showRepairDoc() {
+  const r = currentRecordId ? getRecords()[currentRecordId] : currentPreviewData;
+  if (!r) return;
+  const html = buildRepairHTML(r);
+  document.getElementById('print-title').textContent = `改修推奨資料　${fmtDate(r.date)}`;
+  document.getElementById('modal-title').textContent = `改修推奨資料 ${fmtDate(r.date)}`;
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('repair-btn').textContent = '← 点検記録';
+  document.getElementById('repair-btn').onclick = () => {
+    if (currentRecordId) {
+      openRecord(currentRecordId);
+    } else if (currentPreviewData) {
+      const d = currentPreviewData;
+      document.getElementById('print-title').textContent = `${EQ_NAMES[activeEquipment]} 日常点検記録　${fmtDate(d.date)}`;
+      document.getElementById('modal-title').textContent = `プレビュー ${fmtDate(d.date)}`;
+      document.getElementById('modal-content').innerHTML = buildRecordHTML(d);
+      document.getElementById('repair-btn').textContent = '改修推奨資料';
+      document.getElementById('repair-btn').onclick = showRepairDoc;
+      showDeleteBtn(false);
+    }
+  };
+}
+
+function buildRepairHTML(r) {
+  const cfg = r.config || getConfig();
+  const st = r.statuses || {};
+  const cr = r.categoryRemarks || {};
+  const td = (v,w,style) => `<td style="padding:5px 7px;border:1px solid #ccc${w?';width:'+w:''}${style?';'+style:''}">${v}</td>`;
+
+  const issues = [];
+  cfg.forEach(cat => {
+    cat.checks.forEach(item => {
+      const v = st[item.key];
+      if (v === 'caution' || v === 'repair') {
+        issues.push({ catTitle: cat.title, catId: cat.id, label: item.label, status: v });
+      }
+    });
+  });
+
+  if (!issues.length) {
+    return `<div style="text-align:center;padding:30px;color:var(--muted)">
+      要注意・要修理の項目はありません
+    </div>`;
+  }
+
+  const repairColor = { caution: '#d4ac0d', repair: '#c0392b' };
+  const repairBg    = { caution: '#fef9e7', repair: '#fdedec' };
+
+  let rows = issues.map((item, idx) => {
+    const rem = cr[item.catId] ? `<br><span style="font-size:11px;color:#666">備考：${esc(cr[item.catId])}</span>` : '';
+    return `<tr>
+      ${td(idx+1, '5%', 'text-align:center')}
+      ${td(esc(item.catTitle), '25%')}
+      ${td(esc(item.label))}
+      <td style="padding:5px 7px;border:1px solid #ccc;width:15%;font-weight:bold;color:${repairColor[item.status]};background:${repairBg[item.status]};text-align:center">${SL[item.status]}</td>
+      ${td(rem ? rem : '—')}
+    </tr>`;
+  }).join('');
+
+  return `
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:10px">
+    <tr><td colspan="2" style="padding:4px 0;font-size:13px"><b>点検日：</b>${fmtDate(r.date)}</td>
+        <td colspan="3" style="padding:4px 0;font-size:13px"><b>設備：</b>${esc(r.facility||'—')}　<b>点検者：</b>${esc(r.inspector||'—')}</td></tr>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px">
+    <thead>
+      <tr style="background:#d6eaf8">
+        <th style="padding:6px 7px;border:1px solid #ccc;width:5%">No.</th>
+        <th style="padding:6px 7px;border:1px solid #ccc;width:25%">カテゴリ</th>
+        <th style="padding:6px 7px;border:1px solid #ccc">点検項目</th>
+        <th style="padding:6px 7px;border:1px solid #ccc;width:15%">判定</th>
+        <th style="padding:6px 7px;border:1px solid #ccc">備考・対応メモ</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <tr><th colspan="2" style="padding:6px 8px;border:1px solid #ccc;background:#d6eaf8;text-align:left">総合備考</th></tr>
+    <tr><td colspan="2" style="padding:8px;border:1px solid #ccc;min-height:60px;white-space:pre-wrap">${esc(r.remarks||'（なし）')}</td></tr>
+    <tr><th colspan="2" style="padding:6px 8px;border:1px solid #ccc;background:#fde8e8;text-align:left;color:#922b21">改修内容</th></tr>
+    <tr><td colspan="2" style="padding:8px;border:1px solid #ccc;min-height:60px;white-space:pre-wrap">${esc(r.repairNotes||'（なし）')}</td></tr>
+    <tr><th style="padding:6px 8px;border:1px solid #ccc;background:#d6eaf8;width:40%">確認者</th><td style="padding:8px;border:1px solid #ccc">&nbsp;</td></tr>
+    <tr><th style="padding:6px 8px;border:1px solid #ccc;background:#d6eaf8">対応期限</th><td style="padding:8px;border:1px solid #ccc">&nbsp;</td></tr>
+  </table>
+  <div style="margin-top:8px;font-size:11px;color:#aaa;text-align:right">要注意：${issues.filter(i=>i.status==='caution').length}件　要修理：${issues.filter(i=>i.status==='repair').length}件</div>`;
+}
+
+
+// ===================== 印刷ヘルパー =====================
+function showDeleteBtn(visible) {
+  const btn = document.getElementById('delete-rec-btn');
+  if (btn) btn.style.display = visible ? '' : 'none';
+}
+
+function hasOtherEquipRec(date) {
+  return ['main','battery','generator'].some(eq => {
+    if (eq === activeEquipment) return false;
+    const key = eq === 'main' ? 'inspection_records' : `inspection_records_${eq}`;
+    try {
+      return Object.values(JSON.parse(localStorage.getItem(key)||'{}')).some(r => r.date === date);
+    } catch(e) { return false; }
+  });
+}
+
+function getConfigForEquipment(eq) {
+  const key = eq === 'main' ? 'inspection_config' : `inspection_config_${eq}`;
+  try { const c = JSON.parse(localStorage.getItem(key)); if (c) return c; } catch(e) {}
+  return JSON.parse(JSON.stringify(EQ_DEFAULTS[eq] || DEFAULT_CONFIG));
+}
+
+function printAllEquipment() {
+  const date = currentRecordId
+    ? (() => { const f = findRecord(currentRecordId); return f ? f.rec.date : null; })()
+    : (currentPreviewData && currentPreviewData.date);
+  if (!date) return;
+  let html = '';
+  ['main','battery','generator'].forEach(eq => {
+    const key = eq === 'main' ? 'inspection_records' : `inspection_records_${eq}`;
+    let rec;
+    try { rec = Object.values(JSON.parse(localStorage.getItem(key)||'{}')).find(r => r.date === date); } catch(e) { return; }
+    if (!rec) return;
+    if (html) html += `<div style="page-break-before:always"></div>`;
+    const EQ_SECTION = { main:'高圧受電設備', battery:'蓄電池設備', generator:'発電機' };
+    const EQ_COLOR   = { main:'#1a5276', battery:'#1e8449', generator:'#922b21' };
+    const EQ_BG      = { main:'#eaf4fb',  battery:'#eafaf1',  generator:'#fdedec' };
+    const hColor = EQ_COLOR[eq] || '#1a5276';
+    const hBg    = EQ_BG[eq]    || '#eaf4fb';
+    html += `<div style="font-size:15px;font-weight:bold;border-left:5px solid ${hColor};padding:6px 10px;margin-bottom:10px;color:${hColor};background:${hBg}">■ ${EQ_SECTION[eq]}　${fmtDate(date)}</div>`;
+    html += buildRecordHTML({ ...rec, equipmentType: eq });
+  });
+  if (!html) { alert('印刷できる記録がありません'); return; }
+  document.getElementById('print-title').textContent = '高圧受電設備等　点検記録';
+  document.getElementById('modal-title').textContent = `全設備 ${fmtDate(date)}`;
+  document.getElementById('modal-content').innerHTML = html;
+  setTimeout(() => window.print(), 300);
+}
+
+// ===================== 設定画面 =====================
+function getOpenCats() {
+  const open = new Set();
+  document.querySelectorAll('.setting-cat-body').forEach((body, i) => {
+    if (body.classList.contains('open')) open.add(i);
+  });
+  return open;
+}
+
+function renderSettingsPage(openSet) {
+  const cfg = getConfig();
+  const openStates = openSet !== undefined ? openSet : getOpenCats();
+  const container = document.getElementById('settings-categories');
+  container.innerHTML = '';
+  cfg.forEach((cat, ci) => {
+    const isLast = ci === cfg.length - 1;
+    const div = document.createElement('div');
+    div.className = 'setting-cat';
+    div.innerHTML = `
+      <div class="setting-cat-header" onclick="toggleCat(this)">
+        <div style="display:flex;gap:3px;flex-shrink:0" onclick="event.stopPropagation()">
+          <button class="btn btn-secondary btn-sm" style="padding:8px 10px;min-height:44px" ${ci===0?'disabled':''} onclick="moveCat(${ci},-1)">▲</button>
+          <button class="btn btn-secondary btn-sm" style="padding:8px 10px;min-height:44px" ${isLast?'disabled':''} onclick="moveCat(${ci},1)">▼</button>
+        </div>
+        <span class="setting-cat-title">${esc(cat.title)}</span>
+        <button class="btn btn-warning btn-sm" onclick="event.stopPropagation();dupCat(${ci})">複製</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteCat(${ci})">削除</button>
+      </div>
+      <div class="setting-cat-body" id="cat-body-${ci}">
+        <div class="form-row" style="margin-bottom:8px">
+          <label style="font-size:13px;color:var(--muted)">カテゴリ名</label>
+          <input type="text" value="${esc(cat.title)}" onchange="renameCat(${ci},this.value)">
+        </div>
+
+        <div class="setting-section-label">点検項目</div>
+        <div id="checks-list-${ci}">
+          ${cat.checks.map((item, ii) => `
+            <div class="setting-item">
+              <div style="display:flex;gap:2px;flex-shrink:0">
+                <button class="btn btn-secondary btn-sm" style="padding:8px 10px;min-height:44px" ${ii===0?'disabled':''} onclick="moveCheck(${ci},${ii},-1)">▲</button>
+                <button class="btn btn-secondary btn-sm" style="padding:8px 10px;min-height:44px" ${ii===cat.checks.length-1?'disabled':''} onclick="moveCheck(${ci},${ii},1)">▼</button>
+              </div>
+              <input type="text" value="${esc(item.label)}" onchange="renameCheck(${ci},${ii},this.value)">
+              <button class="btn btn-warning btn-sm" onclick="dupCheck(${ci},${ii})">複製</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCheck(${ci},${ii})">削除</button>
+            </div>`).join('')}
+        </div>
+        <div class="add-row">
+          <input type="text" id="new-check-${ci}" placeholder="項目名を入力">
+          <button class="btn btn-primary btn-sm" onclick="addCheck(${ci})">追加</button>
+        </div>
+
+        <div class="setting-section-label">計測値フィールド</div>
+        <div id="meas-list-${ci}">
+          ${cat.measurements.map((m, mi) => `
+            <div class="setting-item" style="flex-wrap:wrap;gap:4px">
+              <div style="display:flex;gap:2px;flex-shrink:0">
+                <button class="btn btn-secondary btn-sm" style="padding:8px 10px;min-height:44px" ${mi===0?'disabled':''} onclick="moveMeas(${ci},${mi},-1)">▲</button>
+                <button class="btn btn-secondary btn-sm" style="padding:8px 10px;min-height:44px" ${mi===cat.measurements.length-1?'disabled':''} onclick="moveMeas(${ci},${mi},1)">▼</button>
+              </div>
+              <input type="text" value="${esc(m.label)}" onchange="renameMeas(${ci},${mi},'label',this.value)" placeholder="ラベル">
+              <input type="text" class="unit-input" value="${esc(m.unit)}" onchange="renameMeas(${ci},${mi},'unit',this.value)" placeholder="単位">
+              <input type="number" min="1" max="999" value="${m.phases||1}"
+                style="width:58px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+                title="入力欄の数" placeholder="数"
+                onchange="renameMeas(${ci},${mi},'phases',+this.value||1)">
+              <span style="font-size:11px;color:var(--muted);white-space:nowrap">本</span>
+              <input type="text" value="${esc(m.phasePrefix||'')}"
+                style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+                placeholder="接頭語" title="ラベルの接頭語（例：セル）"
+                onchange="renameMeas(${ci},${mi},'phasePrefix',this.value)">
+              <span style="font-size:13px;color:var(--muted);white-space:nowrap">×</span>
+              <input type="number" value="${m.multiplier||1}" step="any" min="0.000001"
+                style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+                title="乗数（CT比・PT比など。入力値にこの数をかけて表示します）" placeholder="乗数"
+                onchange="renameMeas(${ci},${mi},'multiplier',parseFloat(this.value)||1)">
+              <label style="font-size:12px;white-space:nowrap;display:flex;align-items:center;gap:3px;cursor:pointer" title="入力フォームに「未満/以上」の選択肢を表示する">
+                <input type="checkbox" ${m.qualifier?'checked':''} style="width:16px;height:16px;cursor:pointer"
+                  onchange="renameMeas(${ci},${mi},'qualifier',this.checked)">未満/以上
+              </label>
+              <button class="btn btn-warning btn-sm" onclick="dupMeas(${ci},${mi})">複製</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteMeas(${ci},${mi})">削除</button>
+            </div>`).join('')}
+        </div>
+        <div class="add-row" style="flex-wrap:wrap;gap:4px">
+          <input type="text" id="new-meas-label-${ci}" placeholder="ラベル (例: 電圧)">
+          <input type="text" class="unit-input" id="new-meas-unit-${ci}" placeholder="単位">
+          <input type="number" min="1" max="999" value="1" id="new-meas-phases-${ci}"
+            style="width:58px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+            title="入力欄の数" placeholder="数">
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap">本</span>
+          <input type="text" id="new-meas-prefix-${ci}"
+            style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+            placeholder="接頭語" title="ラベルの接頭語（例：セル）">
+          <span style="font-size:13px;color:var(--muted);white-space:nowrap">×</span>
+          <input type="number" value="1" step="any" min="0.000001" id="new-meas-mult-${ci}"
+            style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+            title="乗数（デフォルト1）" placeholder="乗数">
+          <label style="font-size:12px;white-space:nowrap;display:flex;align-items:center;gap:3px;cursor:pointer" title="入力フォームに「未満/以上」の選択肢を表示する">
+            <input type="checkbox" id="new-meas-qual-${ci}" style="width:16px;height:16px;cursor:pointer">未満/以上
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="addMeas(${ci})">追加</button>
+        </div>
+      </div>`;
+    container.appendChild(div);
+  });
+  // 開閉状態を復元
+  openStates.forEach(i => {
+    const body = document.getElementById('cat-body-'+i);
+    if (body) body.classList.add('open');
+  });
+}
+
+function toggleCat(header) {
+  header.nextElementSibling.classList.toggle('open');
+}
+
+// 構造変更（追加・削除・移動）: 設定ページを再描画（開閉状態保持）
+function modifyConfig(fn) {
+  const openStates = getOpenCats();
+  const cfg = getConfig();
+  fn(cfg);
+  saveConfig(cfg);
+  renderSettingsPage(openStates);
+  buildEntryForm();
+}
+
+// 名前変更のみ: 設定ページは再描画しない
+function modifyConfigSilent(fn) {
+  const cfg = getConfig();
+  fn(cfg);
+  saveConfig(cfg);
+  buildEntryForm();
+}
+
+function addCategory() {
+  const openStates = getOpenCats();
+  const cfg = getConfig();
+  cfg.push({ id: 'cat_'+Date.now(), title: '新しいカテゴリ', checks: [], measurements: [] });
+  saveConfig(cfg);
+  openStates.add(cfg.length - 1); // 新カテゴリを開いた状態で表示
+  renderSettingsPage(openStates);
+  buildEntryForm();
+}
+function dupCat(ci) {
+  const openStates = getOpenCats();
+  const cfg = getConfig();
+  const copy = JSON.parse(JSON.stringify(cfg[ci]));
+  copy.id = 'cat_'+Date.now();
+  copy.title = copy.title + ' (コピー)';
+  copy.checks = copy.checks.map(c => ({...c, key: 'ck_'+Date.now()+'_'+Math.random().toString(36).slice(2)}));
+  copy.measurements = copy.measurements.map(m => ({...m, key: 'm_'+Date.now()+'_'+Math.random().toString(36).slice(2)}));
+  cfg.splice(ci + 1, 0, copy);
+  saveConfig(cfg);
+  openStates.add(ci + 1);
+  renderSettingsPage(openStates);
+  buildEntryForm();
+}
+function deleteCat(ci) {
+  if (!confirm('このカテゴリを削除しますか？')) return;
+  modifyConfig(cfg => cfg.splice(ci, 1));
+}
+function moveCat(ci, dir) {
+  modifyConfig(cfg => {
+    const t = cfg[ci]; cfg[ci] = cfg[ci+dir]; cfg[ci+dir] = t;
+  });
+}
+function renameCat(ci, val) { modifyConfigSilent(cfg => { cfg[ci].title = val; }); }
+
+function addCheck(ci) {
+  const inp = document.getElementById('new-check-'+ci);
+  const label = inp.value.trim(); if (!label) return;
+  inp.value = '';
+  modifyConfig(cfg => cfg[ci].checks.push({ key: 'ck_'+Date.now(), label }));
+}
+function dupCheck(ci, ii) {
+  modifyConfig(cfg => {
+    const copy = {...cfg[ci].checks[ii], key: 'ck_'+Date.now()};
+    cfg[ci].checks.splice(ii + 1, 0, copy);
+  });
+}
+function deleteCheck(ci, ii) { if (!confirm('この点検項目を削除しますか？')) return; modifyConfig(cfg => cfg[ci].checks.splice(ii,1)); }
+function moveCheck(ci, ii, dir) {
+  modifyConfig(cfg => {
+    const a = cfg[ci].checks; const t = a[ii]; a[ii] = a[ii+dir]; a[ii+dir] = t;
+  });
+}
+function renameCheck(ci, ii, val) { modifyConfigSilent(cfg => { cfg[ci].checks[ii].label = val; }); }
+
+function addMeas(ci) {
+  const label  = document.getElementById('new-meas-label-'+ci).value.trim(); if (!label) return;
+  const unit        = document.getElementById('new-meas-unit-'+ci).value.trim();
+  const phases      = +(document.getElementById('new-meas-phases-'+ci).value) || 1;
+  const phasePrefix  = document.getElementById('new-meas-prefix-'+ci).value.trim();
+  const multiplier   = parseFloat(document.getElementById('new-meas-mult-'+ci).value) || 1;
+  const qualifier    = document.getElementById('new-meas-qual-'+ci).checked;
+  const entry = { key: 'm_'+Date.now(), label, unit, phases };
+  if (phasePrefix) entry.phasePrefix = phasePrefix;
+  if (multiplier !== 1) entry.multiplier = multiplier;
+  if (qualifier) entry.qualifier = true;
+  modifyConfig(cfg => cfg[ci].measurements.push(entry));
+}
+function dupMeas(ci, mi) {
+  modifyConfig(cfg => {
+    const copy = {...cfg[ci].measurements[mi], key: 'm_'+Date.now()};
+    cfg[ci].measurements.splice(mi + 1, 0, copy);
+  });
+}
+function deleteMeas(ci, mi) { if (!confirm('この計測値フィールドを削除しますか？')) return; modifyConfig(cfg => cfg[ci].measurements.splice(mi,1)); }
+function moveMeas(ci, mi, dir) {
+  modifyConfig(cfg => {
+    const a = cfg[ci].measurements; const t = a[mi]; a[mi] = a[mi+dir]; a[mi+dir] = t;
+  });
+}
+function renameMeas(ci, mi, field, val) { modifyConfigSilent(cfg => { cfg[ci].measurements[mi][field] = val; }); }
+function defaultKey() {
+  return activeEquipment === 'main' ? 'inspection_default' : `inspection_default_${activeEquipment}`;
+}
+
+function saveAsDefault() {
+  const cfg = getConfig();
+  localStorage.setItem(defaultKey(), JSON.stringify(cfg));
+  pushDefaultToServer(activeEquipment, cfg);
+  alert(`${EQ_NAMES[activeEquipment]} の現在の設定をデフォルトとして保存しました`);
+}
+
+function resetConfig() {
+  const userDefault = localStorage.getItem(defaultKey());
+  const msg = userDefault
+    ? `設定をユーザー定義のデフォルトに戻しますか？\n（記録データは消えません）`
+    : `設定を出荷時デフォルトに戻しますか？\n（記録データは消えません）`;
+  if (!confirm(msg)) return;
+  if (userDefault) {
+    localStorage.setItem(cfgKey(), userDefault);
+    pushConfigToServer(activeEquipment, JSON.parse(userDefault));
+  } else {
+    localStorage.removeItem(cfgKey());
+    pushConfigToServer(activeEquipment, null); // 内蔵デフォルトへ（サーバーは null）
+  }
+  renderSettingsPage(); buildEntryForm();
+}
+
+function getPhaseLabels(n, prefix) {
+  if (!n || n <= 1) return null;
+  if (!prefix) {
+    if (n === 2) return ['L1', 'L2'];
+    if (n === 3) return ['R相', 'S相', 'T相'];
+  }
+  const p = prefix || '';
+  return Array.from({length: n}, (_, i) => `${p}${i+1}`);
+}
+
+function applyMult(val, mult) {
+  if (!mult || mult === 1) return val;
+  const n = parseFloat(val);
+  if (isNaN(n) || val === '' || val === undefined) return val;
+  return parseFloat((n * mult).toPrecision(10));
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Service Worker 登録（HTTPS環境のみ）
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
