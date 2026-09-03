@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高圧受電設備 日常点検記録</title>
+<style>
+:root {
+  --primary: #1a5276;
+  --primary-light: #2e86c1;
+  --good: #1e8449;
+  --caution: #d4ac0d;
+  --repair: #c0392b;
+  --bg: #f4f6f7;
+  --card: #fff;
+  --border: #d5d8dc;
+  --text: #2c3e50;
+  --muted: #7f8c8d;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Hiragino Sans','Meiryo',sans-serif; background: var(--bg); color: var(--text); font-size: 15px; }
+
+header { background: var(--primary); color: #fff; padding: 12px 16px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+header h1 { font-size: 17px; font-weight: bold; }
+header p  { font-size: 13px; opacity: .8; margin-top: 2px; }
+
+.tabs { display: flex; background: var(--primary); }
+.tab  { flex: 1; padding: 13px 6px; text-align: center; color: rgba(255,255,255,.7); cursor: pointer; font-size: 13px; border-bottom: 3px solid transparent; transition: all .2s; }
+.tab.active { color: #fff; border-bottom-color: #f39c12; font-weight: bold; }
+
+.page { display: none; padding: 12px; max-width: 700px; margin: 0 auto; }
+.page.active { display: block; }
+
+.card { background: var(--card); border-radius: 8px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: visible; }
+.card-title { font-size: 14px; font-weight: bold; color: var(--primary); border-bottom: 2px solid var(--primary); padding-bottom: 6px; margin-bottom: 12px; }
+
+.form-row { display: flex; align-items: center; margin-bottom: 10px; gap: 8px; flex-wrap: wrap; }
+.form-row label { font-size: 14px; color: var(--muted); min-width: 90px; flex-shrink: 0; }
+.form-row input[type=text],.form-row input[type=date],.form-row input[type=number],.form-row select,.form-row textarea {
+  flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 16px; font-family: inherit; background: #fafafa; min-width: 0;
+}
+.form-row textarea { width: 100%; min-height: 70px; resize: vertical; }
+.unit { font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+.status-group { display: flex; gap: 5px; flex: 1; }
+.status-btn { flex: 1; padding: 11px 4px; border: 1px solid var(--border); border-radius: 6px; text-align: center; cursor: pointer; font-size: 13px; background: #f8f9fa; transition: all .15s; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.status-btn.good.active    { background: var(--good);    color: #fff; border-color: var(--good); }
+.status-btn.caution.active { background: var(--caution); color: #fff; border-color: var(--caution); }
+.status-btn.repair.active  { background: var(--repair);  color: #fff; border-color: var(--repair); }
+.status-btn.na.active      { background: var(--muted);   color: #fff; border-color: var(--muted); }
+
+.btn { display: inline-block; padding: 13px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: bold; text-align: center; width: 100%; margin-top: 6px; font-family: inherit; }
+.btn-primary   { background: var(--primary-light); color: #fff; }
+.btn-success   { background: var(--good);   color: #fff; }
+.btn-danger    { background: var(--repair); color: #fff; }
+.btn-secondary { background: var(--muted);  color: #fff; }
+.btn-warning   { background: var(--caution); color: #fff; }
+.btn-sm { padding: 9px 14px; font-size: 13px; width: auto; border-radius: 6px; margin-top: 0; }
+
+.history-item { background: var(--card); border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1); cursor: pointer; border-left: 4px solid var(--primary-light); }
+.history-item:hover { background: #eaf4fb; }
+.history-date  { font-size: 15px; font-weight: bold; color: var(--primary); }
+.history-meta  { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.history-badges { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+.badge-caution { background: #fef9e7; color: var(--caution); border: 1px solid var(--caution); }
+.badge-repair  { background: #fdedec; color: var(--repair);  border: 1px solid var(--repair); }
+.badge-good    { background: #eafaf1; color: var(--good);    border: 1px solid var(--good); }
+
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; }
+.modal-overlay.active { display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 20px 0; }
+.modal { background: #fff; border-radius: 10px; width: 95%; max-width: 680px; padding: 16px; margin: auto; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 2px solid var(--primary); padding-bottom: 8px; }
+.modal-title  { font-size: 16px; font-weight: bold; color: var(--primary); }
+.close-btn    { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted); line-height: 1; padding: 8px 12px; }
+
+/* 設定画面 */
+.setting-cat { background: var(--card); border-radius: 8px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: hidden; }
+.setting-cat-header { display: flex; align-items: center; padding: 12px 14px; gap: 8px; background: #eaf4fb; cursor: pointer; }
+.setting-cat-title { flex: 1; font-weight: bold; font-size: 14px; color: var(--primary); }
+.setting-cat-body { padding: 12px 14px; display: none; }
+.setting-cat-body.open { display: block; }
+.setting-section-label { font-size: 12px; color: var(--muted); font-weight: bold; margin: 10px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+.setting-item { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.setting-item input[type=text] { flex: 1; min-width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-family: inherit; }
+.setting-item .unit-input { width: 60px; flex: none; }
+.add-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.add-row input[type=text] { flex: 1; min-width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-family: inherit; }
+.add-row .unit-input { width: 60px; flex: none; }
+
+.search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+.search-bar input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 16px; }
+.no-records { text-align: center; color: var(--muted); padding: 30px; font-size: 14px; }
+
+/* Mobile touch */
+.tab, .sub-tab, .eq-btn, .btn, .btn-sm, .close-btn,
+.setting-cat-header, .history-item, .status-btn {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+body.modal-open { overflow: hidden; position: fixed; width: 100%; left: 0; right: 0; }
+.modal-overlay.active { -webkit-overflow-scrolling: touch; }
+
+/* Print */
+@media print {
+  header,.tabs,.btn,#print-actions,.modal-overlay:not(.active) { display: none !important; }
+  .modal-overlay { display: block !important; position: static !important; padding: 0 !important; background: none !important; overflow: visible !important; }
+  .modal { width: 100% !important; box-shadow: none !important; padding: 0 !important; border-radius: 0 !important; }
+  .close-btn { display: none !important; }
+  body { background: #fff; font-size: 12px; }
+  .page { display: none !important; }
+  .print-title { display: block !important; font-size: 18px; font-weight: bold; text-align: center; margin-bottom: 10px; }
+  .ptable { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
+  .ptable th,.ptable td { border: 1px solid #333; padding: 4px 7px; }
+  .ptable th { background: #d6eaf8; }
+  .sc-good    { color: #1e8449; font-weight: bold; }
+  .sc-caution { color: #d4ac0d; font-weight: bold; }
+  .sc-repair  { color: #c0392b; font-weight: bold; }
+  .sc-na      { color: #7f8c8d; }
+}
+.print-title { display: none; }
+/* Multi-phase grid */
+.meas-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); gap:6px; width:100%; margin-top:4px; }
+.meas-cell { display:flex; flex-direction:column; align-items:center; gap:2px; }
+.meas-lbl  { font-size:11px; color:var(--muted); white-space:nowrap; text-align:center; }
+.meas-cell input { width:100%; text-align:center; padding:5px 2px; font-size:16px; border:1px solid var(--border); border-radius:6px; background:#fafafa; }
+.meas-unit { font-size:10px; color:var(--muted); }
+.prev-val { font-size:11px; color:var(--muted); margin-top:3px; width:100%; }
+/* Sub-tabs */
+.sub-tabs { display:flex; background:#fff; border-bottom:2px solid var(--border); margin-top:12px; border-radius:8px 8px 0 0; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+.sub-tab  { flex:1; padding:13px 8px; text-align:center; cursor:pointer; font-size:14px; color:var(--muted); border-bottom:3px solid transparent; margin-bottom:-2px; transition:all .2s; }
+.sub-tab.active { color:var(--primary); border-bottom-color:var(--primary); font-weight:bold; background:#f0f7ff; }
+.sub-page { display:none; }
+.sub-page.active { display:block; }
+/* Equipment selector */
+.eq-bar { display:flex; background:#0e3460; overflow-x:auto; gap:2px; padding:6px 8px; }
+.eq-btn { flex-shrink:0; padding:11px 16px; border:none; border-radius:20px; font-size:13px; cursor:pointer; background:rgba(255,255,255,.15); color:rgba(255,255,255,.8); font-family:inherit; white-space:nowrap; transition:all .2s; }
+.eq-btn.active { background:#f39c12; color:#fff; font-weight:bold; }
+</style>
+</head>
+<body>
+
+<header style="position:relative">
+  <a href="/" aria-label="ホームへ戻る" style="position:absolute;left:14px;top:14px;color:#fff;text-decoration:none;font-size:18px">🏠</a>
+  <h1 id="main-title" style="padding-left:28px">高圧受電設備 日常点検記録</h1>
+  <p style="padding-left:28px">スマートフォン対応 点検管理システム</p>
+</header>
+
+<div class="eq-bar" id="eq-bar">
+  <button class="eq-btn active" onclick="switchEquipment('main')">高圧受電設備</button>
+  <button class="eq-btn" onclick="switchEquipment('battery')">蓄電池</button>
+  <button class="eq-btn" onclick="switchEquipment('generator')">発電機</button>
+</div>
+
+<div class="tabs" id="tab-bar">
+  <div class="tab active" onclick="showTab('entry')">新規入力</div>
+  <div class="tab" onclick="showTab('history')">履歴・出力</div>
+  <div class="tab" id="tab-settings" onclick="showTab('settings')">設定</div>
+</div>
+
+<!-- 新規入力 -->
+<div class="page active" id="page-entry">
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">基本情報</div>
+    <div class="form-row"><label>点検日</label><input type="date" id="date"></div>
+    <div class="form-row"><label>点検者名</label><input type="text" id="inspector" placeholder="氏名を入力"></div>
+    <div class="form-row"><label>設備名称</label><input type="text" id="facility" placeholder="例：第1キュービクル"></div>
+    <div class="form-row">
+      <label>天候</label>
+      <select id="weather"><option>晴</option><option>曇</option><option>雨</option><option>雪</option></select>
+    </div>
+    <div class="form-row" style="flex-wrap:wrap"><label>室温</label><input type="number" inputmode="decimal" id="room_temp" placeholder="—" step="0.1" style="max-width:90px"><span class="unit">℃</span><div class="prev-val" id="prev-room_temp"></div></div>
+    <div class="form-row" style="flex-wrap:wrap"><label>湿度</label><input type="number" inputmode="decimal" id="humidity" placeholder="—" step="1" style="max-width:90px"><span class="unit">%</span><div class="prev-val" id="prev-humidity"></div></div>
+  </div>
+
+  <!-- サブタブ -->
+  <div class="sub-tabs">
+    <div class="sub-tab active" onclick="showSubTab('measure')">計測データ</div>
+    <div class="sub-tab" onclick="showSubTab('visual')">外観点検</div>
+  </div>
+
+  <!-- 計測データ -->
+  <div class="sub-page active" id="sub-measure">
+    <div id="entry-measurements"></div>
+    <div class="card">
+      <div class="card-title">特記事項</div>
+      <div class="form-row" style="flex-direction:column;align-items:stretch">
+        <textarea id="remarks" placeholder="異常・気になる点・連絡事項などを入力"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- 外観点検 -->
+  <div class="sub-page" id="sub-visual">
+    <div id="entry-checks"></div>
+  </div>
+  <div id="edit-banner" style="display:none;background:#eafaf1;border:1px solid #1e8449;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <span id="edit-info" style="color:#1e5631;font-weight:bold">✎ 記録を編集中</span>
+      <button class="btn btn-secondary btn-sm" onclick="cancelEdit()">キャンセル</button>
+    </div>
+  </div>
+  <div id="draft-banner" style="display:none;background:#fef9e7;border:1px solid #d4ac0d;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <span id="draft-info" style="color:#7d6608"></span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-warning btn-sm" onclick="restoreDraft()">下書きを読み込む</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearDraft()">削除</button>
+      </div>
+    </div>
+  </div>
+  <div id="autosave-indicator" style="text-align:right;font-size:11px;color:var(--muted);margin-top:6px;min-height:16px"></div>
+  <button class="btn btn-success" onclick="saveRecord()">保存する</button>
+  <button class="btn btn-primary" style="margin-top:8px" onclick="previewPrint()">この内容をPDF出力</button>
+  <div style="height:20px"></div>
+</div>
+
+<!-- 履歴 -->
+<div class="page" id="page-history">
+  <div style="margin-top:12px">
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="exportData()">JSONエクスポート</button>
+      <button class="btn btn-warning btn-sm" onclick="document.getElementById('importFile').click()">JSONインポート</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="annual-year" placeholder="例: 2026" maxlength="4" style="width:90px;flex:none;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:16px;font-family:inherit">
+      <button class="btn btn-primary btn-sm" onclick="showAnnualReport()">年間報告書を作成</button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search-month" placeholder="例: 2026-03" maxlength="7" onchange="renderHistory()" style="width:120px;flex:none">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('search-month').value='';renderHistory()">全て</button>
+    </div>
+    <div id="history-list"></div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div class="page" id="page-settings">
+  <div style="margin-top:12px">
+    <div class="card">
+      <div class="card-title">点検項目・計測値の編集</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">カテゴリ・点検項目・計測値フィールドを自由に追加・編集・削除できます。</p>
+      <button class="btn btn-primary btn-sm" onclick="addCategory()" style="margin-bottom:12px">＋ カテゴリを追加</button>
+    </div>
+    <div id="settings-categories"></div>
+    <div class="card" style="margin-top:4px">
+      <div class="card-title" style="font-size:14px;margin-bottom:8px">設定の共有</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">設定（点検項目・計測値フィールド）をファイルに保存して、他の端末に引き継げます。</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="exportConfig()">設定をエクスポート</button>
+        <button class="btn btn-warning btn-sm" onclick="document.getElementById('configImportFile').click()">設定をインポート</button>
+        <input type="file" id="configImportFile" accept=".json" style="display:none" onchange="importConfigFile(event)">
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="saveAsDefault()">現在の設定をデフォルトとして保存</button>
+      <button class="btn btn-danger btn-sm" onclick="resetConfig()" style="margin-top:6px">設定をデフォルトに戻す</button>
+    </div>
+  </div>
+</div>
+
+<!-- 詳細モーダル -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">点検記録詳細</span>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    <div id="print-actions" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="window.print()">PDF出力・印刷</button>
+      <button class="btn btn-warning btn-sm" id="repair-btn" onclick="showRepairDoc()">改修推奨資料</button>
+      <button class="btn btn-secondary btn-sm" id="all-eq-btn" onclick="printAllEquipment()" style="display:none">全設備印刷</button>
+      <button class="btn btn-success btn-sm" id="edit-rec-btn" onclick="editRecord(currentRecordId)">編集</button>
+      <button class="btn btn-danger btn-sm" id="delete-rec-btn" onclick="deleteRecord()">削除</button>
+    </div>
+    <div class="print-title" id="print-title"></div>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<script>
+// ===================== デフォルト設定 =====================
+const DEFAULT_CONFIG = [
+  { id:'general', title:'受電設備全般',
+    checks:[{key:'g_noise',label:'異常音'},{key:'g_smell',label:'異臭'},{key:'g_heat',label:'異常発熱'},{key:'g_color',label:'変色・焦げ'},{key:'g_damage',label:'損傷・汚損'}],
+    measurements:[] },
+  { id:'cable', title:'高圧ケーブル・母線',
+    checks:[{key:'c_damage',label:'損傷・断線の有無'},{key:'c_joint',label:'接続部の異常'},{key:'c_support',label:'支持物の異常'}],
+    measurements:[] },
+  { id:'ds', title:'断路器 (DS) / 負荷開閉器 (LBS)',
+    checks:[{key:'ds_disp',label:'動作表示の確認'},{key:'ds_cont',label:'接触部の異常'},{key:'ds_noise',label:'異常音・異臭'}],
+    measurements:[] },
+  { id:'vcb', title:'遮断器 (VCB / ACB)',
+    checks:[{key:'vcb_disp',label:'動作表示の確認'},{key:'vcb_cnt',label:'動作回数計の確認'},{key:'vcb_noise',label:'異常音・異臭'},{key:'vcb_dmg',label:'外観異常'}],
+    measurements:[] },
+  { id:'tr', title:'変圧器 (TR)',
+    checks:[{key:'tr_noise',label:'異常音・異臭'},{key:'tr_oil',label:'漏油の有無'},{key:'tr_color',label:'変色・過熱の有無'},{key:'tr_dmg',label:'外観異常'}],
+    measurements:[{key:'tr_v1',label:'一次電圧',unit:'V',phases:3},{key:'tr_v2',label:'二次電圧',unit:'V',phases:3},{key:'tr_i1',label:'一次電流',unit:'A',phases:3},{key:'tr_i2',label:'二次電流',unit:'A',phases:3},{key:'tr_ot',label:'油温',unit:'℃'}] },
+  { id:'sc', title:'高圧コンデンサ (SC)',
+    checks:[{key:'sc_noise',label:'異常音・異臭'},{key:'sc_bulge',label:'膨らみ・液漏れ'},{key:'sc_dmg',label:'外観異常'}],
+    measurements:[{key:'sc_i',label:'電流値',unit:'A',phases:3}] },
+  { id:'la', title:'避雷器 (LA) / 計器類',
+    checks:[{key:'la_dmg',label:'避雷器 外観異常'},{key:'la_meter',label:'計器類の指示確認'},{key:'la_relay',label:'保護継電器 動作表示'}],
+    measurements:[{key:'m_v',label:'電圧計',unit:'V',phases:3},{key:'m_i',label:'電流計',unit:'A',phases:3},{key:'m_kw',label:'電力計',unit:'kW'},{key:'m_pf',label:'力率',unit:''}] },
+  { id:'relay', title:'保護継電器',
+    checks:[{key:'ry_disp',label:'動作表示の確認'},{key:'ry_lamp',label:'表示灯の点灯確認'},{key:'ry_abn',label:'異常表示の有無'}],
+    measurements:[] },
+  { id:'lv', title:'低圧盤',
+    checks:[{key:'lv_brk',label:'ブレーカー状態確認'},{key:'lv_noise',label:'異常音・異臭'},{key:'lv_dmg',label:'外観異常'}],
+    measurements:[{key:'lv_v',label:'低圧電圧',unit:'V',phases:3},{key:'lv_i',label:'低圧電流',unit:'A',phases:3}] },
+  { id:'cubicle', title:'キュービクル・電気室',
+    checks:[{key:'cu_vent',label:'換気・通風状態'},{key:'cu_lock',label:'扉の施錠確認'},{key:'cu_water',label:'浸水・結露の有無'},{key:'cu_pest',label:'害虫・鳥獣侵入の有無'},{key:'cu_clean',label:'清掃状態'}],
+    measurements:[] },
+];
+
+const DEFAULT_CONFIG_BATTERY = [
+  { id:'bat_vis', title:'外観点検',
+    checks:[{key:'bv1',label:'外観異常・損傷'},{key:'bv2',label:'腐食・漏液の有無'},{key:'bv3',label:'端子の緩み・腐食'},{key:'bv4',label:'ラック・ケースの異常'},{key:'bv5',label:'配線の損傷・断線'}],
+    measurements:[] },
+  { id:'bat_elec', title:'電圧測定',
+    checks:[{key:'be1',label:'電圧異常の有無'}],
+    measurements:[{key:'bv_total',label:'全体電圧',unit:'V',phases:1},{key:'bv_cell',label:'セル電圧',unit:'V',phases:54,phasePrefix:'セル'}] },
+  { id:'bat_chg', title:'充放電状態',
+    checks:[{key:'bc1',label:'充電器の異常'},{key:'bc2',label:'表示灯の確認'},{key:'bc3',label:'充電状態(SOC)の確認'}],
+    measurements:[{key:'b_soc',label:'充電残量(SOC)',unit:'%',phases:1},{key:'b_i',label:'充電電流',unit:'A',phases:1}] },
+  { id:'bat_temp', title:'温度管理',
+    checks:[{key:'bt1',label:'異常発熱の有無'}],
+    measurements:[{key:'b_temp',label:'電池温度',unit:'℃',phases:1},{key:'b_room',label:'室温',unit:'℃',phases:1}] },
+  { id:'bat_safe', title:'安全装置',
+    checks:[{key:'bs1',label:'保護装置の動作確認'},{key:'bs2',label:'換気装置の動作確認'},{key:'bs3',label:'消火設備の確認'}],
+    measurements:[] },
+];
+
+const DEFAULT_CONFIG_GENERATOR = [
+  { id:'gen_vis', title:'外観点検',
+    checks:[{key:'gv1',label:'外観異常・損傷'},{key:'gv2',label:'燃料漏れの有無'},{key:'gv3',label:'冷却水漏れの有無'},{key:'gv4',label:'オイル漏れの有無'},{key:'gv5',label:'排気系統の異常'}],
+    measurements:[] },
+  { id:'gen_fuel', title:'燃料・潤滑・冷却',
+    checks:[{key:'gf1',label:'燃料量の確認'},{key:'gf2',label:'潤滑油量の確認'},{key:'gf3',label:'冷却水量の確認'}],
+    measurements:[{key:'g_fuel',label:'燃料残量',unit:'L',phases:1},{key:'g_cool',label:'冷却水温度',unit:'℃',phases:1}] },
+  { id:'gen_elec', title:'電気出力',
+    checks:[{key:'ge1',label:'出力電圧の正常確認'},{key:'ge2',label:'出力電流の正常確認'},{key:'ge3',label:'周波数の正常確認'}],
+    measurements:[{key:'g_v',label:'出力電圧',unit:'V',phases:3},{key:'g_i',label:'出力電流',unit:'A',phases:3},{key:'g_hz',label:'周波数',unit:'Hz',phases:1},{key:'g_kw',label:'出力電力',unit:'kW',phases:1}] },
+  { id:'gen_run', title:'運転状態',
+    checks:[{key:'gr1',label:'異常音・異臭'},{key:'gr2',label:'異常振動'},{key:'gr3',label:'排気の状態'},{key:'gr4',label:'回転数の確認'}],
+    measurements:[{key:'g_rpm',label:'回転数',unit:'rpm',phases:1}] },
+  { id:'gen_auto', title:'自動起動装置',
+    checks:[{key:'ga1',label:'自動起動装置の動作確認'},{key:'ga2',label:'起動バッテリーの確認'},{key:'ga3',label:'表示灯の確認'}],
+    measurements:[{key:'g_batv',label:'起動バッテリー電圧',unit:'V',phases:1}] },
+  { id:'gen_misc', title:'定期確認',
+    checks:[{key:'gm1',label:'試運転記録の確認'},{key:'gm2',label:'前回指摘事項の改善確認'}],
+    measurements:[] },
+];
+
+const EQ_DEFAULTS = { main: DEFAULT_CONFIG, battery: DEFAULT_CONFIG_BATTERY, generator: DEFAULT_CONFIG_GENERATOR };
+const EQ_NAMES    = { main:'高圧受電設備', battery:'蓄電池', generator:'発電機' };
+
+const SL = { good:'良好', caution:'要注意', repair:'要修理', na:'N/A' };
+
+// ===================== 設定 =====================
+let activeEquipment = 'main';
+
+// draftKey のみ localStorage を使う（下書きは一時データ）。記録・設定は下記 SERVER 経由でD1に保存。
+function draftKey(){ return activeEquipment==='main' ? 'inspection_draft'   : `inspection_draft_${activeEquipment}`; }
+
+// ===================== サーバー同期（degitaldx / D1）=====================
+// 記録・設定は localStorage ではなく D1（/api/electrical-*）に保存し、チーム共有・監査ログ・
+// 端末紛失に強くする。元アプリは同期前提のため、起動時に全データをメモリキャッシュ SERVER へ
+// 読み込み、getRecords()/getConfig() はキャッシュを同期的に返す。書き込み（保存/削除/設定）は
+// キャッシュ更新＋APIへ write-through。下書き(draft)は一時データのため localStorage のまま。
+const SERVER = {
+  records:  { main:{}, battery:{}, generator:{} },
+  config:   { main:null, battery:null, generator:null },
+  defaults: { main:null, battery:null, generator:null },
+  user: null, canEditConfig: false, online: true,
+};
+const MIRROR_KEY = 'elec_server_mirror'; // オフライン読み取り用のローカルミラー
+
+async function api(path, opts) {
+  const res = await fetch('/api' + path, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    ...(opts || {}),
+  });
+  if (!res.ok) {
+    let msg = '通信エラー';
+    try { const j = await res.json(); if (j && j.error && j.error.message) msg = j.error.message; } catch(e) {}
+    const err = new Error(msg); err.status = res.status; throw err;
+  }
+  return res.json();
+}
+
+function toast(msg) {
+  let t = document.getElementById('elec-toast');
+  if (!t) { t = document.createElement('div'); t.id = 'elec-toast';
+    t.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#c0392b;color:#fff;padding:10px 16px;border-radius:8px;font-size:15px;z-index:2000;box-shadow:0 2px 8px rgba(0,0,0,.3);max-width:90%';
+    document.body.appendChild(t); }
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.style.display = 'none'; }, 5000);
+}
+
+function saveMirror() {
+  try { localStorage.setItem(MIRROR_KEY, JSON.stringify({ records: SERVER.records, config: SERVER.config, defaults: SERVER.defaults })); } catch(e) {}
+}
+function loadMirror() {
+  try { const m = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null');
+    if (m) { SERVER.records = m.records || SERVER.records; SERVER.config = m.config || SERVER.config; SERVER.defaults = m.defaults || SERVER.defaults; } } catch(e) {}
+}
+
+async function loadServerData() {
+  try { const me = await api('/me'); SERVER.user = (me && me.user) || null; SERVER.canEditConfig = !!(me && me.user && me.user.role === 'admin'); } catch(e) {}
+  try {
+    const rr = await api('/electrical-inspections');
+    const buckets = { main:{}, battery:{}, generator:{} };
+    const records = rr && rr.records ? rr.records : {};
+    for (const id in records) { const rec = records[id]; const t = (rec && rec.equipmentType) || 'main'; if (buckets[t]) buckets[t][id] = rec; }
+    SERVER.records = buckets;
+    const cfg = await api('/electrical-config');
+    ['main','battery','generator'].forEach(t => {
+      SERVER.config[t]  = (cfg && cfg[t]) || null;
+      SERVER.defaults[t] = (cfg && cfg.defaults && cfg.defaults[t]) || null;
+    });
+    SERVER.online = true;
+    saveMirror();
+  } catch(e) {
+    SERVER.online = false;
+    loadMirror();
+    toast('オフラインのため保存済みデータ（この端末のキャッシュ）を表示しています');
+  }
+}
+
+// 記録: キャッシュ更新＋POST（client_id で冪等 upsert）
+async function pushRecord(rec) {
+  const t = rec.equipmentType || activeEquipment;
+  if (SERVER.records[t]) SERVER.records[t][rec.id] = rec;
+  saveMirror();
+  await api('/electrical-inspections', { method:'POST', body: JSON.stringify(rec) });
+}
+// 記録: キャッシュ更新＋論理削除DELETE
+async function removeRecord(id, eqType) {
+  const t = eqType || activeEquipment;
+  if (SERVER.records[t]) delete SERVER.records[t][id];
+  saveMirror();
+  await api('/electrical-inspections/' + encodeURIComponent(id), { method:'DELETE' });
+}
+// 設定: キャッシュは常に更新、サーバー保存は admin のみ（config を PUT）
+function pushConfig(eqType, cfg) {
+  SERVER.config[eqType] = cfg;
+  saveMirror();
+  if (SERVER.canEditConfig) {
+    api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, config: cfg }) })
+      .catch(e => toast('設定をサーバーに保存できませんでした: ' + e.message));
+  }
+}
+function pushDefault(eqType, cfg) {
+  SERVER.defaults[eqType] = cfg;
+  saveMirror();
+  if (SERVER.canEditConfig) {
+    api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, default: cfg }) })
+      .catch(e => toast('既定をサーバーに保存できませんでした: ' + e.message));
+  }
+}
+
+function getConfig() {
+  const c = SERVER.config[activeEquipment];
+  if (c) return JSON.parse(JSON.stringify(c));
+  return JSON.parse(JSON.stringify(EQ_DEFAULTS[activeEquipment] || DEFAULT_CONFIG));
+}
+function saveConfig(cfg) { pushConfig(activeEquipment, cfg); }
+
+function switchEquipment(eq) {
+  activeEquipment = eq;
+  document.querySelectorAll('.eq-btn').forEach((b,i) => b.classList.toggle('active', ['main','battery','generator'][i]===eq));
+  document.getElementById('main-title').textContent = EQ_NAMES[eq] + ' 日常点検記録';
+  currentStatuses = {};
+  buildEntryForm();
+  checkDraftOnLoad();
+  renderHistory();
+  if (document.getElementById('page-settings').classList.contains('active')) renderSettingsPage();
+}
+
+// ===================== 初期化 =====================
+let currentStatuses = {};
+let currentRecordId = null;
+let currentPreviewData = null;
+let editingRecordId = null;
+let _modalScrollY = 0;
+let draftTimer = null;
+
+// スクリプトはbody末尾にあるのでDOMは構築済み。
+// iOS WebView/QuickLook等でreadyState判定が信頼できないため
+// 即時実行とDOMContentLoadedの両方で_init()を呼ぶ
+let _initialized = false;
+async function _init() {
+  if (_initialized) return;
+  _initialized = true;
+  try {
+    document.getElementById('date').value = new Date().toISOString().slice(0,10);
+    await loadServerData();                 // D1 から記録・設定・ユーザーを読み込む
+    var insp = document.getElementById('inspector');
+    if (insp && !insp.value && SERVER.user && SERVER.user.name) insp.value = SERVER.user.name; // 点検者名の既定
+    var st = document.getElementById('tab-settings');
+    if (st && !SERVER.canEditConfig) st.style.display = 'none'; // 設定タブは管理者のみ
+    buildEntryForm();
+    checkDraftOnLoad();
+    renderHistory();
+    renderSettingsPage();
+    var pe = document.getElementById('page-entry');
+    if (pe) {
+      pe.addEventListener('input', scheduleDraftSave);
+      pe.addEventListener('change', scheduleDraftSave);
+    }
+  } catch(e) {
+    var errEl = document.getElementById('entry-measurements');
+    if (errEl) errEl.innerHTML = '<div style="color:#c0392b;padding:16px;background:#fdedec;border-radius:8px;margin:12px 0">初期化エラー: ' + String(e) + '<br><small>このエラー内容を開発者に連絡してください</small></div>';
+  }
+}
+document.addEventListener('DOMContentLoaded', _init);
+_init();
+
+// ===================== 下書き =====================
+function checkDraftOnLoad() {
+  const draft = getDraft();
+  if (!draft) return;
+  const banner = document.getElementById('draft-banner');
+  const info = document.getElementById('draft-info');
+  const t = draft.savedAt ? new Date(draft.savedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+  info.textContent = `下書きあり：${fmtDate(draft.date||'')} ${draft.inspector||''} （${t}保存）`;
+  banner.style.display = 'block';
+}
+
+function getDraft() {
+  try { return JSON.parse(localStorage.getItem(draftKey())); } catch(e) { return null; }
+}
+
+function saveDraft() {
+  const data = collectForm();
+  data.savedAt = new Date().toISOString();
+  try { localStorage.setItem(draftKey(), JSON.stringify(data)); } catch(e) { return; }
+  const ind = document.getElementById('autosave-indicator');
+  const t = new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+  ind.textContent = `下書き自動保存済 ${t}`;
+}
+
+function loadDataIntoForm(data) {
+  if (data.date)      document.getElementById('date').value      = data.date;
+  if (data.inspector) document.getElementById('inspector').value = data.inspector;
+  if (data.facility)  document.getElementById('facility').value  = data.facility;
+  if (data.weather) {
+    const sel = document.getElementById('weather');
+    [...sel.options].forEach(o => { if (o.value===data.weather) sel.value=data.weather; });
+  }
+  if (data.room_temp !== undefined && data.room_temp !== '') document.getElementById('room_temp').value = data.room_temp;
+  if (data.humidity  !== undefined && data.humidity  !== '') document.getElementById('humidity').value  = data.humidity;
+  if (data.remarks)   document.getElementById('remarks').value   = data.remarks;
+  if (data.statuses) {
+    Object.entries(data.statuses).forEach(([key, val]) => {
+      currentStatuses[key] = val;
+      document.querySelectorAll('.status-group').forEach(grp => {
+        const btn = grp.querySelector(`[onclick*="'${key}'"][onclick*="'${val}'"]`);
+        if (btn) {
+          grp.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      });
+    });
+  }
+  if (data.measurements) {
+    Object.entries(data.measurements).forEach(([key, val]) => {
+      if (Array.isArray(val)) {
+        val.forEach((v, i) => {
+          const el = document.getElementById(`m_${key}_${i}`);
+          if (el && v !== '') el.value = v;
+        });
+      } else {
+        const el = document.getElementById('m_'+key);
+        if (el) el.value = val;
+      }
+    });
+  }
+  if (data.categoryRemarks) {
+    Object.entries(data.categoryRemarks).forEach(([catId, val]) => {
+      const el = document.getElementById('cat-rem-'+catId);
+      if (el && val) el.value = val;
+    });
+  }
+}
+
+function restoreDraft() {
+  const draft = getDraft();
+  if (!draft) return;
+  loadDataIntoForm(draft);
+  document.getElementById('draft-banner').style.display = 'none';
+  document.getElementById('autosave-indicator').textContent = '下書きを読み込みました';
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(draftKey()); } catch(e) {}
+  document.getElementById('draft-banner').style.display = 'none';
+  document.getElementById('autosave-indicator').textContent = '下書きを削除しました';
+}
+
+function scheduleDraftSave() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraft, 5000);
+}
+
+// ===================== 入力フォーム生成 =====================
+function buildEntryForm() {
+  currentStatuses = {};
+  const cfg = getConfig();
+  const measCont  = document.getElementById('entry-measurements');
+  const checkCont = document.getElementById('entry-checks');
+  if (!measCont || !checkCont) return;
+  measCont.innerHTML  = '';
+  checkCont.innerHTML = '';
+
+  // 前回データ取得
+  const lastRec  = Object.values(getRecords()).sort((a,b) => (b.date||'').localeCompare(a.date||''))[0] || null;
+  const prevMs   = lastRec ? (lastRec.measurements   || {}) : {};
+  const prevSt   = lastRec ? (lastRec.statuses        || {}) : {};
+  const prevCr   = lastRec ? (lastRec.categoryRemarks || {}) : {};
+  const prevDate = lastRec ? `(${lastRec.date.slice(5).replace('-','/')})` : '';
+
+  // 基本情報カードの前回値
+  ['room_temp','humidity'].forEach(field => {
+    const el = document.getElementById(`prev-${field}`);
+    if (!el) return;
+    const unit = field === 'room_temp' ? '℃' : '%';
+    const v = lastRec && lastRec[field] !== '' && lastRec[field] !== undefined && lastRec[field] !== null;
+    el.textContent = v ? `前回${prevDate}: ${lastRec[field]} ${unit}` : '';
+  });
+
+  cfg.forEach(cat => {
+    // --- 計測データ カード ---
+    if (cat.measurements.length > 0) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `<div class="card-title">${esc(cat.title)}</div>`;
+      cat.measurements.forEach(m => {
+        const phases = m.phases || 1;
+        const phaseLabels = getPhaseLabels(phases, m.phasePrefix);
+        const row = document.createElement('div');
+        row.className = 'form-row';
+        if (!phaseLabels) {
+          const pv = prevMs[m.key];
+          const prevHtml = (pv !== undefined && pv !== '')
+            ? `<div class="prev-val">前回${prevDate}: ${pv} ${esc(m.unit)}</div>` : '';
+          row.style.flexWrap = 'wrap';
+          row.innerHTML = `<label>${esc(m.label)}</label>
+            <input type="number" inputmode="decimal" id="m_${m.key}" placeholder="—" step="any" style="max-width:110px">
+            <span class="unit">${esc(m.unit)}</span>
+            ${prevHtml}`;
+        } else if (phases >= 5) {
+          const pvArr = prevMs[m.key];
+          const cells = phaseLabels.map((lbl, i) => {
+            const pv = Array.isArray(pvArr) ? pvArr[i] : undefined;
+            const prevCell = (pv !== undefined && pv !== '')
+              ? `<span style="font-size:10px;color:#aaa">前:${pv}</span>` : '';
+            return `<div class="meas-cell">
+               <span class="meas-lbl">${lbl}</span>
+               <input type="number" inputmode="decimal" id="m_${m.key}_${i}" placeholder="—" step="any">
+               <span class="meas-unit">${esc(m.unit)}</span>
+               ${prevCell}
+             </div>`;
+          }).join('');
+          row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
+            <div class="meas-grid">${cells}</div>`;
+          row.style.flexWrap = 'wrap';
+        } else {
+          const inputs = phaseLabels.map((lbl, i) =>
+            `<span style="font-size:12px;color:var(--muted);white-space:nowrap">${lbl}:
+             <input type="number" inputmode="decimal" id="m_${m.key}_${i}" placeholder="—" step="any" style="max-width:80px;display:inline-block">
+             ${esc(m.unit)}</span>`
+          ).join(' ');
+          const pv = prevMs[m.key];
+          const prevText = pv
+            ? (Array.isArray(pv)
+                ? phaseLabels.map((lbl,i) => (pv[i]!==undefined && pv[i]!=='') ? `${lbl}:${pv[i]}${esc(m.unit)}` : '').filter(Boolean).join('　')
+                : `${pv} ${esc(m.unit)}`)
+            : '';
+          const prevHtml = prevText ? `<div class="prev-val">前回${prevDate}: ${prevText}</div>` : '';
+          row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${inputs}</div>
+            ${prevHtml}`;
+          row.style.flexWrap = 'wrap';
+        }
+        card.appendChild(row);
+      });
+      measCont.appendChild(card);
+    }
+
+    // --- 外観点検 カード ---
+    if (cat.checks.length > 0) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `<div class="card-title">${esc(cat.title)}</div>`;
+      cat.checks.forEach(item => {
+        currentStatuses[item.key] = currentStatuses[item.key] || 'good';
+        const ps = prevSt[item.key];
+        const prevHtml = ps ? `<div class="prev-val">前回${prevDate}: ${SL[ps]||ps}</div>` : '';
+        const row = document.createElement('div');
+        row.className = 'form-row';
+        row.style.cssText = 'flex-direction:column;align-items:stretch;gap:4px';
+        row.innerHTML = `<label style="font-size:13px;color:var(--text)">${esc(item.label)}</label>
+          <div class="status-group">
+            <div class="status-btn good active" onclick="setSt('${item.key}','good',this)">良好</div>
+            <div class="status-btn caution"     onclick="setSt('${item.key}','caution',this)">要注意</div>
+            <div class="status-btn repair"      onclick="setSt('${item.key}','repair',this)">要修理</div>
+          </div>
+          ${prevHtml}`;
+        card.appendChild(row);
+      });
+      // カテゴリ備考
+      const pr = prevCr[cat.id];
+      const prevRemHtml = pr ? `<div class="prev-val" style="margin-top:4px">前回備考: ${esc(pr)}</div>` : '';
+      const remRow = document.createElement('div');
+      remRow.style.cssText = 'margin-top:8px';
+      remRow.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:4px">備考</div>
+        <textarea id="cat-rem-${cat.id}" placeholder="このカテゴリの気になる点・メモ"
+          style="width:100%;min-height:52px;resize:vertical;border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:16px;font-family:inherit;background:#fafafa"></textarea>
+        ${prevRemHtml}`;
+      card.appendChild(remRow);
+      checkCont.appendChild(card);
+    }
+  });
+
+}
+
+function setSt(key, val, el) {
+  currentStatuses[key] = val;
+  el.closest('.status-group').querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  scheduleDraftSave();
+}
+
+// ===================== サブタブ =====================
+function showSubTab(name) {
+  document.querySelectorAll('.sub-tab').forEach((t,i) => t.classList.toggle('active', ['measure','visual'][i]===name));
+  document.querySelectorAll('.sub-page').forEach(p => p.classList.remove('active'));
+  document.getElementById('sub-'+name).classList.add('active');
+}
+
+// ===================== タブ =====================
+function showTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['entry','history','settings'][i]===tab));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+tab).classList.add('active');
+  if (tab==='history') renderHistory();
+  if (tab==='settings') renderSettingsPage();
+}
+
+// ===================== 保存 =====================
+async function saveRecord() {
+  const data = collectForm();
+  if (!data.date)      { alert('点検日を入力してください'); return; }
+  if (!data.inspector) { alert('点検者名を入力してください'); return; }
+  const recs = getRecords();
+  let rec;
+  if (editingRecordId && recs[editingRecordId]) {
+    rec = { ...recs[editingRecordId], ...data, savedAt: new Date().toISOString() };
+    recs[editingRecordId] = rec;
+    editingRecordId = null;
+    document.getElementById('edit-banner').style.display = 'none';
+  } else {
+    const id = Date.now().toString();
+    rec = { id, equipmentType: activeEquipment, ...data, savedAt: new Date().toISOString() };
+    recs[id] = rec;
+  }
+  try {
+    await pushRecord(rec);
+  } catch(e) {
+    alert('サーバーへ保存できませんでした（通信環境を確認してください）：' + e.message);
+    return;
+  }
+  clearDraft();
+  alert('保存しました');
+  renderHistory();
+}
+
+function editRecord(id) {
+  if (!id) return;
+  const r = getRecords()[id];
+  if (!r) return;
+  closeModal();
+  // 設備タイプが違う場合は切り替え
+  if (r.equipmentType && r.equipmentType !== activeEquipment) {
+    switchEquipment(r.equipmentType);
+  }
+  showTab('entry');
+  editingRecordId = id;
+  loadDataIntoForm(r);
+  document.getElementById('edit-banner').style.display = 'block';
+  document.getElementById('edit-info').textContent = `✎ 編集中：${fmtDate(r.date)}　${r.inspector||''}`;
+  document.getElementById('draft-banner').style.display = 'none';
+  window.scrollTo(0, 0);
+}
+
+function cancelEdit() {
+  editingRecordId = null;
+  document.getElementById('edit-banner').style.display = 'none';
+}
+
+function collectForm() {
+  const cfg = getConfig();
+  const measurements = {};
+  cfg.forEach(cat => cat.measurements.forEach(m => {
+    const phases = m.phases || 1;
+    if (phases === 1) {
+      const el = document.getElementById('m_'+m.key);
+      if (el && el.value !== '') measurements[m.key] = el.value;
+    } else {
+      const vals = Array.from({length: phases}, (_, i) => {
+        const el = document.getElementById(`m_${m.key}_${i}`);
+        return el ? el.value : '';
+      });
+      if (vals.some(v => v !== '')) measurements[m.key] = vals;
+    }
+  }));
+  return {
+    date: document.getElementById('date').value,
+    inspector: document.getElementById('inspector').value,
+    facility: document.getElementById('facility').value,
+    weather: document.getElementById('weather').value,
+    room_temp: document.getElementById('room_temp').value,
+    humidity: document.getElementById('humidity').value,
+    statuses: {...currentStatuses},
+    measurements,
+    categoryRemarks: Object.fromEntries(cfg.map(cat => {
+      const el = document.getElementById('cat-rem-'+cat.id);
+      return [cat.id, el ? el.value : ''];
+    })),
+    remarks: document.getElementById('remarks').value,
+    config: JSON.parse(JSON.stringify(cfg)),
+  };
+}
+
+function getRecords() {
+  return SERVER.records[activeEquipment] || {};
+}
+
+// ===================== 履歴 =====================
+function renderHistory() {
+  const recs = getRecords();
+  const list = document.getElementById('history-list');
+  const fm = document.getElementById('search-month').value;
+  let sorted = Object.values(recs).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  if (fm) sorted = sorted.filter(r => r.date.startsWith(fm));
+  if (!sorted.length) { list.innerHTML = '<div class="no-records">点検記録がありません</div>'; return; }
+  list.innerHTML = sorted.map(r => {
+    const st = r.statuses || {};
+    const ca = Object.values(st).filter(v=>v==='caution').length;
+    const re = Object.values(st).filter(v=>v==='repair').length;
+    const badges = [
+      re ? `<span class="badge badge-repair">要修理 ${re}件</span>` : '',
+      ca ? `<span class="badge badge-caution">要注意 ${ca}件</span>` : '',
+      (!re && !ca) ? '<span class="badge badge-good">異常なし</span>' : '',
+    ].join('');
+    return `<div class="history-item" onclick="openRecord('${r.id}')">
+      <div class="history-date">${fmtDate(r.date)}</div>
+      <div class="history-meta">${r.inspector||'—'} / ${r.facility||'—'} / ${r.weather||'—'}</div>
+      <div class="history-badges">${badges}</div>
+    </div>`;
+  }).join('');
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  const [y,m,day] = d.split('-');
+  return `${y}年${+m}月${+day}日`;
+}
+
+// ===================== 詳細モーダル =====================
+function openRecord(id) {
+  const r = getRecords()[id];
+  if (!r) return;
+  currentRecordId = id;
+  currentPreviewData = null;
+  document.getElementById('modal-title').textContent = `点検記録 ${fmtDate(r.date)}`;
+  document.getElementById('print-title').textContent = `${EQ_NAMES[r.equipmentType]||EQ_NAMES[activeEquipment]||EQ_NAMES.main} 日常点検記録　${fmtDate(r.date)}`;
+  document.getElementById('modal-content').innerHTML = buildRecordHTML(r);
+  document.getElementById('repair-btn').textContent = '改修推奨資料';
+  document.getElementById('repair-btn').onclick = showRepairDoc;
+  showDeleteBtn(true);
+  document.getElementById('all-eq-btn').style.display = hasOtherEquipRec(r.date) ? '' : 'none';
+  _modalScrollY = window.scrollY;
+  document.body.style.top = `-${_modalScrollY}px`;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+}
+// ===================== 年間報告書 =====================
+function showAnnualReport() {
+  const yearVal = document.getElementById('annual-year').value.trim();
+  const year = yearVal || String(new Date().getFullYear());
+  if (!/^\d{4}$/.test(year)) { alert('年を4桁で入力してください（例: 2026）'); return; }
+  const recs = Object.values(getRecords())
+    .filter(r => r.date && r.date.startsWith(year))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (!recs.length) { alert(`${year}年の記録がありません`); return; }
+  currentRecordId = null;
+  currentPreviewData = null;
+  document.getElementById('modal-title').textContent = `${EQ_NAMES[activeEquipment]} ${year}年 年間点検集計報告書`;
+  document.getElementById('print-title').textContent = `${EQ_NAMES[activeEquipment]} 年間点検集計報告書　${year}年`;
+  document.getElementById('modal-content').innerHTML = buildAnnualHTML(recs, year);
+  document.getElementById('repair-btn').style.display = 'none';
+  document.getElementById('edit-rec-btn').style.display = 'none';
+  showDeleteBtn(false);
+  document.getElementById('all-eq-btn').style.display = 'none';
+  _modalScrollY = window.scrollY;
+  document.body.style.top = `-${_modalScrollY}px`;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+}
+
+function buildAnnualHTML(recs, year) {
+  const cfg = getConfig();
+  const TH = s => `<th style="padding:5px 7px;border:1px solid #ccc;background:#d6eaf8;white-space:nowrap;text-align:center">${s}</th>`;
+  const TD = (s, style) => `<td style="padding:4px 7px;border:1px solid #ccc${style ? ';' + style : ''}">${s != null && s !== '' ? s : '—'}</td>`;
+
+  // 集計
+  let totalCaution = 0, totalRepair = 0;
+  recs.forEach(r => {
+    Object.values(r.statuses || {}).forEach(v => {
+      if (v === 'caution') totalCaution++;
+      else if (v === 'repair') totalRepair++;
+    });
+  });
+  const facility = (recs[0] && recs[0].facility) || '—';
+
+  // ---- 月別点検実績 ----
+  let monthRows = '';
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, '0');
+    const mRecs = recs.filter(r => r.date.slice(5, 7) === mm);
+    if (!mRecs.length) {
+      monthRows += `<tr>${TD(m + '月', 'text-align:center')}${TD('点検なし', 'color:#aaa;text-align:center')}${TD('', '')}${TD('—', 'text-align:center')}${TD('—', 'text-align:center')}</tr>`;
+    } else {
+      mRecs.forEach((r, ri) => {
+        const st = r.statuses || {};
+        const ca = Object.values(st).filter(v => v === 'caution').length;
+        const re = Object.values(st).filter(v => v === 'repair').length;
+        monthRows += `<tr>
+          ${ri === 0 ? `<td rowspan="${mRecs.length}" style="padding:4px 7px;border:1px solid #ccc;text-align:center;vertical-align:middle">${m}月</td>` : ''}
+          ${TD(fmtDate(r.date))}${TD(esc(r.inspector || '—'))}
+          ${TD(ca > 0 ? ca + '件' : '—', ca > 0 ? 'color:#d4ac0d;text-align:center' : 'text-align:center')}
+          ${TD(re > 0 ? re + '件' : '—', re > 0 ? 'color:#c0392b;text-align:center' : 'text-align:center')}
+        </tr>`;
+      });
+    }
+  }
+
+  // ---- 点検項目別年間集計 ----
+  let checkRows = '';
+  cfg.forEach(cat => {
+    const rows = [];
+    cat.checks.forEach(item => {
+      let good = 0, caution = 0, repair = 0;
+      recs.forEach(r => {
+        const v = (r.statuses || {})[item.key];
+        if (v === 'good') good++;
+        else if (v === 'caution') caution++;
+        else if (v === 'repair') repair++;
+      });
+      if (good + caution + repair === 0) return;
+      rows.push(`<tr>
+        ${TD(esc(item.label))}
+        ${TD(good, 'color:#1e8449;text-align:center')}
+        ${TD(caution || '—', caution > 0 ? 'color:#d4ac0d;text-align:center;font-weight:bold' : 'text-align:center')}
+        ${TD(repair || '—', repair > 0 ? 'color:#c0392b;text-align:center;font-weight:bold' : 'text-align:center')}
+      </tr>`);
+    });
+    if (rows.length) {
+      checkRows += `<tr><td colspan="4" style="padding:4px 7px;border:1px solid #ccc;background:#eaf4fb;font-weight:bold;font-size:12px">${esc(cat.title)}</td></tr>`;
+      checkRows += rows.join('');
+    }
+  });
+
+  // ---- 測定値月別推移 ----
+  const mnums = Array.from({ length: 12 }, (_, i) => i + 1);
+  let measRows = '';
+  cfg.forEach(cat => {
+    cat.measurements.forEach(m => {
+      const pl = getPhaseLabels(m.phases || 1, m.phasePrefix);
+      if (!pl) {
+        let row = `<tr>${TD(esc(m.label))}${TD(esc(m.unit), 'text-align:center')}`;
+        mnums.forEach(mo => {
+          const rec = recs.find(r => r.date.slice(5, 7) === String(mo).padStart(2, '0'));
+          const val = rec ? ((rec.measurements || {})[m.key] || '') : '';
+          row += TD(val, 'text-align:center');
+        });
+        measRows += row + '</tr>';
+      } else {
+        pl.forEach((lbl, i) => {
+          let row = `<tr>${TD(esc(m.label) + ' ' + lbl)}${TD(esc(m.unit), 'text-align:center')}`;
+          mnums.forEach(mo => {
+            const rec = recs.find(r => r.date.slice(5, 7) === String(mo).padStart(2, '0'));
+            const vals = rec ? ((rec.measurements || {})[m.key] || []) : [];
+            const val = Array.isArray(vals) ? (vals[i] || '') : '';
+            row += TD(val, 'text-align:center');
+          });
+          measRows += row + '</tr>';
+        });
+      }
+    });
+  });
+
+  const mhdr = mnums.map(i => TH(i + '月')).join('');
+  const sec = t => `<div style="font-weight:bold;font-size:13px;color:#1a5276;border-left:3px solid #1a5276;padding-left:8px;margin:14px 0 6px">${t}</div>`;
+
+  let html = `<div style="font-size:12px;color:#555;padding:8px 10px;background:#f4f6f7;border-radius:6px;margin-bottom:10px;line-height:1.8">
+    設備：<b>${EQ_NAMES[activeEquipment]}</b>　設備名称：<b>${esc(facility)}</b>　年度：<b>${year}年</b><br>
+    点検回数：<b>${recs.length}回</b>　要注意累計：<b style="color:#d4ac0d">${totalCaution}件</b>　要修理累計：<b style="color:#c0392b">${totalRepair}件</b>
+  </div>`;
+
+  html += sec('月別点検実績');
+  html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px">
+    <thead><tr>${TH('月')}${TH('点検日')}${TH('点検者')}${TH('要注意')}${TH('要修理')}</tr></thead>
+    <tbody>${monthRows}</tbody>
+  </table>`;
+
+  if (checkRows) {
+    html += sec('点検項目別 年間集計');
+    html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px">
+      <thead><tr>${TH('点検項目')}${TH('良好')}${TH('要注意')}${TH('要修理')}</tr></thead>
+      <tbody>${checkRows}</tbody>
+    </table>`;
+  }
+
+  if (measRows) {
+    html += sec('測定値 月別推移');
+    html += `<div style="overflow-x:auto;margin-bottom:4px">
+      <table style="border-collapse:collapse;font-size:11px;white-space:nowrap">
+        <thead><tr>${TH('測定項目')}${TH('単位')}${mhdr}</tr></thead>
+        <tbody>${measRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  html += `<div style="font-size:11px;color:#aaa;text-align:right;margin-top:10px">作成日時：${new Date().toLocaleString('ja-JP')}</div>`;
+  return html;
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('active');
+  document.body.classList.remove('modal-open');
+  document.body.style.top = '';
+  window.scrollTo(0, _modalScrollY);
+  currentRecordId = null;
+  currentPreviewData = null;
+  showDeleteBtn(true);
+  const rb = document.getElementById('repair-btn');
+  rb.style.display = '';
+  rb.textContent = '改修推奨資料';
+  rb.onclick = showRepairDoc;
+  document.getElementById('edit-rec-btn').style.display = '';
+  document.getElementById('all-eq-btn').style.display = 'none';
+}
+
+function buildRecordHTML(r) {
+  const cfg = r.config || getConfig();
+  const st = r.statuses || {};
+  const ms = r.measurements || {};
+  const td = (v,w) => `<td style="padding:5px 7px;border:1px solid #ccc${w?';width:'+w:''}">${v}</td>`;
+  const th2 = t => `<tr><th colspan="2" style="padding:5px 7px;border:1px solid #ccc;background:#d6eaf8;text-align:left">${t}</th></tr>`;
+
+  let html = `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+    ${th2('基本情報')}
+    <tr>${td('点検日','40%')}${td(fmtDate(r.date))}</tr>
+    <tr>${td('点検者')}${td(r.inspector||'—')}</tr>
+    <tr>${td('設備名称')}${td(r.facility||'—')}</tr>
+    <tr>${td('天候')}${td(r.weather||'—')}</tr>
+    <tr>${td('室温')}${td((r.room_temp||'—')+' ℃')}</tr>
+    <tr>${td('湿度')}${td((r.humidity||'—')+' %')}</tr>
+  </table>`;
+
+  // 点検結果
+  html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+    ${th2('点検結果')}`;
+  const cr = r.categoryRemarks || {};
+  cfg.forEach(cat => {
+    html += `<tr><td colspan="2" style="padding:4px 7px;border:1px solid #ccc;background:#eaf4fb;font-weight:bold;font-size:12px">${esc(cat.title)}</td></tr>`;
+    cat.checks.forEach(item => {
+      const v = st[item.key] || 'good';
+      html += `<tr>${td(esc(item.label),'45%')}<td class="sc-${v}" style="padding:5px 7px;border:1px solid #ccc">${SL[v]||v}</td></tr>`;
+    });
+    if (cr[cat.id]) {
+      html += `<tr><td style="padding:4px 7px;border:1px solid #ccc;font-size:12px;color:#666" colspan="2">備考：${esc(cr[cat.id])}</td></tr>`;
+    }
+  });
+  html += '</table>';
+
+  // 計測値
+  const msRows = [];
+  cfg.forEach(cat => {
+    cat.measurements.forEach(m => {
+      const val = ms[m.key];
+      if (val === undefined || val === '') return;
+      if (Array.isArray(val)) {
+        const phases = m.phases || val.length;
+        const labels = getPhaseLabels(phases, m.phasePrefix) || val.map((_,i)=>`${i+1}`);
+        const display = val.map((v,i) => v!=='' ? `${labels[i]}: ${v} ${esc(m.unit)}` : '').filter(Boolean).join('　');
+        if (display) msRows.push(`<tr>${td(esc(m.label),'45%')}${td(display)}</tr>`);
+      } else {
+        msRows.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%')}${td(val+' '+esc(m.unit))}</tr>`);
+      }
+    });
+  });
+  if (msRows.length) {
+    html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
+      ${th2('計測値')}${msRows.join('')}</table>`;
+  }
+
+  html += `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px">
+    ${th2('特記事項')}
+    <tr><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap">${esc(r.remarks||'（なし）')}</td></tr>
+  </table>
+  <div style="margin-top:8px;font-size:11px;color:#aaa;text-align:right">保存日時：${r.savedAt ? new Date(r.savedAt).toLocaleString('ja-JP') : '—'}</div>`;
+  return html;
+}
+
+function previewPrint() {
+  const data = collectForm();
+  if (!data.date) { alert('点検日を入力してください'); return; }
+  data.id = 'preview'; data.savedAt = new Date().toISOString();
+  data.equipmentType = activeEquipment;
+  currentPreviewData = data;
+  currentRecordId = null;
+  document.getElementById('modal-title').textContent = `プレビュー ${fmtDate(data.date)}`;
+  document.getElementById('print-title').textContent = `${EQ_NAMES[activeEquipment]} 日常点検記録　${fmtDate(data.date)}`;
+  document.getElementById('modal-content').innerHTML = buildRecordHTML(data);
+  document.getElementById('repair-btn').textContent = '改修推奨資料';
+  document.getElementById('repair-btn').onclick = showRepairDoc;
+  showDeleteBtn(false);
+  document.getElementById('all-eq-btn').style.display = 'none';
+  _modalScrollY = window.scrollY;
+  document.body.style.top = `-${_modalScrollY}px`;
+  document.getElementById('modal').classList.add('active');
+  document.body.classList.add('modal-open');
+  setTimeout(() => window.print(), 300);
+}
+
+async function deleteRecord() {
+  if (!currentRecordId) return;
+  if (!confirm('この記録を削除しますか？')) return;
+  const rec = getRecords()[currentRecordId];
+  try {
+    await removeRecord(currentRecordId, rec && rec.equipmentType);
+  } catch(e) { alert('削除できませんでした：' + e.message); return; }
+  closeModal(); renderHistory();
+}
+
+// ===================== 改修推奨資料 =====================
+function showRepairDoc() {
+  const r = currentRecordId ? getRecords()[currentRecordId] : currentPreviewData;
+  if (!r) return;
+  const html = buildRepairHTML(r);
+  document.getElementById('print-title').textContent = `改修推奨資料　${fmtDate(r.date)}`;
+  document.getElementById('modal-title').textContent = `改修推奨資料 ${fmtDate(r.date)}`;
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('repair-btn').textContent = '← 点検記録';
+  document.getElementById('repair-btn').onclick = () => {
+    if (currentRecordId) {
+      openRecord(currentRecordId);
+    } else if (currentPreviewData) {
+      const d = currentPreviewData;
+      document.getElementById('print-title').textContent = `${EQ_NAMES[activeEquipment]} 日常点検記録　${fmtDate(d.date)}`;
+      document.getElementById('modal-title').textContent = `プレビュー ${fmtDate(d.date)}`;
+      document.getElementById('modal-content').innerHTML = buildRecordHTML(d);
+      document.getElementById('repair-btn').textContent = '改修推奨資料';
+      document.getElementById('repair-btn').onclick = showRepairDoc;
+      showDeleteBtn(false);
+    }
+  };
+}
+
+function buildRepairHTML(r) {
+  const cfg = r.config || getConfig();
+  const st = r.statuses || {};
+  const cr = r.categoryRemarks || {};
+  const td = (v,w,style) => `<td style="padding:5px 7px;border:1px solid #ccc${w?';width:'+w:''}${style?';'+style:''}">${v}</td>`;
+
+  const issues = [];
+  cfg.forEach(cat => {
+    cat.checks.forEach(item => {
+      const v = st[item.key];
+      if (v === 'caution' || v === 'repair') {
+        issues.push({ catTitle: cat.title, catId: cat.id, label: item.label, status: v });
+      }
+    });
+  });
+
+  if (!issues.length) {
+    return `<div style="text-align:center;padding:30px;color:var(--muted)">
+      要注意・要修理の項目はありません
+    </div>`;
+  }
+
+  const repairColor = { caution: '#d4ac0d', repair: '#c0392b' };
+  const repairBg    = { caution: '#fef9e7', repair: '#fdedec' };
+
+  let rows = issues.map((item, idx) => {
+    const rem = cr[item.catId] ? `<br><span style="font-size:11px;color:#666">備考：${esc(cr[item.catId])}</span>` : '';
+    return `<tr>
+      ${td(idx+1, '5%', 'text-align:center')}
+      ${td(esc(item.catTitle), '25%')}
+      ${td(esc(item.label))}
+      <td style="padding:5px 7px;border:1px solid #ccc;width:15%;font-weight:bold;color:${repairColor[item.status]};background:${repairBg[item.status]};text-align:center">${SL[item.status]}</td>
+      ${td(rem ? rem : '—')}
+    </tr>`;
+  }).join('');
+
+  return `
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:10px">
+    <tr><td colspan="2" style="padding:4px 0;font-size:13px"><b>点検日：</b>${fmtDate(r.date)}</td>
+        <td colspan="3" style="padding:4px 0;font-size:13px"><b>設備：</b>${esc(r.facility||'—')}　<b>点検者：</b>${esc(r.inspector||'—')}</td></tr>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px">
+    <thead>
+      <tr style="background:#d6eaf8">
+        <th style="padding:6px 7px;border:1px solid #ccc;width:5%">No.</th>
+        <th style="padding:6px 7px;border:1px solid #ccc;width:25%">カテゴリ</th>
+        <th style="padding:6px 7px;border:1px solid #ccc">点検項目</th>
+        <th style="padding:6px 7px;border:1px solid #ccc;width:15%">判定</th>
+        <th style="padding:6px 7px;border:1px solid #ccc">備考・対応メモ</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <tr><th colspan="2" style="padding:6px 8px;border:1px solid #ccc;background:#d6eaf8;text-align:left">総合備考</th></tr>
+    <tr><td colspan="2" style="padding:8px;border:1px solid #ccc;min-height:60px;white-space:pre-wrap">${esc(r.remarks||'（なし）')}</td></tr>
+    <tr><th style="padding:6px 8px;border:1px solid #ccc;background:#d6eaf8;width:40%">確認者</th><td style="padding:8px;border:1px solid #ccc">&nbsp;</td></tr>
+    <tr><th style="padding:6px 8px;border:1px solid #ccc;background:#d6eaf8">対応期限</th><td style="padding:8px;border:1px solid #ccc">&nbsp;</td></tr>
+  </table>
+  <div style="margin-top:8px;font-size:11px;color:#aaa;text-align:right">要注意：${issues.filter(i=>i.status==='caution').length}件　要修理：${issues.filter(i=>i.status==='repair').length}件</div>`;
+}
+
+// ===================== エクスポート/インポート =====================
+function triggerDownload(blob, filename) {
+  // iOS Safari 15+: ファイル共有シートを使用
+  if (navigator.share && navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file] }).catch(() => {});
+      return;
+    }
+  }
+  // デスクトップ・Android: 通常ダウンロード
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+function exportData() {
+  const data = { records: getRecords(), config: getConfig(), exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  triggerDownload(blob, `点検記録_${new Date().toISOString().slice(0,10)}.json`);
+}
+
+function importData(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      let n = 0;
+      if (data.records) {
+        for (const id in data.records) {
+          const rec = data.records[id];
+          if (!rec || !rec.id) continue;
+          try { await pushRecord(rec); n++; } catch(err) { /* 個別失敗はスキップ */ }
+        }
+      }
+      if (data.config && SERVER.canEditConfig) pushConfig(activeEquipment, data.config);
+      alert(`インポート完了！\n記録：${n}件`);
+      renderHistory(); buildEntryForm(); renderSettingsPage();
+    } catch(err) { alert('ファイルの読み込みに失敗しました'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// ===================== 印刷ヘルパー =====================
+function showDeleteBtn(visible) {
+  const btn = document.getElementById('delete-rec-btn');
+  if (btn) btn.style.display = visible ? '' : 'none';
+}
+
+function hasOtherEquipRec(date) {
+  return ['main','battery','generator'].some(eq => {
+    if (eq === activeEquipment) return false;
+    return Object.values(SERVER.records[eq] || {}).some(r => r.date === date);
+  });
+}
+
+function printAllEquipment() {
+  const date = currentRecordId
+    ? (getRecords()[currentRecordId] || {}).date
+    : (currentPreviewData && currentPreviewData.date);
+  if (!date) return;
+  let html = '';
+  ['main','battery','generator'].forEach(eq => {
+    const rec = Object.values(SERVER.records[eq] || {}).find(r => r.date === date);
+    if (!rec) return;
+    if (html) html += `<div style="page-break-before:always"></div>`;
+    html += `<div style="font-size:18px;font-weight:bold;text-align:center;margin-bottom:10px">${EQ_NAMES[eq]} 日常点検記録　${fmtDate(date)}</div>`;
+    html += buildRecordHTML(rec);
+  });
+  if (!html) { alert('印刷できる記録がありません'); return; }
+  document.getElementById('print-title').textContent = '';
+  document.getElementById('modal-title').textContent = `全設備 ${fmtDate(date)}`;
+  document.getElementById('modal-content').innerHTML = html;
+  setTimeout(() => window.print(), 300);
+}
+
+function exportConfig() {
+  const data = {
+    main:      SERVER.config.main      || JSON.parse(JSON.stringify(DEFAULT_CONFIG)),
+    battery:   SERVER.config.battery   || JSON.parse(JSON.stringify(DEFAULT_CONFIG_BATTERY)),
+    generator: SERVER.config.generator || JSON.parse(JSON.stringify(DEFAULT_CONFIG_GENERATOR)),
+    defaults: {
+      main:      SERVER.defaults.main      || null,
+      battery:   SERVER.defaults.battery   || null,
+      generator: SERVER.defaults.generator || null,
+    },
+    exportedAt: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  triggerDownload(blob, `点検設定_${new Date().toISOString().slice(0,10)}.json`);
+}
+
+function importConfigFile(e) {
+  const file = e.target.files[0]; if (!file) return;
+  if (!SERVER.canEditConfig) { alert('設定のインポートは管理者のみ可能です'); e.target.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      ['main','battery','generator'].forEach(t => { if (data[t]) pushConfig(t, data[t]); });
+      if (data.defaults) ['main','battery','generator'].forEach(t => { if (data.defaults[t]) pushDefault(t, data.defaults[t]); });
+      alert('設定のインポートが完了しました');
+      renderSettingsPage(); buildEntryForm();
+    } catch(err) { alert('ファイルの読み込みに失敗しました'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// ===================== 設定画面 =====================
+function getOpenCats() {
+  const open = new Set();
+  document.querySelectorAll('.setting-cat-body').forEach((body, i) => {
+    if (body.classList.contains('open')) open.add(i);
+  });
+  return open;
+}
+
+function renderSettingsPage(openSet) {
+  const cfg = getConfig();
+  const openStates = openSet !== undefined ? openSet : getOpenCats();
+  const container = document.getElementById('settings-categories');
+  container.innerHTML = '';
+  cfg.forEach((cat, ci) => {
+    const isLast = ci === cfg.length - 1;
+    const div = document.createElement('div');
+    div.className = 'setting-cat';
+    div.innerHTML = `
+      <div class="setting-cat-header" onclick="toggleCat(this)">
+        <div style="display:flex;gap:3px;flex-shrink:0" onclick="event.stopPropagation()">
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" ${ci===0?'disabled':''} onclick="moveCat(${ci},-1)">▲</button>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" ${isLast?'disabled':''} onclick="moveCat(${ci},1)">▼</button>
+        </div>
+        <span class="setting-cat-title">${esc(cat.title)}</span>
+        <button class="btn btn-warning btn-sm" onclick="event.stopPropagation();dupCat(${ci})">複製</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteCat(${ci})">削除</button>
+      </div>
+      <div class="setting-cat-body" id="cat-body-${ci}">
+        <div class="form-row" style="margin-bottom:8px">
+          <label style="font-size:13px;color:var(--muted)">カテゴリ名</label>
+          <input type="text" value="${esc(cat.title)}" onchange="renameCat(${ci},this.value)">
+        </div>
+
+        <div class="setting-section-label">点検項目</div>
+        <div id="checks-list-${ci}">
+          ${cat.checks.map((item, ii) => `
+            <div class="setting-item">
+              <div style="display:flex;gap:2px;flex-shrink:0">
+                <button class="btn btn-secondary btn-sm" style="padding:2px 6px" ${ii===0?'disabled':''} onclick="moveCheck(${ci},${ii},-1)">▲</button>
+                <button class="btn btn-secondary btn-sm" style="padding:2px 6px" ${ii===cat.checks.length-1?'disabled':''} onclick="moveCheck(${ci},${ii},1)">▼</button>
+              </div>
+              <input type="text" value="${esc(item.label)}" onchange="renameCheck(${ci},${ii},this.value)">
+              <button class="btn btn-warning btn-sm" onclick="dupCheck(${ci},${ii})">複製</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCheck(${ci},${ii})">削除</button>
+            </div>`).join('')}
+        </div>
+        <div class="add-row">
+          <input type="text" id="new-check-${ci}" placeholder="項目名を入力">
+          <button class="btn btn-primary btn-sm" onclick="addCheck(${ci})">追加</button>
+        </div>
+
+        <div class="setting-section-label">計測値フィールド</div>
+        <div id="meas-list-${ci}">
+          ${cat.measurements.map((m, mi) => `
+            <div class="setting-item" style="flex-wrap:wrap;gap:4px">
+              <div style="display:flex;gap:2px;flex-shrink:0">
+                <button class="btn btn-secondary btn-sm" style="padding:2px 6px" ${mi===0?'disabled':''} onclick="moveMeas(${ci},${mi},-1)">▲</button>
+                <button class="btn btn-secondary btn-sm" style="padding:2px 6px" ${mi===cat.measurements.length-1?'disabled':''} onclick="moveMeas(${ci},${mi},1)">▼</button>
+              </div>
+              <input type="text" value="${esc(m.label)}" onchange="renameMeas(${ci},${mi},'label',this.value)" placeholder="ラベル">
+              <input type="text" class="unit-input" value="${esc(m.unit)}" onchange="renameMeas(${ci},${mi},'unit',this.value)" placeholder="単位">
+              <input type="number" min="1" max="999" value="${m.phases||1}"
+                style="width:58px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+                title="入力欄の数" placeholder="数"
+                onchange="renameMeas(${ci},${mi},'phases',+this.value||1)">
+              <span style="font-size:11px;color:var(--muted);white-space:nowrap">本</span>
+              <input type="text" value="${esc(m.phasePrefix||'')}"
+                style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+                placeholder="接頭語" title="ラベルの接頭語（例：セル）"
+                onchange="renameMeas(${ci},${mi},'phasePrefix',this.value)">
+              <button class="btn btn-warning btn-sm" onclick="dupMeas(${ci},${mi})">複製</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteMeas(${ci},${mi})">削除</button>
+            </div>`).join('')}
+        </div>
+        <div class="add-row" style="flex-wrap:wrap;gap:4px">
+          <input type="text" id="new-meas-label-${ci}" placeholder="ラベル (例: 電圧)">
+          <input type="text" class="unit-input" id="new-meas-unit-${ci}" placeholder="単位">
+          <input type="number" min="1" max="999" value="1" id="new-meas-phases-${ci}"
+            style="width:58px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+            title="入力欄の数" placeholder="数">
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap">本</span>
+          <input type="text" id="new-meas-prefix-${ci}"
+            style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:16px"
+            placeholder="接頭語" title="ラベルの接頭語（例：セル）">
+          <button class="btn btn-primary btn-sm" onclick="addMeas(${ci})">追加</button>
+        </div>
+      </div>`;
+    container.appendChild(div);
+  });
+  // 開閉状態を復元
+  openStates.forEach(i => {
+    const body = document.getElementById('cat-body-'+i);
+    if (body) body.classList.add('open');
+  });
+}
+
+function toggleCat(header) {
+  header.nextElementSibling.classList.toggle('open');
+}
+
+// 構造変更（追加・削除・移動）: 設定ページを再描画（開閉状態保持）
+function modifyConfig(fn) {
+  const openStates = getOpenCats();
+  const cfg = getConfig();
+  fn(cfg);
+  saveConfig(cfg);
+  renderSettingsPage(openStates);
+  buildEntryForm();
+}
+
+// 名前変更のみ: 設定ページは再描画しない
+function modifyConfigSilent(fn) {
+  const cfg = getConfig();
+  fn(cfg);
+  saveConfig(cfg);
+  buildEntryForm();
+}
+
+function addCategory() {
+  const openStates = getOpenCats();
+  const cfg = getConfig();
+  cfg.push({ id: 'cat_'+Date.now(), title: '新しいカテゴリ', checks: [], measurements: [] });
+  saveConfig(cfg);
+  openStates.add(cfg.length - 1); // 新カテゴリを開いた状態で表示
+  renderSettingsPage(openStates);
+  buildEntryForm();
+}
+function dupCat(ci) {
+  const openStates = getOpenCats();
+  const cfg = getConfig();
+  const copy = JSON.parse(JSON.stringify(cfg[ci]));
+  copy.id = 'cat_'+Date.now();
+  copy.title = copy.title + ' (コピー)';
+  copy.checks = copy.checks.map(c => ({...c, key: 'ck_'+Date.now()+'_'+Math.random().toString(36).slice(2)}));
+  copy.measurements = copy.measurements.map(m => ({...m, key: 'm_'+Date.now()+'_'+Math.random().toString(36).slice(2)}));
+  cfg.splice(ci + 1, 0, copy);
+  saveConfig(cfg);
+  openStates.add(ci + 1);
+  renderSettingsPage(openStates);
+  buildEntryForm();
+}
+function deleteCat(ci) {
+  if (!confirm('このカテゴリを削除しますか？')) return;
+  modifyConfig(cfg => cfg.splice(ci, 1));
+}
+function moveCat(ci, dir) {
+  modifyConfig(cfg => {
+    const t = cfg[ci]; cfg[ci] = cfg[ci+dir]; cfg[ci+dir] = t;
+  });
+}
+function renameCat(ci, val) { modifyConfigSilent(cfg => { cfg[ci].title = val; }); }
+
+function addCheck(ci) {
+  const inp = document.getElementById('new-check-'+ci);
+  const label = inp.value.trim(); if (!label) return;
+  inp.value = '';
+  modifyConfig(cfg => cfg[ci].checks.push({ key: 'ck_'+Date.now(), label }));
+}
+function dupCheck(ci, ii) {
+  modifyConfig(cfg => {
+    const copy = {...cfg[ci].checks[ii], key: 'ck_'+Date.now()};
+    cfg[ci].checks.splice(ii + 1, 0, copy);
+  });
+}
+function deleteCheck(ci, ii) { modifyConfig(cfg => cfg[ci].checks.splice(ii,1)); }
+function moveCheck(ci, ii, dir) {
+  modifyConfig(cfg => {
+    const a = cfg[ci].checks; const t = a[ii]; a[ii] = a[ii+dir]; a[ii+dir] = t;
+  });
+}
+function renameCheck(ci, ii, val) { modifyConfigSilent(cfg => { cfg[ci].checks[ii].label = val; }); }
+
+function addMeas(ci) {
+  const label  = document.getElementById('new-meas-label-'+ci).value.trim(); if (!label) return;
+  const unit        = document.getElementById('new-meas-unit-'+ci).value.trim();
+  const phases      = +(document.getElementById('new-meas-phases-'+ci).value) || 1;
+  const phasePrefix = document.getElementById('new-meas-prefix-'+ci).value.trim();
+  const entry = { key: 'm_'+Date.now(), label, unit, phases };
+  if (phasePrefix) entry.phasePrefix = phasePrefix;
+  modifyConfig(cfg => cfg[ci].measurements.push(entry));
+}
+function dupMeas(ci, mi) {
+  modifyConfig(cfg => {
+    const copy = {...cfg[ci].measurements[mi], key: 'm_'+Date.now()};
+    cfg[ci].measurements.splice(mi + 1, 0, copy);
+  });
+}
+function deleteMeas(ci, mi) { modifyConfig(cfg => cfg[ci].measurements.splice(mi,1)); }
+function moveMeas(ci, mi, dir) {
+  modifyConfig(cfg => {
+    const a = cfg[ci].measurements; const t = a[mi]; a[mi] = a[mi+dir]; a[mi+dir] = t;
+  });
+}
+function renameMeas(ci, mi, field, val) { modifyConfigSilent(cfg => { cfg[ci].measurements[mi][field] = val; }); }
+function saveAsDefault() {
+  pushDefault(activeEquipment, getConfig());
+  alert(`${EQ_NAMES[activeEquipment]} の現在の設定をデフォルトとして保存しました`);
+}
+
+function resetConfig() {
+  const userDefault = SERVER.defaults[activeEquipment];
+  const msg = userDefault
+    ? `設定をユーザー定義のデフォルトに戻しますか？\n（記録データは消えません）`
+    : `設定を出荷時デフォルトに戻しますか？\n（記録データは消えません）`;
+  if (!confirm(msg)) return;
+  // userDefault があればそれを、無ければ内蔵デフォルト（config=null）に戻す
+  pushConfig(activeEquipment, userDefault ? JSON.parse(JSON.stringify(userDefault)) : null);
+  renderSettingsPage(); buildEntryForm();
+}
+
+function getPhaseLabels(n, prefix) {
+  if (!n || n <= 1) return null;
+  if (!prefix) {
+    if (n === 2) return ['L1', 'L2'];
+    if (n === 3) return ['R相', 'S相', 'T相'];
+  }
+  const p = prefix || '';
+  return Array.from({length: n}, (_, i) => `${p}${i+1}`);
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

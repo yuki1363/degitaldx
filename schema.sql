@@ -842,3 +842,41 @@ CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (us
 --   （通知は functions/api/_lib/overdue-notify.js が1時間ごとに判定。type='plan_print_reminder'）。
 ALTER TABLE maintenance_plan ADD COLUMN printed_at TEXT;  -- 工事連絡書を最後に出力（印刷）した日時
 ALTER TABLE maintenance_plan ADD COLUMN printed_by TEXT;  -- 出力した人（メール）
+
+-- =====================================================================
+-- 電気設備点検（12）— 別アプリ（電気設備 日常点検記録・単一HTML）を統合。
+--   高圧受電設備/蓄電池/発電機の点検記録をD1でチーム共有・監査する。
+--   記録は取り込み元アプリのRecordオブジェクトを record_json にそのまま保存し、
+--   検索用に一部の列を持つ（items_json と同じスナップショット思想＝設定変更後も
+--   過去記録が壊れない。config スナップショットは record_json 内に含む）。
+--   下書き（autosave）は端末ローカル(localStorage)のまま＝一時データのため同期しない。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS electrical_inspection (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id      TEXT    NOT NULL UNIQUE,       -- 取り込み元アプリの id（Date.now()）。冪等upsertキー
+  equipment_type TEXT    NOT NULL
+                         CHECK (equipment_type IN ('main', 'battery', 'generator')),
+  inspected_date TEXT    NOT NULL,              -- 'YYYY-MM-DD'
+  has_abnormal   INTEGER NOT NULL DEFAULT 0,    -- caution/repair が1つでもあれば1（一覧色分け・将来通知用）
+  record_json    TEXT    NOT NULL,              -- Record全体（statuses/measurements/config スナップショット等を含む）
+  -- 共通監査列
+  created_by     TEXT,
+  created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by     TEXT,
+  updated_at     TEXT,
+  deleted_by     TEXT,
+  deleted_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_electrical_inspection
+  ON electrical_inspection (equipment_type, inspected_date);
+
+-- 電気設備点検 設定（設備タイプごとに1行）: 現在のカスタム設定＋ユーザー保存の既定。
+--   config_json が NULL のタイプは取り込み元アプリ内蔵のデフォルト設定を使う。
+CREATE TABLE IF NOT EXISTS electrical_config (
+  equipment_type TEXT PRIMARY KEY
+                      CHECK (equipment_type IN ('main', 'battery', 'generator')),
+  config_json    TEXT,   -- 現在のカスタム設定（配列JSON）。NULL=内蔵デフォルト
+  default_json   TEXT,   -- ユーザーが「既定として保存」した設定
+  updated_by     TEXT,
+  updated_at     TEXT
+);

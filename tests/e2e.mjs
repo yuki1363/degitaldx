@@ -851,6 +851,42 @@ for (let i = 0; i < 10; i++) {
 }
 check('棚卸モードで在庫が実数に更新される', stQty === 7, `qty=${stQty}`);
 
+// ---------- 9.6 電気設備点検（D1同期・別アプリ統合） ----------
+section('9.6 電気設備点検（/electrical/ + /api/electrical-*）');
+// 記録を POST → client_id キーで取得できる。has_abnormal は repair 混在で1（サーバー算出）
+const elClientId = 'E2E' + Date.now();
+const elRec = {
+  id: elClientId, equipmentType: 'main', date: '2026-09-03', inspector: 'E2E点検者',
+  facility: '第1キュービクル', weather: '晴', room_temp: '22', humidity: '55',
+  statuses: { g_noise: 'good', tr_dmg: 'caution', cu_water: 'repair' },
+  measurements: { tr_v1: ['6600', '6600', '6598'], tr_ot: '42' },
+  categoryRemarks: {}, remarks: 'E2E特記', config: [], savedAt: new Date().toISOString(),
+};
+const elPost = await api('/api/electrical-inspections', { method: 'POST', body: elRec });
+check('電気点検: 記録POST（201）', elPost.status === 201, `status=${elPost.status}`);
+const elGet = await api('/api/electrical-inspections?equipment_type=main');
+check('電気点検: client_idキーで取得できる', !!elGet.json?.records?.[elClientId], `keys=${Object.keys(elGet.json?.records||{}).length}`);
+check('電気点検: measurements/statusesが往復する',
+  elGet.json?.records?.[elClientId]?.statuses?.cu_water === 'repair' &&
+  Array.isArray(elGet.json?.records?.[elClientId]?.measurements?.tr_v1));
+// 設定の往復（admin）
+const elCfgPut = await api('/api/electrical-config', { method: 'PUT', body: { equipment_type: 'battery', config: [{ id: 'c1', title: 'E2Eカテゴリ', checks: [], measurements: [] }] } });
+check('電気点検: 設定PUT（admin・200）', elCfgPut.status === 200, `status=${elCfgPut.status}`);
+const elCfgGet = await api('/api/electrical-config');
+check('電気点検: 設定がGETで戻る', elCfgGet.json?.battery?.[0]?.title === 'E2Eカテゴリ', JSON.stringify(elCfgGet.json?.battery));
+// 論理削除 → 一覧から消える
+const elDel = await api(`/api/electrical-inspections/${encodeURIComponent(elClientId)}`, { method: 'DELETE' });
+check('電気点検: 記録DELETE（200）', elDel.status === 200, `status=${elDel.status}`);
+const elGet2 = await api('/api/electrical-inspections');
+check('電気点検: 削除後は一覧に出ない（論理削除）', !elGet2.json?.records?.[elClientId]);
+// ページが pageerror なく表示される（別ドキュメント）
+const elBefore = pageErrors.length;
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+check('電気点検: /electrical/ が pageerror なく表示', pageErrors.length === elBefore,
+  pageErrors.slice(elBefore).join(' / '));
+check('電気点検: 設備バーが描画される', await page.evaluate(() => !!document.querySelector('.eq-btn')));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

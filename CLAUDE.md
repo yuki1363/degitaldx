@@ -192,6 +192,16 @@
 - **あいまい検索**: キーワードを複数バリアントに展開してORで照合（全角英数→半角／ひらがな⇄カタカナ／**全角カタカナ⇄半角カタカナ**（例「フィルム」で半角登録の「ﾌｨﾙﾑ」がヒット。NFKC正規化＋全角→半角カナ変換）／末尾長音ゆれ。例「こんぷれっさ」で「コンプレッサー」がヒット）。英字の大小は LIKE が元々区別しない
 - 検索対象列は担当者名・記録者名・点検項目の値（items_json）・トラブルの帳票入力（form_values_json）・カスタム項目値、および**関連設備の名称・番号**（`equipment_id` で結合した設備名でもヒットする。本文に設備名が無いトラブル/点検/業務依頼も設備名で引ける）まで含む。後付け列は無い旧DBでは基本列のみで自動再試行（searchWithFallback）
 - 検索APIは `GET /api/search?q=...&from=...&to=...&category=...&equipment=...&type=...` の1エンドポイントに集約
+### 12. 電気設備点検（別アプリ統合）
+高圧受電設備/蓄電池/発電機の日常点検を記録する専用アプリ（単一HTML）を統合したもの。既存の汎用「点検実施(02)」とは別機能（設備タイプ・相測定など電気固有仕様のため）。
+- **配信**: `electrical/index.html` を独立ページ `/electrical/` で配信（元アプリはグローバルCSS/固定ID/インライン`onclick`でページ全体を所有する前提のため、iframeやインライン化はせず**別ドキュメント**で完全隔離）。ホームのタイル `⚡ 電気設備点検` から遷移。Access は全パスを保護済み。
+- **保存（D1同期ハイブリッド）**: 元アプリは localStorage 保存だが、**記録・設定は D1 に置換**してチーム共有・監査・端末紛失対応にした。UIは同期前提のため、起動時に `GET /api/electrical-inspections`（全タイプ）＋`GET /api/electrical-config` で**メモリキャッシュ `SERVER` に全読み込み**→ `getRecords()`/`getConfig()` はキャッシュを同期返却（render系は無改修）→ 保存/削除/設定は**キャッシュ更新＋API書き込み(write-through)**。詳細は `electrical/index.html` の「サーバー同期」節。
+- **下書き（autosave）は端末ローカル(localStorage)のまま**（一時データ＝クラッシュ復帰用）。オフライン時は読み取り用ローカルミラー(`elec_server_mirror`)を表示し、**書き込みキューは未実装（online書き込み前提）**。
+- **権限**: 記録の保存/削除=editor、**設定編集=admin**（非adminは設定タブ非表示）、閲覧=全員。点検者名は `/api/me` の氏名を既定。
+- **記録の保存形式**: 元アプリの Record を `record_json` にそのまま保存（config スナップショット含む＝設定変更後も過去記録が壊れない。02 の items_json と同じ思想）。検索用に `equipment_type`/`inspected_date`/`has_abnormal`(caution/repairで1) を列に持つ。`client_id`(元アプリのDate.now() id) で冪等 upsert。
+- **API**: `functions/api/electrical-inspections/`（`index.js` GET一覧`{records:{[client_id]:Record}}`/POST upsert、`[id].js` DELETE論理削除）、`functions/api/electrical-config/`（GET`{main,battery,generator,defaults}`/PUT admin・`master_history`退避）。
+- **スコープ外（後日）**: 写真添付（元アプリに無し）、オフライン書き込みキュー、横断検索(11)・通知への載せ込み（`has_abnormal`が足場）。
+**テーブル**: `electrical_inspection`（client_id, equipment_type[main/battery/generator], inspected_date, has_abnormal, record_json, +共通監査列）、`electrical_config`（equipment_type PK, config_json, default_json, updated_by/at）
 ---
 ## ディレクトリ構成（想定）
 ```
