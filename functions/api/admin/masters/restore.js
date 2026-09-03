@@ -17,6 +17,7 @@ const MASTERS = {
   report_category:      ['name', 'sort_order'],
   inspection_master:    ['equipment_id', 'name', 'input_type', 'unit', 'min_value', 'max_value', 'options_json', 'sort_order'],
   trouble_custom_field: ['name', 'input_type', 'options_json', 'sort_order'],
+  utility_item:         ['section', 'name', 'input_type', 'unit', 'min_value', 'max_value', 'options_json', 'alert_options_json', 'sort_order'],
 };
 
 export async function onRequestPost({ request, env, data }) {

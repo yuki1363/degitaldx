@@ -11,6 +11,7 @@ const ALLOWED_TABLES = {
   daily_report:      { displayCol: 'body',         dateCol: 'report_date' },
   maintenance_plan:  { displayCol: 'title',        dateCol: 'planned_date'},
   equipment_ledger:  { displayCol: 'name',         dateCol: 'created_at'  },
+  utility_report:    { displayCol: 'report_date',  dateCol: 'report_date' },
 };
 
 export async function onRequestGet({ request, env, data }) {
