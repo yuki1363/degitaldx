@@ -880,3 +880,119 @@ CREATE TABLE IF NOT EXISTS electrical_config (
   updated_by     TEXT,
   updated_at     TEXT
 );
+
+-- =====================================================================
+-- ユーティリティ日報（13）— 工場ユーティリティ設備の日常点検を毎日1件記録する。
+--   項目は utility_item マスタで管理し（管理画面から追加・削除可／変更は master_history で復元）、
+--   値は実施時点のスナップショットとして utility_report.values_json に保存する
+--   （02 点検の items_json・12 電気設備の record_json と同じ思想＝マスタを変えても過去記録が壊れない）。
+--   同じ定義は functions/api/utility-reports/_schema.js にもあり（自己修復マイグレーション）、
+--   項目を増やすときは両方を必ず揃えること。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS utility_item (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  section            TEXT    NOT NULL DEFAULT '',
+  name               TEXT    NOT NULL,
+  input_type         TEXT    NOT NULL DEFAULT 'number'
+                             CHECK (input_type IN ('number', 'select', 'multi', 'time', 'text')),
+  unit               TEXT,
+  min_value          REAL,
+  max_value          REAL,
+  options_json       TEXT,
+  alert_options_json TEXT,
+  sort_order         INTEGER NOT NULL DEFAULT 0,
+  created_by         TEXT,
+  created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by         TEXT,
+  updated_at         TEXT,
+  deleted_by         TEXT,
+  deleted_at         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_utility_item_sort ON utility_item (sort_order, id);
+
+-- values_json: [{ item_id, name, section, input_type, unit, min_value, max_value, value, abnormal }]
+-- has_abnormal: 基準範囲外の数値 or 異常扱いの選択肢を含むか（一覧の色分け用）
+-- report_date に UNIQUE は付けない（論理削除した日を再登録できるようにするため）。
+--   1日1件のガードは API 側で行う（同日の未削除レコードがあれば 409 + existing_id）。
+CREATE TABLE IF NOT EXISTS utility_report (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_date   TEXT    NOT NULL,
+  inspected_at  TEXT    NOT NULL,
+  reporter_name TEXT,
+  has_abnormal  INTEGER NOT NULL DEFAULT 0,
+  values_json   TEXT    NOT NULL DEFAULT '[]',
+  note          TEXT,
+  created_by    TEXT,
+  created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_by    TEXT,
+  updated_at    TEXT,
+  deleted_by    TEXT,
+  deleted_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_utility_report_date ON utility_report (report_date);
+
+-- 初期点検項目（31項目）
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '灯油系統', '灯油サブタンクレベル（液面）', 'select', NULL, '["上","中","下"]', NULL, 1, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '灯油サブタンクレベル（液面）');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '灯油系統', '温水ボイラー灯油メーター', 'number', 'L', NULL, NULL, 2, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ボイラー灯油メーター');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '灯油系統', '運転開始時間', 'time', NULL, NULL, NULL, 3, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '運転開始時間');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '灯油系統', '運転終了時間', 'time', NULL, NULL, NULL, 4, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '運転終了時間');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '圧縮機・温水', '空気圧縮機運転号機', 'multi', NULL, '["1号機","2号機","3号機"]', NULL, 10, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '空気圧縮機運転号機');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '圧縮機・温水', 'ヘッダー圧力', 'number', 'MPa', NULL, NULL, 11, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'ヘッダー圧力');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '圧縮機・温水', '温水ポンプ運転号機', 'multi', NULL, '["1号機","2号機","3号機"]', NULL, 12, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ポンプ運転号機');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '圧縮機・温水', '温水ポンプ圧力', 'number', 'MPa', NULL, NULL, 13, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ポンプ圧力');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '圧縮機・温水', '温水タンク容量', 'number', '㎥', NULL, NULL, 14, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水タンク容量');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '圧縮機・温水', '温水タンク内温度', 'number', '℃', NULL, NULL, 15, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水タンク内温度');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '中水タンク容量', 'number', '㎥', NULL, NULL, 20, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '中水タンク容量');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '飲料水タンク容量', 'number', '㎥', NULL, NULL, 21, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '飲料水タンク容量');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', 'PWタンク容量', 'number', '㎥', NULL, NULL, 22, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'PWタンク容量');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '市水温度', 'number', '℃', NULL, NULL, 23, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '市水温度');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '灯油タンク容量TK605', 'number', '㎥', NULL, NULL, 24, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '灯油タンク容量TK605');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '灯油メーター1', 'number', 'L', NULL, NULL, 25, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '灯油メーター1');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '薬品タンク1', 'number', 'L', NULL, NULL, 26, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '薬品タンク1');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '灯油メーター2', 'number', 'L', NULL, NULL, 27, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '灯油メーター2');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '各種タンク', '薬品タンク2', 'number', 'L', NULL, NULL, 28, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '薬品タンク2');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '蒸気ボイラー・ドレン', '蒸気ボイラー運転号機', 'multi', NULL, '["1号機","2号機"]', NULL, 30, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '蒸気ボイラー運転号機');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '蒸気ボイラー・ドレン', '蒸気ボイラー圧力', 'number', 'MPa', NULL, NULL, 31, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '蒸気ボイラー圧力');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '蒸気ボイラー・ドレン', 'PW補給水メーター', 'number', 'L', NULL, NULL, 32, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'PW補給水メーター');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '蒸気ボイラー・ドレン', 'ボイラー給水ポンプ圧力', 'number', 'MPa', NULL, NULL, 33, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'ボイラー給水ポンプ圧力');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '蒸気ボイラー・ドレン', 'ドレン電導度', 'number', 'μS/cm', NULL, NULL, 34, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'ドレン電導度');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '蒸気ボイラー・ドレン', 'ドレンポンプ圧力', 'number', 'MPa', NULL, NULL, 35, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'ドレンポンプ圧力');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '運転時間・油面', '総運転時間1', 'number', 'hr', NULL, NULL, 40, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間1');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '運転時間・油面', '油面確認1', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 41, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認1');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '運転時間・油面', '総運転時間2', 'number', 'hr', NULL, NULL, 42, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間2');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '運転時間・油面', '油面確認2', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 43, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認2');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '運転時間・油面', '総運転時間3', 'number', 'hr', NULL, NULL, 44, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間3');
+INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
+SELECT '運転時間・油面', '油面確認3', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 45, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認3');
