@@ -223,11 +223,6 @@ body.modal-open { overflow: hidden; }
 <!-- 履歴 -->
 <div class="page" id="page-history">
   <div style="margin-top:12px">
-    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-      <button class="btn btn-primary btn-sm" onclick="exportData()">JSONエクスポート（全設備）</button>
-      <button class="btn btn-warning btn-sm" onclick="document.getElementById('importFile').click()">JSONインポート</button>
-      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
-    </div>
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
       <input type="text" id="annual-year" placeholder="例: 2026" maxlength="4" style="width:90px;flex:none;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:16px;font-family:inherit">
       <button class="btn btn-primary btn-sm" onclick="showAnnualReport()">年間報告書（現設備）</button>
@@ -258,13 +253,8 @@ body.modal-open { overflow: hidden; }
     </div>
     <div id="settings-categories"></div>
     <div class="card" style="margin-top:4px">
-      <div class="card-title" style="font-size:14px;margin-bottom:8px">設定の共有</div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">設定（点検項目・計測値フィールド）をファイルに保存して、他の端末に引き継げます。</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <button class="btn btn-primary btn-sm" onclick="exportConfig()">設定をエクスポート（全設備）</button>
-        <button class="btn btn-warning btn-sm" onclick="document.getElementById('configImportFile').click()">設定をインポート（全設備）</button>
-        <input type="file" id="configImportFile" accept=".json" style="display:none" onchange="importConfigFile(event)">
-      </div>
+      <div class="card-title" style="font-size:14px;margin-bottom:8px">既定設定</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">設定（点検項目・計測値フィールド）はサーバー(D1)に保存され、全端末で自動的に共有されます。</p>
       <button class="btn btn-secondary btn-sm" onclick="saveAsDefault()">現在の設定をデフォルトとして保存</button>
       <button class="btn btn-danger btn-sm" onclick="resetConfig()" style="margin-top:6px">設定をデフォルトに戻す</button>
     </div>
@@ -667,7 +657,7 @@ function buildEntryForm() {
           }).join('');
           const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel" style="margin-top:4px"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
           const copyBtn = copyPairs.length ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0;margin-top:4px"
-            onclick="setPrevVals(${JSON.stringify(copyPairs)})">前回値コピー</button>` : '';
+            onclick="setPrevVals(${JSON.stringify(copyPairs).replace(/"/g, '&quot;')})">前回値コピー</button>` : '';
           row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
             <div class="meas-grid">${cells}</div>
             ${qualSel}${copyBtn}`;
@@ -691,7 +681,7 @@ function buildEntryForm() {
             : '';
           const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
           const copyBtn2 = copyPairs.length ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0"
-            onclick="setPrevVals(${JSON.stringify(copyPairs)})">前回値コピー</button>` : '';
+            onclick="setPrevVals(${JSON.stringify(copyPairs).replace(/"/g, '&quot;')})">前回値コピー</button>` : '';
           const prevHtml = prevText ? `<div class="prev-val" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%">
             <span>前回${prevDate}: ${prevText}</span>${copyBtn2}</div>` : '';
           row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
@@ -1380,113 +1370,6 @@ function buildRepairHTML(r) {
   <div style="margin-top:8px;font-size:11px;color:#aaa;text-align:right">要注意：${issues.filter(i=>i.status==='caution').length}件　要修理：${issues.filter(i=>i.status==='repair').length}件</div>`;
 }
 
-// ===================== エクスポート/インポート =====================
-function triggerDownload(blob, filename) {
-  // iOS Safari: Web Share API でファイル共有シートを表示
-  if (navigator.share && navigator.canShare) {
-    const file = new File([blob], filename, { type: blob.type });
-    if (navigator.canShare({ files: [file] })) {
-      navigator.share({ files: [file] }).catch(err => {
-        // AbortError はユーザーキャンセルなので無視、それ以外はフォールバック
-        if (err && err.name !== 'AbortError') _downloadFallback(blob, filename);
-      });
-      return;
-    }
-  }
-  _downloadFallback(blob, filename);
-}
-
-function _downloadFallback(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function exportData() {
-  const EQ_KEYS = { main: 'inspection_records', battery: 'inspection_records_battery', generator: 'inspection_records_generator' };
-  const CFG_KEYS = { main: 'inspection_config', battery: 'inspection_config_battery', generator: 'inspection_config_generator' };
-  const data = {
-    records: Object.fromEntries(Object.entries(EQ_KEYS).map(([eq, k]) => [eq, JSON.parse(localStorage.getItem(k) || '{}')])),
-    config:  Object.fromEntries(Object.entries(CFG_KEYS).map(([eq, k]) => {
-      const cfg = JSON.parse(localStorage.getItem(k) || 'null');
-      return [eq, cfg || JSON.parse(JSON.stringify(EQ_DEFAULTS[eq]))];
-    })),
-    exportedAt: new Date().toISOString()
-  };
-  const totalRecs = Object.values(data.records).reduce((s, r) => s + Object.keys(r).length, 0);
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  triggerDownload(blob, `点検記録_全設備_${new Date().toISOString().slice(0,10)}.json`);
-}
-
-function importData(e) {
-  const file = e.target.files[0]; if (!file) return;
-  if (!checkLocalStorageAvailable()) {
-    alert('データを保存できません。\nfile:// や制限された環境ではなく、HTTPSのURLからアクセスしてください。');
-    e.target.value = '';
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = async ev => {
-    try {
-      const data = JSON.parse(ev.target.result);
-      const EQ_REC_KEYS = { main: 'inspection_records', battery: 'inspection_records_battery', generator: 'inspection_records_generator' };
-      const EQ_CFG_KEYS = { main: 'inspection_config', battery: 'inspection_config_battery', generator: 'inspection_config_generator' };
-      let totalRecs = 0;
-      if (data.records) {
-        // 新形式: { main:{...}, battery:{...}, generator:{...} }
-        const isNewFmt = ['main','battery','generator'].some(k => k in data.records);
-        if (isNewFmt) {
-          ['main','battery','generator'].forEach(eq => {
-            if (!data.records[eq]) return;
-            const key = EQ_REC_KEYS[eq];
-            const merged = { ...JSON.parse(localStorage.getItem(key)||'{}'), ...data.records[eq] };
-            localStorage.setItem(key, JSON.stringify(merged));
-            totalRecs += Object.keys(data.records[eq]).length;
-          });
-        } else {
-          // 旧形式: フラットな記録オブジェクト（後方互換）
-          const merged = { ...JSON.parse(localStorage.getItem(recKey())||'{}'), ...data.records };
-          localStorage.setItem(recKey(), JSON.stringify(merged));
-          totalRecs = Object.keys(data.records).length;
-        }
-      }
-      if (data.config) {
-        const isNewFmt = ['main','battery','generator'].some(k => k in data.config);
-        if (isNewFmt) {
-          ['main','battery','generator'].forEach(eq => {
-            if (data.config[eq]) localStorage.setItem(EQ_CFG_KEYS[eq], JSON.stringify(data.config[eq]));
-          });
-        } else {
-          saveConfig(data.config); // 旧形式
-        }
-      }
-      // D1 へ反映（インポートした記録を1件ずつ upsert・設定は admin のみ PUT）
-      const _imp = [];
-      if (data.records) {
-        const isNewFmt = ['main','battery','generator'].some(k => k in data.records);
-        if (isNewFmt) { ['main','battery','generator'].forEach(eq => { if (data.records[eq]) Object.values(data.records[eq]).forEach(r => { if (r) { r.equipmentType = r.equipmentType || eq; _imp.push(r); } }); }); }
-        else { Object.values(data.records).forEach(r => { if (r) { r.equipmentType = r.equipmentType || activeEquipment; _imp.push(r); } }); }
-      }
-      for (const r of _imp) { if (r && r.id) { try { await pushRecordToServer(r); } catch(e) {} } }
-      if (data.config) {
-        const isNewFmt = ['main','battery','generator'].some(k => k in data.config);
-        if (isNewFmt) ['main','battery','generator'].forEach(eq => { if (data.config[eq]) pushConfigToServer(eq, data.config[eq]); });
-        else pushConfigToServer(activeEquipment, data.config);
-      }
-      alert(`インポート完了！\n記録：${totalRecs}件`);
-      renderHistory(); buildEntryForm(); renderSettingsPage();
-    } catch(err) { alert('ファイルの読み込みに失敗しました\n' + err.message); }
-  };
-  reader.onerror = () => alert('ファイルの読み込みに失敗しました。ファイルを確認してください。');
-  reader.readAsText(file);
-  e.target.value = '';
-}
 
 // ===================== 印刷ヘルパー =====================
 function showDeleteBtn(visible) {
@@ -1535,62 +1418,6 @@ function printAllEquipment() {
   document.getElementById('modal-title').textContent = `全設備 ${fmtDate(date)}`;
   document.getElementById('modal-content').innerHTML = html;
   setTimeout(() => window.print(), 300);
-}
-
-function exportConfig() {
-  let data;
-  try {
-    data = {
-      main: JSON.parse(localStorage.getItem('inspection_config') || 'null') || JSON.parse(JSON.stringify(DEFAULT_CONFIG)),
-      battery: JSON.parse(localStorage.getItem('inspection_config_battery') || 'null') || JSON.parse(JSON.stringify(DEFAULT_CONFIG_BATTERY)),
-      generator: JSON.parse(localStorage.getItem('inspection_config_generator') || 'null') || JSON.parse(JSON.stringify(DEFAULT_CONFIG_GENERATOR)),
-      defaults: {
-        main:      JSON.parse(localStorage.getItem('inspection_default')           || 'null'),
-        battery:   JSON.parse(localStorage.getItem('inspection_default_battery')   || 'null'),
-        generator: JSON.parse(localStorage.getItem('inspection_default_generator') || 'null'),
-      },
-      exportedAt: new Date().toISOString()
-    };
-  } catch(e) {
-    alert('設定のエクスポートに失敗しました（プライベートモードでは使用できません）');
-    return;
-  }
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  triggerDownload(blob, `点検設定_${new Date().toISOString().slice(0,10)}.json`);
-}
-
-function importConfigFile(e) {
-  const file = e.target.files[0]; if (!file) return;
-  if (!checkLocalStorageAvailable()) {
-    alert('設定を保存できません。\nfile:// や制限された環境ではなく、HTTPSのURLからアクセスしてください。');
-    e.target.value = '';
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = ev => {
-    try {
-      const data = JSON.parse(ev.target.result);
-      if (data.main)      localStorage.setItem('inspection_config',           JSON.stringify(data.main));
-      if (data.battery)   localStorage.setItem('inspection_config_battery',   JSON.stringify(data.battery));
-      if (data.generator) localStorage.setItem('inspection_config_generator', JSON.stringify(data.generator));
-      if (data.defaults) {
-        if (data.defaults.main)      localStorage.setItem('inspection_default',           JSON.stringify(data.defaults.main));
-        if (data.defaults.battery)   localStorage.setItem('inspection_default_battery',   JSON.stringify(data.defaults.battery));
-        if (data.defaults.generator) localStorage.setItem('inspection_default_generator', JSON.stringify(data.defaults.generator));
-      }
-      // D1 へ反映（admin のみ）
-      ['main','battery','generator'].forEach(eq => { if (data[eq]) pushConfigToServer(eq, data[eq]); });
-      if (data.defaults) ['main','battery','generator'].forEach(eq => { if (data.defaults[eq]) pushDefaultToServer(eq, data.defaults[eq]); });
-      // 保存されたか確認
-      const saved = localStorage.getItem('inspection_config') || localStorage.getItem('inspection_config_battery') || localStorage.getItem('inspection_config_generator');
-      if (!saved) throw new Error('localStorage保存失敗');
-      alert('設定のインポートが完了しました');
-      renderSettingsPage(); buildEntryForm();
-    } catch(err) { alert('ファイルの読み込みに失敗しました\n' + err.message); }
-  };
-  reader.onerror = () => alert('設定ファイルの読み込みに失敗しました。ファイルを確認してください。');
-  reader.readAsText(file);
-  e.target.value = '';
 }
 
 // ===================== 設定画面 =====================
