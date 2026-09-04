@@ -888,7 +888,7 @@ CREATE TABLE IF NOT EXISTS electrical_config (
 --   （02 点検の items_json・12 電気設備の record_json と同じ思想＝マスタを変えても過去記録が壊れない）。
 --   同じ定義は functions/api/utility-reports/_schema.js にもあり（自己修復マイグレーション）、
 --   項目を増やすときは両方を必ず揃えること。
---   sort_order はセクションごとに番号帯を分ける（灯油1〜/圧縮機10〜/各種タンク30〜/蒸気40〜）。
+--   sort_order はセクションごとに番号帯を分ける（灯油1〜/温水・圧縮機10〜/各種タンク30〜/蒸気40〜）。
 --   帯が重なると一覧・入力画面でセクションが分断されるため、項目を足すときは帯の中で採番すること。
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS utility_item (
@@ -945,29 +945,29 @@ SELECT '灯油系統', '運転開始時間', 'time', NULL, NULL, NULL, 3, 'syste
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
 SELECT '灯油系統', '運転終了時間', 'time', NULL, NULL, NULL, 4, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '運転終了時間');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '空気圧縮機運転号機', 'multi', NULL, '["1号機","2号機","3号機"]', NULL, 10, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '空気圧縮機運転号機');
+SELECT '温水・圧縮機', '温水ポンプ運転号機', 'multi', NULL, '["1号機","2号機","3号機"]', NULL, 10, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ポンプ運転号機');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', 'ヘッダー圧力', 'number', 'MPa', NULL, NULL, 11, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'ヘッダー圧力');
+SELECT '温水・圧縮機', '温水ポンプ圧力', 'number', 'MPa', NULL, NULL, 11, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ポンプ圧力');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '総運転時間1', 'number', 'hr', NULL, NULL, 12, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間1');
+SELECT '温水・圧縮機', '温水タンク容量', 'number', '㎥', NULL, NULL, 12, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水タンク容量');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '油面確認1', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 13, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認1');
+SELECT '温水・圧縮機', '温水タンク内温度', 'number', '℃', NULL, NULL, 13, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水タンク内温度');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '総運転時間2', 'number', 'hr', NULL, NULL, 14, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間2');
+SELECT '温水・圧縮機', '空気圧縮機運転号機', 'multi', NULL, '["1号機","2号機","3号機"]', NULL, 14, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '空気圧縮機運転号機');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '油面確認2', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 15, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認2');
+SELECT '温水・圧縮機', 'ヘッダー圧力', 'number', 'MPa', NULL, NULL, 15, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = 'ヘッダー圧力');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '総運転時間3', 'number', 'hr', NULL, NULL, 16, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間3');
+SELECT '温水・圧縮機', '総運転時間1', 'number', 'hr', NULL, NULL, 16, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間1');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '油面確認3', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 17, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認3');
+SELECT '温水・圧縮機', '油面確認1', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 17, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認1');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '温水ポンプ運転号機', 'multi', NULL, '["1号機","2号機","3号機"]', NULL, 18, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ポンプ運転号機');
+SELECT '温水・圧縮機', '総運転時間2', 'number', 'hr', NULL, NULL, 18, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間2');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '温水ポンプ圧力', 'number', 'MPa', NULL, NULL, 19, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水ポンプ圧力');
+SELECT '温水・圧縮機', '油面確認2', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 19, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認2');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '温水タンク容量', 'number', '㎥', NULL, NULL, 20, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水タンク容量');
+SELECT '温水・圧縮機', '総運転時間3', 'number', 'hr', NULL, NULL, 20, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '総運転時間3');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
-SELECT '圧縮機・温水', '温水タンク内温度', 'number', '℃', NULL, NULL, 21, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '温水タンク内温度');
+SELECT '温水・圧縮機', '油面確認3', 'select', NULL, '["OK","要補充","異常"]', '["要補充","異常"]', 21, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '油面確認3');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
 SELECT '各種タンク', '中水タンク容量', 'number', '㎥', NULL, NULL, 30, 'system' WHERE NOT EXISTS (SELECT 1 FROM utility_item WHERE name = '中水タンク容量');
 INSERT INTO utility_item (section, name, input_type, unit, options_json, alert_options_json, sort_order, created_by)
@@ -1003,13 +1003,16 @@ SELECT '蒸気ボイラー・ドレン', 'ドレンポンプ圧力', 'number', '
 --   （移動元になり得る位置を条件に含むため、どの旧レイアウトからでも1回で揃い、再実行しても no-op）
 UPDATE utility_item SET sort_order = sort_order + 10 WHERE section = '蒸気ボイラー・ドレン' AND sort_order BETWEEN 30 AND 35;
 UPDATE utility_item SET sort_order = sort_order + 10 WHERE section = '各種タンク'           AND sort_order BETWEEN 20 AND 28;
-UPDATE utility_item SET sort_order = 21 WHERE name = '温水タンク内温度'   AND sort_order IN (15, 18) AND section = '圧縮機・温水';
-UPDATE utility_item SET sort_order = 20 WHERE name = '温水タンク容量'     AND sort_order IN (14, 17);
-UPDATE utility_item SET sort_order = 19 WHERE name = '温水ポンプ圧力'     AND sort_order IN (13, 16);
-UPDATE utility_item SET sort_order = 18 WHERE name = '温水ポンプ運転号機' AND sort_order IN (12, 15);
-UPDATE utility_item SET section = '圧縮機・温水', sort_order = 16 WHERE name = '総運転時間3' AND (section = '運転時間・油面' OR sort_order = 14);
-UPDATE utility_item SET section = '圧縮機・温水', sort_order = 14 WHERE name = '総運転時間2' AND (section = '運転時間・油面' OR sort_order = 13);
-UPDATE utility_item SET section = '圧縮機・温水', sort_order = 12 WHERE name = '総運転時間1' AND section = '運転時間・油面';
-UPDATE utility_item SET section = '圧縮機・温水', sort_order = 13 WHERE name = '油面確認1' AND section IN ('運転時間・油面', '油面確認');
-UPDATE utility_item SET section = '圧縮機・温水', sort_order = 15 WHERE name = '油面確認2' AND section IN ('運転時間・油面', '油面確認');
-UPDATE utility_item SET section = '圧縮機・温水', sort_order = 17 WHERE name = '油面確認3' AND section IN ('運転時間・油面', '油面確認');
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 10 WHERE name = '温水ポンプ運転号機' AND sort_order IN (12, 15, 18);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 11 WHERE name = '温水ポンプ圧力'     AND sort_order IN (13, 16, 19);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 12 WHERE name = '温水タンク容量'     AND sort_order IN (14, 17, 20);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 13 WHERE name = '温水タンク内温度'   AND sort_order IN (15, 18, 21);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 14 WHERE name = '空気圧縮機運転号機' AND sort_order = 10;
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 15 WHERE name = 'ヘッダー圧力'       AND sort_order = 11;
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 16 WHERE name = '総運転時間1' AND (section = '運転時間・油面' OR sort_order = 12);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 17 WHERE name = '油面確認1'   AND (section IN ('運転時間・油面', '油面確認') OR sort_order = 13);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 18 WHERE name = '総運転時間2' AND (section = '運転時間・油面' OR sort_order IN (13, 14));
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 19 WHERE name = '油面確認2'   AND (section IN ('運転時間・油面', '油面確認') OR sort_order = 15);
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 20 WHERE name = '総運転時間3' AND (section = '運転時間・油面' OR sort_order IN (14, 16));
+UPDATE utility_item SET section = '温水・圧縮機', sort_order = 21 WHERE name = '油面確認3'   AND (section IN ('運転時間・油面', '油面確認') OR sort_order = 17);
+UPDATE utility_item SET section = '温水・圧縮機' WHERE section = '圧縮機・温水';
