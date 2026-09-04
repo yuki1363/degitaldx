@@ -2,6 +2,18 @@
 
 import { jsonError } from '../_lib/http.js';
 
+/**
+ * 数値の表記ゆれを半角へ寄せる（js/inspection-items.js の normalizeNumberText と同じ規則）。
+ * クライアント側で正規化済みだが、全角のまま届いても 400 で弾かず保存できるようにする保険。
+ */
+function normalizeNumberText(text) {
+  return String(text ?? '')
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[．。]/g, '.')
+    .replace(/[，,、\s]/g, '')
+    .replace(/[－ー−―‐]/g, '-');
+}
+
 const parseJson = (s, fallback) => {
   if (!s) return fallback;
   try { return JSON.parse(s); } catch { return fallback; }
@@ -76,7 +88,7 @@ export function buildValues(items, rawValues) {
 
     switch (item.input_type) {
       case 'number': {
-        const n = Number(value);
+        const n = Number(normalizeNumberText(value));
         if (!Number.isFinite(n)) {
           return { error: jsonError(400, `「${item.name}」は数値で入力してください。`) };
         }

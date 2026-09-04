@@ -36,6 +36,27 @@ async function handleMeterCapture(file, master, input, statusEl, fileInput) {
   }
 }
 
+/**
+ * 数値入力の表記ゆれを半角へ寄せる。
+ *   全角数字「１２３」、全角ピリオド「．」、桁区切りのカンマ、全角マイナスを吸収する。
+ *   （日本語入力(IME)がONのまま打った値や、コピー&ペーストされた値を受け付けるため）
+ */
+export function normalizeNumberText(text) {
+  return String(text ?? '')
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[．。]/g, '.')
+    .replace(/[，,、\s]/g, '')
+    .replace(/[－ー−―‐]/g, '-');
+}
+
+/** 数値文字列を数値にする。空・数値にならないものは undefined */
+export function parseNumberText(text) {
+  const t = normalizeNumberText(text).trim();
+  if (t === '') return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /** 選択肢を配列で返す。13 ユーティリティ日報の API は配列（options）、02 点検は JSON文字列（options_json） */
 function optionsOf(master) {
   if (Array.isArray(master.options)) return master.options;
@@ -75,18 +96,31 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
       break;
     }
     case 'number': {
+      // type="number" は使わない。理由:
+      //   - 上下ボタン（スピナー）があり、欄をタップしただけで -1 等が入ってしまう
+      //   - 日本語入力(IME)がONだと打った文字が弾かれ、全角数字も受け付けない
+      //   - 値が「数値として不正」だと input.value が空文字になり、入力が黙って消える
+      // text + inputmode="decimal" ならスマホの数字キーパッドは出たまま、上記を回避できる。
       const input = el('input', {
-        type: 'number', step: 'any', inputmode: 'decimal',
+        type: 'text', inputmode: 'decimal', autocomplete: 'off',
         value: existingValue !== undefined ? existingValue : '',
         oninput: () => {
-          const v = Number(input.value);
+          // 全角・カンマなどをその場で半角へ寄せる（変換が要るときだけ書き換え、カーソル飛びを防ぐ）
+          const fixed = normalizeNumberText(input.value);
+          if (fixed !== input.value) input.value = fixed;
+
+          const raw = input.value.trim();
+          const v = Number(raw);
+          const invalid = raw !== '' && !Number.isFinite(v);
           const out =
-            input.value !== '' && Number.isFinite(v) &&
-            ((master.min_value !== null && v < master.min_value) ||
-             (master.max_value !== null && v > master.max_value));
-          input.classList.toggle('is-abnormal', out);
-          warn.hidden = !out;
-          warn.textContent = '⚠ 基準範囲外です。確認してください。';
+            !invalid && raw !== '' &&
+            ((master.min_value !== null && master.min_value !== undefined && v < master.min_value) ||
+             (master.max_value !== null && master.max_value !== undefined && v > master.max_value));
+          input.classList.toggle('is-abnormal', invalid || out);
+          warn.hidden = !(invalid || out);
+          warn.textContent = invalid
+            ? '⚠ 数値で入力してください。'
+            : '⚠ 基準範囲外です。確認してください。';
         },
       });
       if (existingValue !== undefined) input.dispatchEvent(new Event('input'));
@@ -117,8 +151,8 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
         const renderLastHint = () => {
           const dateStr = lastInfo.date ? `（${String(lastInfo.date).slice(0, 10).replace(/-/g, '/')}）` : '';
           let diffText = '';
-          const cur = Number(input.value);
-          if (input.value !== '' && Number.isFinite(cur)) {
+          const cur = parseNumberText(input.value);
+          if (cur !== undefined) {
             const d = Math.round((cur - prevNum) * 1000) / 1000; // 浮動小数の丸め誤差よけ
             diffText = `　差 ${d > 0 ? '+' : ''}${d} ${d > 0 ? '↑' : d < 0 ? '↓' : '→'}`;
           }
@@ -130,7 +164,7 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
 
       // 初期値の異常表示
       setTimeout(() => input.dispatchEvent(new Event('input')), 0);
-      getValue = () => (input.value === '' ? undefined : Number(input.value));
+      getValue = () => parseNumberText(input.value);
       break;
     }
     case 'select': {

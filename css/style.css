@@ -653,10 +653,15 @@ label {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 📷の読み取りステータス（width:100%）を次の行へ回す。
+     折り返しが無いと同じ行に居座り、入力欄が数十pxまで潰れてしまう */
+  flex-wrap: wrap;
 }
 
 .number-row input {
-  flex: 1;
+  /* 最低120pxは確保する（潰れると値が見えず、タップ位置もずれる） */
+  flex: 1 1 120px;
+  min-width: 0;
 }
 
 .unit {
@@ -675,6 +680,7 @@ label {
   color: var(--color-text-muted);
   display: block;
   width: 100%;
+  flex-basis: 100%; /* 入力欄と同じ行に並ばず、必ず次の行へ回る */
   margin-top: 2px;
 }
 

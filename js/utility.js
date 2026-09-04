@@ -11,7 +11,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail, ACTION_LABELS } from '/js/util.js';
-import { buildItemInput } from '/js/inspection-items.js';
+import { buildItemInput, normalizeNumberText } from '/js/inspection-items.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 
@@ -359,11 +359,12 @@ async function renderItems() {
     el('option', { value: 'text' }, '自由記述'),
   ]);
   const unitIn = el('input', { type: 'text', placeholder: '単位（L・MPa 等）' });
-  const minIn = el('input', { type: 'number', step: 'any', placeholder: '下限値' });
-  const maxIn = el('input', { type: 'number', step: 'any', placeholder: '上限値' });
+  // 上下限・並び順も入力欄と同じ理由で type=text（スピナー誤爆・IMEで弾かれるのを避ける）
+  const minIn = el('input', { type: 'text', inputmode: 'decimal', placeholder: '下限値' });
+  const maxIn = el('input', { type: 'text', inputmode: 'decimal', placeholder: '上限値' });
   const optionsIn = el('input', { type: 'text', placeholder: '選択肢（カンマ区切り）' });
   const alertIn = el('input', { type: 'text', placeholder: '異常扱いの選択肢（カンマ区切り）' });
-  const sortIn = el('input', { type: 'number', placeholder: '並び順', value: String((items.at(-1)?.sort_order ?? 0) + 1) });
+  const sortIn = el('input', { type: 'text', inputmode: 'numeric', placeholder: '並び順', value: String((items.at(-1)?.sort_order ?? 0) + 1) });
   const notice = el('p', { class: 'notice is-error', hidden: true }, '');
 
   const split = (s) => s.split(/[,、]/).map((v) => v.trim()).filter(Boolean);
@@ -378,11 +379,11 @@ async function renderItems() {
           section: sectionIn.value.trim(),
           input_type: typeSel.value,
           unit: unitIn.value.trim(),
-          min_value: minIn.value,
-          max_value: maxIn.value,
+          min_value: normalizeNumberText(minIn.value),
+          max_value: normalizeNumberText(maxIn.value),
           options: split(optionsIn.value),
           alert_options: split(alertIn.value),
-          sort_order: Number(sortIn.value) || 0,
+          sort_order: Number(normalizeNumberText(sortIn.value)) || 0,
         });
         go('?items=1');
       } catch (err) {
