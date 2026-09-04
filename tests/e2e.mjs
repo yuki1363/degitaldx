@@ -928,6 +928,33 @@ const utLimit = await api(`/api/utility-reports/items/${utHeader.id}`, {
 });
 check('ユーティリティ: 項目マスタPUT（admin・200）', utLimit.status === 200, `status=${utLimit.status}`);
 
+// --- 点検項目の並び替え（管理画面の ▲▼ = PUT /items/reorder） ---
+const utOrder0 = (await api('/api/utility-reports/items')).json.items.map((i) => i.id);
+const utSwapped = [...utOrder0];
+const utSwapAt = utSwapped.indexOf(utHeader.id);
+[utSwapped[utSwapAt - 1], utSwapped[utSwapAt]] = [utSwapped[utSwapAt], utSwapped[utSwapAt - 1]];
+const utReorder = await api('/api/utility-reports/items/reorder', {
+  method: 'PUT', body: { order: utSwapped, moved_id: utHeader.id },
+});
+check('ユーティリティ: 並び替えPUT（admin・200）', utReorder.status === 200, `status=${utReorder.status}`);
+const utReordered = (await api('/api/utility-reports/items')).json.items;
+check('ユーティリティ: 指定した順に並び替わる',
+  utReordered.map((i) => i.id).join(',') === utSwapped.join(','), utReordered.map((i) => i.name).join(','));
+check('ユーティリティ: 並び替え後は1000番台の連番（移行SQLの番号帯と衝突させない）',
+  utReordered.every((i, idx) => i.sort_order === 1000 + idx * 10),
+  utReordered.map((i) => i.sort_order).join(','));
+const utReorderShort = await api('/api/utility-reports/items/reorder', {
+  method: 'PUT', body: { order: utSwapped.slice(1) },
+});
+check('ユーティリティ: 項目の抜けた並び替えは409', utReorderShort.status === 409, `status=${utReorderShort.status}`);
+const utReorderBad = await api('/api/utility-reports/items/reorder', { method: 'PUT', body: { order: 'x' } });
+check('ユーティリティ: order が配列でなければ400', utReorderBad.status === 400, `status=${utReorderBad.status}`);
+// 以降の並び順テストのため元の順へ戻す（並び替えは何度でもやり直せる）
+const utReorderBack = await api('/api/utility-reports/items/reorder', { method: 'PUT', body: { order: utOrder0 } });
+const utBackList = (await api('/api/utility-reports/items')).json.items.map((i) => i.id);
+check('ユーティリティ: 元の順へ戻せる',
+  utReorderBack.status === 200 && utBackList.join(',') === utOrder0.join(','), utBackList.join(','));
+
 const utDate = '2026-01-15';
 const utPost = await api('/api/utility-reports', {
   method: 'POST',
@@ -1050,6 +1077,45 @@ check('ユーティリティ: 選択式・時刻にも前回値が出る',
   utHints.some((h) => h.name.includes('油面確認1') && h.hint.includes('前回 OK')) &&
   utHints.some((h) => h.name.includes('運転開始時間') && h.hint.includes('前回 07:00')),
   JSON.stringify(utHints));
+
+// --- 管理画面の ▲▼ で並び替えできる（画面操作） ---
+const utItemsBefore = pageErrors.length;
+await page.goto(`${BASE}/pages/utility?items=1`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+check('ユーティリティ: 点検項目マスタが pageerror なく表示', pageErrors.length === utItemsBefore,
+  pageErrors.slice(utItemsBefore).join(' / '));
+const utGroupNames = () => page.evaluate(() => {
+  const card = [...document.querySelectorAll('#app .card')].find((c) => c.querySelector('.row-list'));
+  // :scope を付けないとカード見出し（グループ名）まで拾ってしまう
+  //（querySelectorAll のセレクタは文書全体で評価されるため、外側の .row-list に一致する）
+  return [...card.querySelectorAll(':scope > .row-list .list-item-title')].map((n) => n.textContent.trim());
+});
+const utNamesBefore = await utGroupNames();
+const utRow = (n) => page.locator('#app .card .row-list .list-item').nth(n);
+await utRow(0).locator('button[title$="を下へ"]').click();
+await page.waitForTimeout(600);
+const utNamesAfter = await utGroupNames();
+check('ユーティリティ: ▼で項目が1つ下へ移動する',
+  utNamesAfter[0] === utNamesBefore[1] && utNamesAfter[1] === utNamesBefore[0],
+  `${utNamesBefore.slice(0, 2).join(',')} → ${utNamesAfter.slice(0, 2).join(',')}`);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+check('ユーティリティ: 並び替えが保存されている（再読込後も同じ）',
+  (await utGroupNames()).join(',') === utNamesAfter.join(','), (await utGroupNames()).join(','));
+// 元へ戻す（▲）
+await utRow(1).locator('button[title$="を上へ"]').click();
+await page.waitForTimeout(600);
+check('ユーティリティ: ▲で元の順へ戻せる（画面）',
+  (await utGroupNames()).join(',') === utNamesBefore.join(','), (await utGroupNames()).join(','));
+// スマホ幅（375px）で ▲▼🗑 を並べても横スクロールが出ないこと
+await page.setViewportSize({ width: 375, height: 720 });
+await page.waitForTimeout(300);
+const utOverflow = await page.evaluate(() => ({
+  scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth,
+}));
+check('ユーティリティ: 点検項目マスタが375px幅で横に溢れない',
+  utOverflow.scroll <= utOverflow.client + 1, JSON.stringify(utOverflow));
+await page.setViewportSize({ width: 1280, height: 720 });
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

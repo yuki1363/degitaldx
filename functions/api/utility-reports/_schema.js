@@ -59,6 +59,12 @@ export const UTILITY_ITEMS = [
 
 ];
 
+/** 管理画面から並び替えたときの採番。UTILITY_MIGRATIONS が参照する旧番号（1〜45）と
+ *  重ならない番号帯にすることで、手動の並びが移行SQLで巻き戻されるのを防ぐ
+ *  （さらに ensureUtilityOrder が「1000番台が1件でもあれば移行しない」で二重に守る） */
+export const REORDER_BASE = 1000;
+export const REORDER_STEP = 10;
+
 /**
  * 既に31項目を投入済みのDBを、上の並びへ合わせ直す移行。
  *   空気圧縮機の号機別「総運転時間N／油面確認N」を、圧縮機セクションのヘッダー圧力直後へ
@@ -152,6 +158,28 @@ export async function ensureUtilitySchema(db) {
     `CREATE INDEX IF NOT EXISTS idx_utility_report_date ON utility_report (report_date)`,
     `CREATE INDEX IF NOT EXISTS idx_utility_item_sort ON utility_item (sort_order, id)`,
     ...UTILITY_ITEMS.map(itemSeedSql),
-    ...UTILITY_MIGRATIONS,
   ]);
+  await ensureUtilityOrder(db);
+}
+
+let orderMigrated = false;
+
+/**
+ * 旧レイアウトの並びを最終形へ揃える移行（1プロセス内で1回だけ）。
+ * 管理画面から並び替え済み（sort_order が 1000番台）のDBでは実行しない
+ * ＝現場が決めた並びを移行SQLで巻き戻さないため。
+ */
+async function ensureUtilityOrder(db) {
+  if (orderMigrated) return;
+  try {
+    const row = await db.prepare(
+      `SELECT COUNT(*) AS n FROM utility_item WHERE sort_order >= ?`
+    ).bind(REORDER_BASE).first();
+    if ((row?.n ?? 0) === 0) {
+      for (const sql of UTILITY_MIGRATIONS) {
+        try { await db.prepare(sql).run(); } catch { /* 冪等なので失敗しても続行 */ }
+      }
+    }
+    orderMigrated = true;
+  } catch { /* テーブル未作成など。次のリクエストで再試行する */ }
 }
