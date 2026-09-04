@@ -17,6 +17,7 @@ const TYPE_CONFIG = {
   equipment:  { label: '設備台帳',  color: '#0f766e', bg: '#ccfbf1' },
   parts:      { label: '部品在庫',  color: '#9a3412', bg: '#ffedd5' },
   plan:       { label: '保全計画',  color: '#0369a1', bg: '#e0f2fe' },
+  utility:    { label: 'ユーティリティ日報', color: '#334155', bg: '#e2e8f0' },
 };
 
 const ALL_TYPES = Object.keys(TYPE_CONFIG);

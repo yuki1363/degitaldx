@@ -36,6 +36,15 @@ async function handleMeterCapture(file, master, input, statusEl, fileInput) {
   }
 }
 
+/** 選択肢を配列で返す。13 ユーティリティ日報の API は配列（options）、02 点検は JSON文字列（options_json） */
+function optionsOf(master) {
+  if (Array.isArray(master.options)) return master.options;
+  if (master.options_json) {
+    try { return JSON.parse(master.options_json); } catch { return []; }
+  }
+  return [];
+}
+
 /** 1項目分の入力UIを作る。getValue() は未入力なら undefined を返す */
 export function buildItemInput(master, existingValue, lastInfo = null) {
   const limits =
@@ -125,13 +134,63 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
       break;
     }
     case 'select': {
-      const options = master.options_json ? JSON.parse(master.options_json) : [];
+      const options = optionsOf(master);
       const select = el('select', {}, [
         el('option', { value: '' }, '選択してください'),
         options.map((o) => el('option', { value: o, selected: existingValue === o }, o)),
       ]);
+      // alert_options（例 ["要補充","異常"]）を選ぶとその場で警告する（13 ユーティリティ日報）
+      const alerts = Array.isArray(master.alert_options) ? master.alert_options : [];
+      if (alerts.length) {
+        const updateWarn = () => {
+          warn.hidden = !alerts.includes(select.value);
+          warn.textContent = '⚠ 異常です。状況をメモ・写真で残してください。';
+        };
+        select.addEventListener('change', updateWarn);
+        updateWarn();
+      }
       inputArea = select;
       getValue = () => (select.value === '' ? undefined : select.value);
+      break;
+    }
+    case 'time': {
+      // 運転開始・終了時刻など HH:MM の入力（13 ユーティリティ日報）
+      const input = el('input', {
+        type: 'time',
+        value: existingValue !== undefined && existingValue !== null ? String(existingValue) : '',
+      });
+      inputArea = input;
+      getValue = () => (input.value === '' ? undefined : input.value);
+      break;
+    }
+    case 'multi': {
+      // 複数選択（例: 空気圧縮機の運転号機 1〜3号機）。チップをタップでトグルする
+      const options = optionsOf(master);
+      const selected = new Set(
+        Array.isArray(existingValue)
+          ? existingValue.map(String)
+          : (existingValue ? String(existingValue).split(';').filter(Boolean) : [])
+      );
+      const summary = el('p', { class: 'hint' }, '');
+      const updateSummary = () => {
+        summary.textContent = selected.size
+          ? `選択中: ${options.filter((o) => selected.has(o)).join('、')}`
+          : '未選択';
+      };
+      const buttons = options.map((o) => {
+        const btn = el('button', { type: 'button', class: 'okng-btn' }, o);
+        const paint = () => btn.classList.toggle('selected-ok', selected.has(o));
+        btn.addEventListener('click', () => {
+          if (selected.has(o)) selected.delete(o); else selected.add(o);
+          paint();
+          updateSummary();
+        });
+        paint();
+        return btn;
+      });
+      updateSummary();
+      inputArea = el('div', {}, [el('div', { class: 'okng-row' }, buttons), summary]);
+      getValue = () => (selected.size === 0 ? undefined : options.filter((o) => selected.has(o)));
       break;
     }
     default: {
@@ -139,6 +198,17 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
       inputArea = input;
       getValue = () => input.value.trim();
     }
+  }
+
+  // 数値以外（選択式・複数選択・時刻・自由記述）の前回値表示。
+  // 差分は出せないので「前回 ○○（日付）」だけを入力欄の下に添える（13 ユーティリティ日報）。
+  // 02 点検は数値項目にしか lastInfo を渡さないため、既存の表示は変わらない。
+  if (!lastHint && lastInfo != null && lastInfo.value !== undefined
+      && lastInfo.value !== null && lastInfo.value !== '') {
+    const prev = Array.isArray(lastInfo.value) ? lastInfo.value.join('、') : String(lastInfo.value);
+    const dateStr = lastInfo.date ? `（${String(lastInfo.date).slice(0, 10).replace(/-/g, '/')}）` : '';
+    lastHint = el('p', { class: 'hint last-value-hint' },
+      `前回 ${prev}${master.unit ? ' ' + master.unit : ''}${dateStr}`);
   }
 
   const box = el('div', { class: 'check-item' }, [

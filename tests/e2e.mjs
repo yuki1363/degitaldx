@@ -10,7 +10,8 @@
 //     6. 部品の発注中バッジ → 入庫で自動解除
 //     7. 保全計画: 期間予定が週表示の全日に出る
 //     8. ダッシュボード: カスタムグラフ描画
-//     9. オフラインでの静的ページ表示（SWプリキャッシュ）
+//     9. ユーティリティ日報（1日1件ガード・異常判定・横断検索）
+//    10. オフラインでの静的ページ表示（SWプリキャッシュ）
 
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -75,7 +76,7 @@ await page.waitForFunction(async () => {
   return false;
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
-  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'dashboard', 'admin', 'chat', 'search', 'notifications'];
+  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
@@ -891,6 +892,143 @@ await page.waitForTimeout(400);
 check('電気点検: /electrical/ が pageerror なく表示', pageErrors.length === elBefore,
   pageErrors.slice(elBefore).join(' / '));
 check('電気点検: 設備バーが描画される', await page.evaluate(() => !!document.querySelector('.eq-btn')));
+
+// ---------- 9.7 ユーティリティ日報（13） ----------
+section('9.7 ユーティリティ日報（項目マスタ・1日1件ガード・異常判定）');
+const utItems = await api('/api/utility-reports/items');
+check('ユーティリティ: 初期項目が31件ある', utItems.json?.items?.length === 31,
+  `count=${utItems.json?.items?.length}`);
+const byName = (n) => utItems.json.items.find((i) => i.name === n);
+const utHeader = byName('ヘッダー圧力');
+const utOil = byName('油面確認1');
+const utComp = byName('空気圧縮機運転号機');
+const utStart = byName('運転開始時間');
+const utOrder = utItems.json.items.filter((i) => i.section === '圧縮機・温水').map((i) => i.name);
+check('ユーティリティ: 総運転時間と油面確認が号機ごとに1組で並ぶ',
+  utOrder.slice(0, 8).join(',') ===
+    '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3',
+  utOrder.join(','));
+const utSorts = utItems.json.items.map((i) => i.sort_order);
+check('ユーティリティ: sort_orderが重複しない（セクション分断の防止）',
+  new Set(utSorts).size === utSorts.length, utSorts.join(','));
+check('ユーティリティ: 総運転時間は数値入力（単位hr）',
+  utItems.json.items.filter((i) => i.name.startsWith('総運転時間'))
+    .every((i) => i.input_type === 'number' && i.unit === 'hr'));
+check('ユーティリティ: 複数選択・時刻・異常選択肢の定義がある',
+  utComp?.input_type === 'multi' && utStart?.input_type === 'time' &&
+  Array.isArray(utOil?.alert_options) && utOil.alert_options.includes('異常'),
+  JSON.stringify({ comp: utComp?.input_type, start: utStart?.input_type, alert: utOil?.alert_options }));
+
+// 上下限を設定してから異常判定を確認する（初期値は未設定のため）
+const utLimit = await api(`/api/utility-reports/items/${utHeader.id}`, {
+  method: 'PUT',
+  body: { section: utHeader.section, name: utHeader.name, input_type: 'number', unit: 'MPa',
+          min_value: 0.5, max_value: 0.9, sort_order: utHeader.sort_order },
+});
+check('ユーティリティ: 項目マスタPUT（admin・200）', utLimit.status === 200, `status=${utLimit.status}`);
+
+const utDate = '2026-01-15';
+const utPost = await api('/api/utility-reports', {
+  method: 'POST',
+  body: {
+    report_date: utDate, reporter_name: 'E2E点検者', note: 'E2Eユーティリティ特記',
+    values: { [utHeader.id]: 1.5, [utOil.id]: '異常', [utComp.id]: ['1号機', '3号機'], [utStart.id]: '08:30' },
+  },
+});
+check('ユーティリティ: 日報POST（201）', utPost.status === 201, `status=${utPost.status}`);
+check('ユーティリティ: 基準範囲外・異常選択で has_abnormal=1', utPost.json?.has_abnormal === 1,
+  JSON.stringify(utPost.json));
+const utId = utPost.json?.id;
+
+// 1日1件ガード（同じ日の2件目は 409 + 既存ID）
+const utDup = await api('/api/utility-reports', { method: 'POST', body: { report_date: utDate, values: {} } });
+check('ユーティリティ: 同じ日の2件目は409', utDup.status === 409, `status=${utDup.status}`);
+check('ユーティリティ: 409に既存IDが入る', utDup.json?.error?.detail?.existing_id === utId,
+  JSON.stringify(utDup.json?.error));
+
+// 入力値の検証（時刻の形式違反は400）
+const utBadTime = await api('/api/utility-reports', {
+  method: 'POST', body: { report_date: '2026-01-16', values: { [utStart.id]: '8:3' } },
+});
+check('ユーティリティ: 時刻の形式違反は400', utBadTime.status === 400, `status=${utBadTime.status}`);
+
+// 詳細（値のスナップショット・変更履歴）
+const utDetail = await api(`/api/utility-reports/${utId}`);
+const utComps = utDetail.json?.report?.values?.find((v) => v.item_id === utComp.id);
+check('ユーティリティ: 複数選択が配列で往復する',
+  Array.isArray(utComps?.value) && utComps.value.join(',') === '1号機,3号機', JSON.stringify(utComps?.value));
+check('ユーティリティ: 変更履歴が記録される', (utDetail.json?.history?.length ?? 0) >= 1);
+
+// 前回値API（この日より前の記録が無いので null）
+const utLatest = await api(`/api/utility-reports/latest?before=${utDate}`);
+check('ユーティリティ: 前回値なしでも200で report:null', utLatest.status === 200 && utLatest.json?.report === null,
+  JSON.stringify(utLatest.json));
+
+// 同時編集ガード
+const utConflict = await api(`/api/utility-reports/${utId}`, {
+  method: 'PUT',
+  body: { report_date: utDate, values: {}, expected_updated_at: '2000-01-01T00:00:00Z' },
+});
+check('ユーティリティ: 競合する編集は409', utConflict.status === 409, `status=${utConflict.status}`);
+
+// 横断検索（11）で拾える
+const utSearch = await api('/api/search?q=' + encodeURIComponent('E2Eユーティリティ特記') + '&type=utility');
+check('ユーティリティ: 横断検索でヒットする',
+  (utSearch.json?.results ?? []).some((r) => r.type === 'utility' && r.id === utId),
+  JSON.stringify((utSearch.json?.results ?? []).map((r) => r.type)));
+
+// 一覧・CSV用の with_values
+const utList = await api(`/api/utility-reports?from=${utDate}&to=${utDate}&with_values=1`);
+check('ユーティリティ: 一覧に values 付きで出る',
+  utList.json?.reports?.[0]?.id === utId && Array.isArray(utList.json.reports[0].values));
+
+// 論理削除 → 一覧から消え、同じ日を再登録できる
+const utDel = await api(`/api/utility-reports/${utId}`, { method: 'DELETE' });
+check('ユーティリティ: DELETE（200）', utDel.status === 200, `status=${utDel.status}`);
+const utList2 = await api(`/api/utility-reports?from=${utDate}&to=${utDate}`);
+check('ユーティリティ: 削除後は一覧に出ない（論理削除）', (utList2.json?.reports ?? []).length === 0);
+const utReAdd = await api('/api/utility-reports', {
+  method: 'POST',
+  body: { report_date: utDate, values: { [utOil.id]: 'OK', [utStart.id]: '07:00', [utHeader.id]: 0.7 } },
+});
+check('ユーティリティ: 削除した日は再登録できる', utReAdd.status === 201, `status=${utReAdd.status}`);
+
+// 入力画面が pageerror なく開く
+const utBefore = pageErrors.length;
+await page.goto(`${BASE}/pages/utility?new=1`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(300);
+check('ユーティリティ: 入力画面が pageerror なく表示', pageErrors.length === utBefore,
+  pageErrors.slice(utBefore).join(' / '));
+check('ユーティリティ: 点検項目が描画される',
+  await page.evaluate(() => document.querySelectorAll('.check-item').length >= 30),
+  String(await page.evaluate(() => document.querySelectorAll('.check-item').length)));
+// 項目名は先頭のテキストノード（基準値ヒントの span を除く）で比べる
+const utCards = await page.evaluate(() => [...document.querySelectorAll('#app .card')]
+  .map((c) => ({
+    title: c.querySelector('.card-title')?.textContent || '',
+    items: [...c.querySelectorAll('.check-item-name')].map((n) => (n.childNodes[0]?.textContent || '').trim()),
+  }))
+  .filter((c) => c.items.length));
+check('ユーティリティ: 同じセクションが1枚のカードにまとまる',
+  new Set(utCards.map((c) => c.title)).size === utCards.length,
+  utCards.map((c) => c.title).join(','));
+check('ユーティリティ: 圧縮機セクションが号機ごとに1組で並ぶ（画面）',
+  (utCards.find((c) => c.title === '圧縮機・温水')?.items || []).join(',') ===
+    '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3,' +
+    '温水ポンプ運転号機,温水ポンプ圧力,温水タンク容量,温水タンク内温度',
+  JSON.stringify(utCards.find((c) => c.title === '圧縮機・温水')?.items));
+const utHints = await page.evaluate(() =>
+  [...document.querySelectorAll('.check-item')].map((c) => ({
+    name: c.querySelector('.check-item-name')?.textContent || '',
+    hint: c.querySelector('.last-value-hint')?.textContent || '',
+  })).filter((x) => x.hint));
+check('ユーティリティ: 数値項目に前回値が出る',
+  utHints.some((h) => h.name.includes('ヘッダー圧力') && h.hint.includes('前回 0.7')),
+  JSON.stringify(utHints));
+check('ユーティリティ: 選択式・時刻にも前回値が出る',
+  utHints.some((h) => h.name.includes('油面確認1') && h.hint.includes('前回 OK')) &&
+  utHints.some((h) => h.name.includes('運転開始時間') && h.hint.includes('前回 07:00')),
+  JSON.stringify(utHints));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

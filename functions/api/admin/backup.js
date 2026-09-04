@@ -10,6 +10,7 @@ const TABLES = [
   'repair_request', 'repair_history',
   'parts_inventory', 'parts_transaction',
   'maintenance_plan', 'daily_report', 'report_category',
+  'utility_item', 'utility_report',
   'comments', 'chat_messages', 'notifications', 'files',
   'storage_reports', 'audit_log', 'master_history',
 ];

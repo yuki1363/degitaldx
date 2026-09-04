@@ -1,6 +1,7 @@
 // GET /api/search?q=キーワード&from=YYYY-MM-DD&to=YYYY-MM-DD&type=trouble,repair,...&equipment_id=N&category_id=N
 //
 // 検索対象: trouble_record / inspection_result / repair_request / daily_report / equipment_ledger
+//           parts_inventory / maintenance_plan / utility_report
 // 複数キーワード: スペース区切りで AND 検索
 // 実装: D1 の LIKE 検索（FTS5 への移行は将来の課題）
 
@@ -51,7 +52,7 @@ export async function onRequestGet({ request, env }) {
   const limit       = Math.min(Number(sp.get('limit')) || 50, 200);
 
   const keywords = q ? q.split(/\s+/).filter(Boolean).slice(0, 5) : [];
-  const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan'];
+  const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan', 'utility'];
 
   const results = [];
 
@@ -325,6 +326,46 @@ export async function onRequestGet({ request, env }) {
           url:            `/pages/plan?id=${r.id}`,
         });
       }
+    }
+  }
+
+  // ---------- ユーティリティ日報（13） ----------
+  if (types.includes('utility')) {
+    // 拡張列: 点検値のスナップショット（values_json）・入力者名も検索対象にする。
+    // 設備・ジャンルの絞り込みは持たない記録のため適用しない（日報と同じ扱い）。
+    const run = async (cols) => {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      let sql = `
+        SELECT id, report_date, reporter_name, has_abnormal, note, values_json
+        FROM utility_report
+        WHERE deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from) { sql += ` AND report_date >= ?`; binds.push(from); }
+      if (to)   { sql += ` AND report_date <= ?`; binds.push(to); }
+      sql += ` ORDER BY report_date DESC LIMIT ${limit}`;
+      return (await db.prepare(sql).bind(...binds).all()).results;
+    };
+    // テーブルが無い（未マイグレーションの）環境でも検索全体を止めない
+    let rows = [];
+    try {
+      rows = await searchWithFallback(run, ['values_json', 'note', 'reporter_name'], ['note']) ?? [];
+    } catch (err) {
+      console.warn('search: ユーティリティ日報の検索をスキップしました:', String((err && err.message) || err));
+    }
+    for (const r of rows) {
+      results.push({
+        type:           'utility',
+        id:             r.id,
+        date:           r.report_date,
+        title:          `ユーティリティ日報 ${r.report_date}`,
+        snippet:        [r.has_abnormal ? '⚠異常あり' : '', r.reporter_name || '', r.note || '']
+                          .filter(Boolean).join(' / ').slice(0, 80),
+        category_name:  null,
+        equipment_name: null,
+        url:            `/pages/utility?id=${r.id}`,
+      });
     }
   }
 
