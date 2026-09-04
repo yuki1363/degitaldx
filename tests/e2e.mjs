@@ -903,9 +903,10 @@ const utHeader = byName('ヘッダー圧力');
 const utOil = byName('油面確認1');
 const utComp = byName('空気圧縮機運転号機');
 const utStart = byName('運転開始時間');
-const utOrder = utItems.json.items.filter((i) => i.section === '圧縮機・温水').map((i) => i.name);
-check('ユーティリティ: 総運転時間と油面確認が号機ごとに1組で並ぶ',
-  utOrder.slice(0, 8).join(',') ===
+const utOrder = utItems.json.items.filter((i) => i.section === '温水・圧縮機').map((i) => i.name);
+check('ユーティリティ: 温水 → 圧縮機（号機ごとに1組）の順に並ぶ',
+  utOrder.join(',') ===
+    '温水ポンプ運転号機,温水ポンプ圧力,温水タンク容量,温水タンク内温度,' +
     '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3',
   utOrder.join(','));
 const utSorts = utItems.json.items.map((i) => i.sort_order);
@@ -1012,11 +1013,31 @@ const utCards = await page.evaluate(() => [...document.querySelectorAll('#app .c
 check('ユーティリティ: 同じセクションが1枚のカードにまとまる',
   new Set(utCards.map((c) => c.title)).size === utCards.length,
   utCards.map((c) => c.title).join(','));
-check('ユーティリティ: 圧縮機セクションが号機ごとに1組で並ぶ（画面）',
-  (utCards.find((c) => c.title === '圧縮機・温水')?.items || []).join(',') ===
-    '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3,' +
-    '温水ポンプ運転号機,温水ポンプ圧力,温水タンク容量,温水タンク内温度',
-  JSON.stringify(utCards.find((c) => c.title === '圧縮機・温水')?.items));
+check('ユーティリティ: 温水→圧縮機の順で描画される（画面）',
+  (utCards.find((c) => c.title === '温水・圧縮機')?.items || []).join(',') ===
+    '温水ポンプ運転号機,温水ポンプ圧力,温水タンク容量,温水タンク内温度,' +
+    '空気圧縮機運転号機,ヘッダー圧力,総運転時間1,油面確認1,総運転時間2,油面確認2,総運転時間3,油面確認3',
+  JSON.stringify(utCards.find((c) => c.title === '温水・圧縮機')?.items));
+
+// --- 数値欄の実キー入力（page.fill は値を直接代入するため、この種の不具合を検出できない） ---
+const utNumIdx = await page.evaluate(() => [...document.querySelectorAll('#app .check-item')]
+  .findIndex((c) => (c.querySelector('.check-item-name')?.childNodes[0]?.textContent || '').trim() === 'ヘッダー圧力'));
+const utNumInput = page.locator('#app .check-item').nth(utNumIdx).locator('input[type=text], input[type=number]').first();
+const utNumBox = await utNumInput.boundingBox();
+check('ユーティリティ: 数値欄が潰れていない（120px以上）',
+  (utNumBox?.width ?? 0) >= 120, `width=${Math.round(utNumBox?.width ?? 0)}`);
+
+const typeInto = async (text) => {
+  await utNumInput.evaluate((el) => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await utNumInput.click();
+  await page.keyboard.type(text);
+  return utNumInput.inputValue();
+};
+check('ユーティリティ: 欄をタップしただけでは値が入らない（スピナー誤爆なし）',
+  (await typeInto('')) === '', await utNumInput.inputValue());
+check('ユーティリティ: 実キー入力で小数が入る', (await typeInto('1.5')) === '1.5', await utNumInput.inputValue());
+check('ユーティリティ: 全角数字は半角へ直して入る', (await typeInto('１２３')) === '123', await utNumInput.inputValue());
+check('ユーティリティ: 桁区切りカンマを除いて入る', (await typeInto('1,234')) === '1234', await utNumInput.inputValue());
 const utHints = await page.evaluate(() =>
   [...document.querySelectorAll('.check-item')].map((c) => ({
     name: c.querySelector('.check-item-name')?.textContent || '',
