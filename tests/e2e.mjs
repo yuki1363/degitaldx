@@ -197,6 +197,9 @@ check('類似トラブル: フォームにパネルが表示される', await pa
 // [ai] 未構成のE2E環境では ai_enabled:false → AIボタンを出さない
 const meAiRes = await api('/api/me');
 check('/api/me: ai_enabled が false（[ai]未構成）', meAiRes.json?.ai_enabled === false, `ai_enabled=${meAiRes.json?.ai_enabled}`);
+// 画像AI（計器の📷読み取り・銘板読み取り）は既定オフ（AI_VISION_ENABLED=1 のときだけ出す）
+check('/api/me: ai_vision_enabled が既定で false',
+  meAiRes.json?.ai_vision_enabled === false, `ai_vision_enabled=${meAiRes.json?.ai_vision_enabled}`);
 check('類似トラブル: AI未構成ならAIボタンを出さない',
   !(await page.evaluate(() => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('AIに原因・対策')))));
 
@@ -1089,6 +1092,8 @@ await page.goto(`${BASE}/pages/utility?new=1`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(300);
 check('ユーティリティ: 入力画面が pageerror なく表示', pageErrors.length === utBefore,
   pageErrors.slice(utBefore).join(' / '));
+check('ユーティリティ: 計器の📷AI読み取りボタンは既定で出ない',
+  await page.evaluate(() => !document.querySelector('#app .meter-cam-btn')));
 check('ユーティリティ: 入力画面に写真・動画の追加UIがある',
   await page.evaluate(() => !!document.querySelector('#app input[type=file]')
     && [...document.querySelectorAll('#app button')].some((b) => b.textContent.includes('写真・動画を追加'))));

@@ -5,7 +5,7 @@
 //        /pages/ledger?edit=N     … 編集
 
 import { api } from '/js/api.js';
-import { getCurrentUser, hasRole } from '/js/auth.js';
+import { getCurrentUser, hasRole, getAiVisionEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import {
@@ -652,11 +652,14 @@ async function renderForm(existing) {
   render(app, [
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? '設備を編集' : '設備を追加'),
-      el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [
-        el('button', { class: 'btn btn-sm', onclick: () => ocrInput.click() }, '📷 銘板から自動読み取り（AI）'),
-        ocrInput,
-        ocrStatus,
-      ]),
+      // 銘板の自動読み取りも画像AIが有効なときだけ出す（既定は非表示＝手入力のみ）
+      getAiVisionEnabled()
+        ? el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [
+            el('button', { class: 'btn btn-sm', onclick: () => ocrInput.click() }, '📷 銘板から自動読み取り（AI）'),
+            ocrInput,
+            ocrStatus,
+          ])
+        : null,
       field('設備番号（QRラベルに使用・新規は空欄で自動採番）', f.code),
       field('設備名（必須・在庫/台帳から選択 or 自由入力）', cascade.lineInput),
       cascade.lineDatalist,
