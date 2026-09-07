@@ -275,6 +275,11 @@
 - **SQLインジェクション対策**: D1 へのクエリは必ずプリペアドステートメント。SQL文字列連結禁止
 - **権限チェックはサーバー側（Functions）で必ず実施**。フロントの出し分けはUX目的のみ
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
+### AI機能（Workers AI）の出し分け
+- テキスト系AI（トラブルの原因・対策提案など）は `env.AI` 未構成なら `/api/me` の `ai_enabled:false` でボタンを出さない
+- **画像を読むAI（計器の📷自動読み取り＝`/api/ai/read-meter`・設備銘板の自動読み取り＝`/api/ai/extract-equipment`）は既定で非表示**。既定モデル `@cf/meta/llama-3.2-11b-vision-instruct` は Cloudflare アカウントでの**ライセンス同意が必要**で、未同意だと実行時に `5016: … you must submit the prompt 'agree'` で失敗し、現場の入力画面に英文のライセンス文がそのまま出てしまうため（実際に発生）。表示するには Cloudflare ダッシュボード → Pages → 設定 → 環境変数に **`AI_VISION_ENABLED=1`** を設定する（`/api/me` の `ai_vision_enabled`／`js/auth.js` の `getAiVisionEnabled()`／`js/inspection-items.js`・`js/ledger.js`。再デプロイ不要）
+- ライセンス同意が不要なモデルに変えたい場合は `AI_VISION_MODEL` を設定する（`functions/api/_lib/ai-models.js`）
+
 ### セキュリティ必須事項（画像・ファイル保存含む）
 - **R2 バケットは非公開で運用**。`r2.dev` パブリックURL機能は絶対に有効化しない
 - 画像・ファイルの取得は必ず Functions 経由（`/api/files/*`）とし、Access の保護下に置く。R2 直リンク禁止

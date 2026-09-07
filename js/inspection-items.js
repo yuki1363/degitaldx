@@ -1,12 +1,14 @@
 // 点検項目1件分の入力UI（点検入力・点検まとめ入力で共通利用）
 //   buildItemInput(master, existingValue, lastInfo) → { box, getValue, master }
 //   getValue() は未入力なら undefined を返す（text は空文字）。
-//   数値項目には計器写真からのAI自動読み取り（📷）ボタンを併設する。
+//   数値項目には計器写真からのAI自動読み取り（📷）ボタンを併設する
+//   （AI_VISION_ENABLED=1 のときだけ。既定は非表示＝手入力のみ。auth.js の getAiVisionEnabled）。
 //   lastInfo = { value, date } を渡すと、数値項目に「前回値と差分」を表示する
 //   （基準内でも前回からの変化で劣化の兆候に気づけるようにする）。
 
 import { api } from '/js/api.js';
 import { el } from '/js/util.js';
+import { getAiVisionEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 
 async function handleMeterCapture(file, master, input, statusEl, fileInput) {
@@ -125,16 +127,24 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
       });
       if (existingValue !== undefined) input.dispatchEvent(new Event('input'));
 
-      const camStatus = el('span', { class: 'hint meter-cam-status' });
-      const camFileInput = el('input', {
-        type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none',
-        onchange: (e) => handleMeterCapture(e.target.files?.[0], master, input, camStatus, camFileInput),
-      });
-      const camBtn = el('button', {
-        type: 'button', class: 'btn btn-sm meter-cam-btn',
-        title: `${master.name} の計器を撮影して自動入力`,
-        onclick: () => camFileInput.click(),
-      }, '📷');
+      // 計器写真からのAI自動読み取り（📷）。画像AIが有効なときだけ出す
+      //（既定は非表示＝手入力のみ。ライセンス未同意のモデルだと実行時に失敗し、
+      //  現場の入力画面に英文のライセンス文が出てしまうため）
+      let camStatus = null;
+      let camFileInput = null;
+      let camBtn = null;
+      if (getAiVisionEnabled()) {
+        camStatus = el('span', { class: 'hint meter-cam-status' });
+        camFileInput = el('input', {
+          type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none',
+          onchange: (e) => handleMeterCapture(e.target.files?.[0], master, input, camStatus, camFileInput),
+        });
+        camBtn = el('button', {
+          type: 'button', class: 'btn btn-sm meter-cam-btn',
+          title: `${master.name} の計器を撮影して自動入力`,
+          onclick: () => camFileInput.click(),
+        }, '📷');
+      }
 
       inputArea = el('div', { class: 'number-row' }, [
         input,

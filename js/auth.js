@@ -19,6 +19,7 @@ export const ROLE_LABELS = {
 let currentUser = null;
 let vapidPublicKey = null;
 let aiEnabled = false;
+let aiVisionEnabled = false;
 
 /** ログインユーザーを取得する（結果はモジュール内にキャッシュ） */
 export async function getCurrentUser(force = false) {
@@ -27,6 +28,7 @@ export async function getCurrentUser(force = false) {
     currentUser = data.user;
     vapidPublicKey = data.vapid_public_key || null;
     aiEnabled = Boolean(data.ai_enabled);
+    aiVisionEnabled = Boolean(data.ai_vision_enabled);
   }
   return currentUser;
 }
@@ -39,6 +41,16 @@ export function getVapidPublicKey() {
 /** Workers AI が構成されているか（未構成ならAI機能のボタンを出さない）。getCurrentUser() 実行後に使える */
 export function getAiEnabled() {
   return aiEnabled;
+}
+
+/**
+ * 画像を読むAI機能（計器の📷自動読み取り・銘板の自動読み取り）を出してよいか。
+ * 既定は false（サーバー側の環境変数 AI_VISION_ENABLED=1 で有効化）。
+ * Llama 3.2 Vision はライセンス同意前だと実行時エラーになるため、未同意の間は
+ * ボタン自体を出さない（Web Push・AI提案と同じ「未構成なら機能を出さない」方式）。
+ */
+export function getAiVisionEnabled() {
+  return aiVisionEnabled;
 }
 
 /** user が role 以上の権限を持つか */
