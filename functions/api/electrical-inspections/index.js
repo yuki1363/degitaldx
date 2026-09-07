@@ -7,12 +7,15 @@
 //        → { records: { [client_id]: Record } }（型省略時は全タイプまとめて返す）
 //   POST /api/electrical-inspections   （editor以上）
 //        body: Record そのもの、または { record: Record }。client_id で冪等 upsert。
+//        Record.photos（[{ id, file_name, content_type }]）は先に /api/files へ
+//        アップロード済みの写真・動画。保存時にこの記録へ紐づける（02 点検実施と同じ流儀）。
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { ensureColumns } from '../_lib/db-compat.js';
+import { attachFiles } from '../_lib/storage.js';
 
 export const EQUIPMENT_TYPES = ['main', 'battery', 'generator'];
 
@@ -92,6 +95,9 @@ export async function onRequestPost({ env, request, data }) {
   const existing = await db.prepare('SELECT id FROM electrical_inspection WHERE client_id = ?')
     .bind(clientId).first();
 
+  // 記録に添えた写真・動画のID（record_json 側にもメタが残るので一覧はDB追加なしで描ける）
+  const fileIds = Array.isArray(rec.photos) ? rec.photos.map((p) => p && p.id) : [];
+
   if (existing) {
     await db.prepare(
       `UPDATE electrical_inspection
@@ -99,11 +105,14 @@ export async function onRequestPost({ env, request, data }) {
               updated_by = ?, updated_at = ?, deleted_at = NULL, deleted_by = NULL
         WHERE client_id = ?`
     ).bind(type, date, hasAbnormal, recordJson, email, now, clientId).run();
+    const attached = await attachFiles(env, {
+      fileIds, relatedTable: 'electrical_inspection', relatedId: existing.id, userEmail: email, now,
+    });
     await writeAuditLog(db, {
       tableName: 'electrical_inspection', recordId: existing.id, action: 'update',
-      changedBy: email, diff: { equipment_type: type, date },
+      changedBy: email, diff: { equipment_type: type, date, attached_files: attached },
     });
-    return json({ ok: true, id: existing.id, client_id: clientId });
+    return json({ ok: true, id: existing.id, client_id: clientId, attached_files: attached });
   }
 
   const res = await db.prepare(
@@ -113,9 +122,12 @@ export async function onRequestPost({ env, request, data }) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(clientId, type, date, hasAbnormal, recordJson, email, now, email, now).run();
   const id = res.meta?.last_row_id;
+  const attached = await attachFiles(env, {
+    fileIds, relatedTable: 'electrical_inspection', relatedId: id, userEmail: email, now,
+  });
   await writeAuditLog(db, {
     tableName: 'electrical_inspection', recordId: id, action: 'create',
-    changedBy: email, diff: { equipment_type: type, date },
+    changedBy: email, diff: { equipment_type: type, date, attached_files: attached },
   });
-  return json({ ok: true, id, client_id: clientId }, 201);
+  return json({ ok: true, id, client_id: clientId, attached_files: attached }, 201);
 }

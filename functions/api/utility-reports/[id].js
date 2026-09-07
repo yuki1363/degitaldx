@@ -1,10 +1,11 @@
 // 13 ユーティリティ日報 — 詳細・編集・削除
-//   GET    /api/utility-reports/:id  → { report, history }
+//   GET    /api/utility-reports/:id  → { report, files, history }
 //   PUT    /api/utility-reports/:id  （editor以上・expected_updated_at で同時編集ガード）
 //   DELETE /api/utility-reports/:id  （editor以上・論理削除）
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
+import { attachFiles, listAttachedFiles } from '../_lib/storage.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { ensureUtilitySchema } from './_schema.js';
@@ -29,15 +30,18 @@ export async function onRequestGet({ params, env, data }) {
   const row = await findReport(db, id);
   if (!row) return jsonError(404, 'ユーティリティ日報が見つかりません');
 
-  const { results: history } = await db.prepare(
-    `SELECT action, changed_by, changed_at, diff_json
-       FROM audit_log
-      WHERE table_name = 'utility_report' AND record_id = ?
-      ORDER BY changed_at DESC, id DESC
-      LIMIT 20`
-  ).bind(id).all();
+  const [files, { results: history }] = await Promise.all([
+    listAttachedFiles(env, 'utility_report', id),
+    db.prepare(
+      `SELECT action, changed_by, changed_at, diff_json
+         FROM audit_log
+        WHERE table_name = 'utility_report' AND record_id = ?
+        ORDER BY changed_at DESC, id DESC
+        LIMIT 20`
+    ).bind(id).all(),
+  ]);
 
-  return json({ report: toReport(row), history: history ?? [] });
+  return json({ report: toReport(row), files, history: history ?? [] });
 }
 
 export async function onRequestPut({ request, params, env, data }) {
@@ -88,11 +92,20 @@ export async function onRequestPut({ request, params, env, data }) {
     JSON.stringify(built.values), note, email, now, id
   ).run();
 
+  // 編集で追加した写真・動画を紐づける（既存の添付はそのまま残る）
+  const attached = await attachFiles(env, {
+    fileIds: body.file_ids,
+    relatedTable: 'utility_report',
+    relatedId: id,
+    userEmail: email,
+    now,
+  });
+
   await writeAuditLog(db, {
     tableName: 'utility_report', recordId: id, action: 'update', changedBy: email,
-    diff: { report_date: reportDate, has_abnormal: built.hasAbnormal, note },
+    diff: { report_date: reportDate, has_abnormal: built.hasAbnormal, note, attached_files: attached },
   });
-  return json({ ok: true, has_abnormal: built.hasAbnormal });
+  return json({ ok: true, has_abnormal: built.hasAbnormal, attached_files: attached });
 }
 
 export async function onRequestDelete({ params, env, data }) {
