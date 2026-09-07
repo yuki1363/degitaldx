@@ -852,6 +852,17 @@ for (let i = 0; i < 10; i++) {
 }
 check('棚卸モードで在庫が実数に更新される', stQty === 7, `qty=${stQty}`);
 
+// 小さなPNGを /api/files へアップロードするヘルパ（写真添付テスト用）
+const uploadTestImage = (filename) => page.evaluate(async (name) => {
+  const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
+  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#1a5'; ctx.fillRect(0, 0, 8, 8);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  const res = await fetch(`/api/files?filename=${encodeURIComponent(name)}`, {
+    method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob,
+  });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}, filename);
+
 // ---------- 9.6 電気設備点検（D1同期・別アプリ統合） ----------
 section('9.6 電気設備点検（/electrical/ + /api/electrical-*）');
 // 記録を POST → client_id キーで取得できる。has_abnormal は repair 混在で1（サーバー算出）
@@ -880,6 +891,26 @@ const elCfgGet = await api('/api/electrical-config');
 check('電気点検: 設定がGETで戻る', elCfgGet.json?.battery?.[0]?.title === 'E2Eカテゴリ', JSON.stringify(elCfgGet.json?.battery));
 check('電気点検: 乗数×2400が設定に保持される', elCfgGet.json?.battery?.[0]?.measurements?.[0]?.multiplier === 2400);
 check('電気点検: qualifier=trueが設定に保持される', elCfgGet.json?.battery?.[0]?.measurements?.[1]?.qualifier === true);
+// 写真添付（12）: アップロード → 記録に photos を載せて保存 → 記録に紐づく
+const elUp = await uploadTestImage('e2e-electrical.png');
+check('電気点検: 写真アップロード（201）', elUp.status === 201, `status=${elUp.status}`);
+const elFileId = elUp.json?.file?.id;
+const elPhotoPost = await api('/api/electrical-inspections', {
+  method: 'POST',
+  body: { ...elRec, photos: [{ id: elFileId, file_name: 'e2e-electrical.png', content_type: 'image/png' }] },
+});
+check('電気点検: 写真つきで保存できる（200）', elPhotoPost.status === 200, `status=${elPhotoPost.status}`);
+check('電気点検: 写真が記録に紐づく（attached_files=1）', elPhotoPost.json?.attached_files === 1,
+  JSON.stringify(elPhotoPost.json));
+const elGet3 = await api('/api/electrical-inspections?equipment_type=main');
+check('電気点検: 取得した記録に photos が入る',
+  (elGet3.json?.records?.[elClientId]?.photos ?? []).some((p) => p.id === elFileId),
+  JSON.stringify(elGet3.json?.records?.[elClientId]?.photos));
+const elFileList = await api('/api/files');
+check('電気点検: files の related_table が electrical_inspection になる',
+  (elFileList.json?.files ?? []).some((f) => f.id === elFileId && f.related_table === 'electrical_inspection'),
+  JSON.stringify((elFileList.json?.files ?? []).find((f) => f.id === elFileId)));
+
 // 論理削除 → 一覧から消える
 const elDel = await api(`/api/electrical-inspections/${encodeURIComponent(elClientId)}`, { method: 'DELETE' });
 check('電気点検: 記録DELETE（200）', elDel.status === 200, `status=${elDel.status}`);
@@ -892,6 +923,13 @@ await page.waitForTimeout(400);
 check('電気点検: /electrical/ が pageerror なく表示', pageErrors.length === elBefore,
   pageErrors.slice(elBefore).join(' / '));
 check('電気点検: 設備バーが描画される', await page.evaluate(() => !!document.querySelector('.eq-btn')));
+check('電気点検: 写真・動画の追加UIがある',
+  await page.evaluate(() => !!document.getElementById('photo-input')
+    && [...document.querySelectorAll('button')].some((b) => b.textContent.includes('写真・動画を追加'))));
+// アップロード用モジュール（/js/files.js）が読み込めている（import失敗だと保存時に写真が送れない）
+await page.waitForFunction(() => !!window.ElecFiles, { timeout: 5000 }).catch(() => {});
+check('電気点検: 写真アップロードモジュールが読み込まれる',
+  await page.evaluate(() => !!(window.ElecFiles && window.ElecFiles.uploadFile)));
 
 // ---------- 9.7 ユーティリティ日報（13） ----------
 section('9.7 ユーティリティ日報（項目マスタ・1日1件ガード・異常判定）');
@@ -1021,12 +1059,37 @@ const utReAdd = await api('/api/utility-reports', {
 });
 check('ユーティリティ: 削除した日は再登録できる', utReAdd.status === 201, `status=${utReAdd.status}`);
 
+// 写真添付（13）: アップロード → file_ids で保存 → 詳細に files が返る
+const utUp = await uploadTestImage('e2e-utility.png');
+check('ユーティリティ: 写真アップロード（201）', utUp.status === 201, `status=${utUp.status}`);
+const utFileId = utUp.json?.file?.id;
+const utReAddId = utReAdd.json?.id;
+const utAttach = await api(`/api/utility-reports/${utReAddId}`, {
+  method: 'PUT',
+  // values は再登録時と同じ内容を送る（PUTは全置換のため。後段の「前回値」テストの前提を壊さない）
+  body: {
+    report_date: utDate,
+    values: { [utOil.id]: 'OK', [utStart.id]: '07:00', [utHeader.id]: 0.7 },
+    file_ids: [utFileId],
+  },
+});
+check('ユーティリティ: 写真を添付して保存できる（PUT 200）', utAttach.status === 200, `status=${utAttach.status}`);
+check('ユーティリティ: 写真が日報に紐づく（attached_files=1）', utAttach.json?.attached_files === 1,
+  JSON.stringify(utAttach.json));
+const utDetail2 = await api(`/api/utility-reports/${utReAddId}`);
+check('ユーティリティ: 詳細APIが files を返す',
+  (utDetail2.json?.files ?? []).some((f) => f.id === utFileId && f.content_type === 'image/png'),
+  JSON.stringify(utDetail2.json?.files));
+
 // 入力画面が pageerror なく開く
 const utBefore = pageErrors.length;
 await page.goto(`${BASE}/pages/utility?new=1`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(300);
 check('ユーティリティ: 入力画面が pageerror なく表示', pageErrors.length === utBefore,
   pageErrors.slice(utBefore).join(' / '));
+check('ユーティリティ: 入力画面に写真・動画の追加UIがある',
+  await page.evaluate(() => !!document.querySelector('#app input[type=file]')
+    && [...document.querySelectorAll('#app button')].some((b) => b.textContent.includes('写真・動画を追加'))));
 check('ユーティリティ: 点検項目が描画される',
   await page.evaluate(() => document.querySelectorAll('.check-item').length >= 30),
   String(await page.evaluate(() => document.querySelectorAll('.check-item').length)));
@@ -1116,6 +1179,12 @@ const utOverflow = await page.evaluate(() => ({
 check('ユーティリティ: 点検項目マスタが375px幅で横に溢れない',
   utOverflow.scroll <= utOverflow.client + 1, JSON.stringify(utOverflow));
 await page.setViewportSize({ width: 1280, height: 720 });
+
+// 詳細画面に添付写真のサムネイルが出る
+await page.goto(`${BASE}/pages/utility?id=${utReAddId}`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+check('ユーティリティ: 詳細に写真サムネイルが表示される',
+  await page.evaluate(() => !!document.querySelector('#app img.thumb')));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

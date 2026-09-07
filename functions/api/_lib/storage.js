@@ -40,6 +40,8 @@ export const RELATED_TABLES = [
   'comments',
   'chat_messages',
   'print_templates', // 帳票テンプレートの背景用紙画像
+  'utility_report', // 13 ユーティリティ日報の写真・動画
+  'electrical_inspection', // 12 電気設備点検の写真・動画
 ];
 
 /**

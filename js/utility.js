@@ -13,6 +13,7 @@ import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail, ACTION_LABELS } from '/js/util.js';
 import { buildItemInput, normalizeNumberText } from '/js/inspection-items.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
+import { uploadFile, resizeImageFile } from '/js/files.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 
 const app = document.getElementById('app');
@@ -27,6 +28,27 @@ function displayValue(v) {
   if (v === null || v === undefined || v === '') return '';
   const text = Array.isArray(v.value) ? v.value.join('、') : String(v.value);
   return v.unit ? `${text} ${v.unit}` : text;
+}
+
+/** 添付ファイル（写真＝サムネイル／動画・その他＝リンク）の表示。02 点検の詳細と同じ形 */
+function buildAttachmentViews(files) {
+  const images = files.filter((f) => (f.content_type || '').startsWith('image/'));
+  const others = files.filter((f) => !(f.content_type || '').startsWith('image/'));
+  return [
+    images.length > 0
+      ? el('div', { class: 'thumb-grid' }, images.map((f) =>
+          el('a', { href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' }, [
+            el('img', { class: 'thumb', src: `/api/files/${f.id}`, alt: f.file_name, loading: 'lazy' }),
+          ])))
+      : null,
+    others.length > 0
+      ? el('div', { class: 'row-list' }, others.map((f) =>
+          el('div', { class: 'file-row' }, [
+            el('a', { class: 'file-name', href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' },
+              `🎬 ${f.file_name}`),
+          ])))
+      : null,
+  ];
 }
 
 /** datetime-local 用のローカル日時文字列（YYYY-MM-DDTHH:MM） */
@@ -132,7 +154,7 @@ async function renderList() {
 
 // ---------------- 入力（新規・編集） ----------------
 
-async function renderForm(existing) {
+async function renderForm(existing, existingFiles = []) {
   const { items } = await api.get('/api/utility-reports/items');
   if (items.length === 0) {
     render(app, [
@@ -208,6 +230,35 @@ async function renderForm(existing) {
     body.appendChild(built.box);
   }
 
+  // ---- 写真・動画（02 点検実施と同じ流儀: 保存時にまとめてアップロードして紐づける）----
+  //   uploaded: アップロード済み（保存前に再送しないよう分けて持つ）
+  //   pendingFiles: これから送るファイル
+  const uploaded = [];
+  const pendingFiles = [];
+  const fileListBox = el('div', { class: 'row-list' }, []);
+  const renderPending = () => {
+    render(fileListBox, [
+      ...uploaded.map((m) => el('div', { class: 'file-row' }, [
+        el('span', { class: 'file-name' }, `✅ ${m.file_name}`),
+      ])),
+      ...pendingFiles.map((f, idx) => el('div', { class: 'file-row' }, [
+        el('span', { class: 'file-name' }, f.name),
+        el('button', {
+          class: 'btn btn-sm', type: 'button',
+          onclick: () => { pendingFiles.splice(idx, 1); renderPending(); },
+        }, '外す'),
+      ])),
+    ]);
+  };
+  const fileInput = el('input', {
+    type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true,
+    onchange: (e) => {
+      for (const f of e.target.files) pendingFiles.push(f);
+      renderPending();
+      e.target.value = '';
+    },
+  });
+
   const notice = el('p', { class: 'notice is-error', hidden: true }, '');
   const saveBtn = el('button', { class: 'btn btn-primary' }, existing ? '保存する' : '登録する');
 
@@ -220,12 +271,25 @@ async function renderForm(existing) {
         const v = getValue();
         if (v !== undefined && v !== '') values[item.id] = v;
       }
+      // 写真・動画を先に送る（画像はリサイズ＝EXIF除去）。
+      // 送信済みは uploaded へ移すので、保存が 409 等で失敗して押し直しても二重送信にならない。
+      while (pendingFiles.length > 0) {
+        saveBtn.textContent = `写真を送信中… (${uploaded.length + 1}/${uploaded.length + pendingFiles.length})`;
+        const prepared = await resizeImageFile(pendingFiles[0]);
+        const meta = await uploadFile(prepared, {});
+        uploaded.push(meta);
+        pendingFiles.shift();
+        renderPending();
+      }
+      saveBtn.textContent = existing ? '保存する' : '登録する';
+
       const body = {
         report_date: dateIn.value,
         inspected_at: datetimeIn.value ? new Date(datetimeIn.value).toISOString() : undefined,
         reporter_name: reporterIn.value.trim(),
         note: noteIn.value.trim(),
         values,
+        file_ids: uploaded.map((m) => m.id),
       };
       if (existing) {
         await api.put(`/api/utility-reports/${existing.id}`, { ...body, expected_updated_at: existing.updated_at });
@@ -272,6 +336,14 @@ async function renderForm(existing) {
       el('h2', { class: 'card-title' }, '特記事項・備考'),
       el('label', { class: 'field' }, [noteIn]),
     ]),
+    el('div', { class: 'card' }, [
+      el('h2', { class: 'card-title' }, '写真・動画'),
+      ...(existingFiles.length > 0 ? buildAttachmentViews(existingFiles) : []),
+      fileInput,
+      el('button', { class: 'btn', type: 'button', onclick: () => fileInput.click() }, '📷 写真・動画を追加'),
+      fileListBox,
+      el('p', { class: 'hint' }, '写真は長辺1280pxに縮小して保存します（位置情報などのEXIFは自動で除去）。保存を押すと送信されます。'),
+    ]),
     notice,
     el('div', { class: 'action-row' }, [
       saveBtn,
@@ -283,7 +355,7 @@ async function renderForm(existing) {
 // ---------------- 詳細 ----------------
 
 async function renderDetail(id) {
-  const { report, history } = await api.get(`/api/utility-reports/${id}`);
+  const { report, files = [], history } = await api.get(`/api/utility-reports/${id}`);
 
   // セクションごとにカード化し、02 点検の詳細と同じ result-row で値を並べる
   //（入力画面と同じく、同じセクション名は1枚にまとめる）
@@ -317,6 +389,10 @@ async function renderDetail(id) {
     report.note ? el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, '特記事項・備考'),
       el('p', { class: 'note-box' }, report.note),
+    ]) : null,
+    files.length > 0 ? el('div', { class: 'card' }, [
+      el('h2', { class: 'card-title' }, '写真・動画'),
+      ...buildAttachmentViews(files),
     ]) : null,
     hasRole(currentUser, 'editor') ? el('div', { class: 'action-row' }, [
       el('button', { class: 'btn btn-primary', onclick: () => go(`?edit=${report.id}`) }, '✏️ 編集'),
@@ -524,8 +600,8 @@ try {
   } else if (params.get('id')) {
     await renderDetail(Number(params.get('id')));
   } else if (params.get('edit')) {
-    const { report } = await api.get(`/api/utility-reports/${Number(params.get('edit'))}`);
-    await renderForm(report);
+    const { report, files = [] } = await api.get(`/api/utility-reports/${Number(params.get('edit'))}`);
+    await renderForm(report, files);
   } else if (params.get('new')) {
     await renderForm(null);
   } else {

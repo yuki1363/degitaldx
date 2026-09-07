@@ -208,6 +208,13 @@ body.modal-open { overflow: hidden; }
       <textarea id="repair-notes" rows="5" placeholder="実施した改修・修理の内容を詳しく入力（部品交換、作業内容、使用資材など）" style="min-height:120px"></textarea>
     </div>
   </div>
+  <div class="card" style="margin-top:4px">
+    <div class="card-title">写真・動画</div>
+    <input type="file" id="photo-input" accept="image/*,video/*" multiple style="display:none" onchange="onPickPhotos(event)">
+    <button class="btn btn-secondary" type="button" onclick="document.getElementById('photo-input').click()">📷 写真・動画を追加</button>
+    <div id="photo-list" style="margin-top:8px"></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:6px">写真は長辺1280pxに縮小して保存します（位置情報などのEXIFは自動で除去）。「保存する」を押すと送信されます。</div>
+  </div>
   <div id="edit-banner" style="display:none;background:#eafaf1;border:1px solid #1e8449;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
       <span id="edit-info" style="color:#1e5631;font-weight:bold">✎ 記録を編集中</span>
@@ -338,6 +345,60 @@ async function loadServerData() {
 }
 async function pushRecordToServer(rec) { if (!rec || !rec.id) return; await api('/electrical-inspections', { method:'POST', body: JSON.stringify(rec) }); }
 async function deleteRecordFromServer(id) { await api('/electrical-inspections/' + encodeURIComponent(id), { method:'DELETE' }); }
+// ===================== 写真・動画 =====================
+// アップロードはアプリ共通の /js/files.js（容量ガード・EXIF除去つき）を使う。
+// この画面は classic script なので、末尾の module script が window.ElecFiles に載せている。
+//   pendingPhotos … これから送るファイル / currentPhotos … 送信済み（記録に添付するメタ）
+let pendingPhotos = [];
+let currentPhotos = [];
+
+function onPickPhotos(e) {
+  for (const f of e.target.files) pendingPhotos.push(f);
+  e.target.value = '';
+  renderPhotoList();
+  scheduleDraftSave();
+}
+function removePendingPhoto(i) { pendingPhotos.splice(i, 1); renderPhotoList(); }
+function removeCurrentPhoto(i) { currentPhotos.splice(i, 1); renderPhotoList(); scheduleDraftSave(); }
+function resetPhotos(list) {
+  currentPhotos = Array.isArray(list) ? list.slice() : [];
+  pendingPhotos = [];
+  renderPhotoList();
+}
+function photoRow(inner, name, btn) {
+  return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+    ${inner}<span style="flex:1;font-size:13px;word-break:break-all">${name}</span>${btn}</div>`;
+}
+function renderPhotoList() {
+  const box = document.getElementById('photo-list');
+  if (!box) return;
+  let html = '';
+  currentPhotos.forEach((p, i) => {
+    const thumb = (p.content_type || '').startsWith('image/')
+      ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
+      : '<span style="font-size:22px">🎬</span>';
+    html += photoRow(thumb, esc(p.file_name || ''),
+      `<button class="btn btn-secondary btn-sm" type="button" onclick="removeCurrentPhoto(${i})">外す</button>`);
+  });
+  pendingPhotos.forEach((f, i) => {
+    html += photoRow('<span style="font-size:22px">📷</span>', esc(f.name) + '（未送信）',
+      `<button class="btn btn-secondary btn-sm" type="button" onclick="removePendingPhoto(${i})">外す</button>`);
+  });
+  box.innerHTML = html;
+}
+// 保存の直前に呼ぶ。送信済みは currentPhotos へ移すので、保存が失敗して押し直しても二重送信にならない。
+async function uploadPendingPhotos() {
+  if (!pendingPhotos.length) return;
+  if (!window.ElecFiles) throw new Error('アップロード機能を読み込めませんでした。ページを再読み込みしてください');
+  while (pendingPhotos.length) {
+    const prepared = await window.ElecFiles.resizeImageFile(pendingPhotos[0]);
+    const meta = await window.ElecFiles.uploadFile(prepared, {});
+    currentPhotos.push({ id: meta.id, file_name: meta.file_name, content_type: meta.content_type });
+    pendingPhotos.shift();
+    renderPhotoList();
+  }
+}
+
 function pushConfigToServer(eqType, cfg) { if (!SERVER.canEditConfig) return; api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, config: cfg }) }).catch(e => toast('設定をサーバーに保存できませんでした: '+e.message)); }
 function pushDefaultToServer(eqType, def) { if (!SERVER.canEditConfig) return; api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, default: def }) }).catch(e => toast('既定をサーバーに保存できませんでした: '+e.message)); }
 
@@ -352,6 +413,7 @@ function switchEquipment(eq) {
   document.querySelectorAll('.eq-btn').forEach((b,i) => b.classList.toggle('active', ['main','battery','generator'][i]===eq));
   document.getElementById('main-title').textContent = EQ_NAMES[eq] + ' 日常点検記録';
   currentStatuses = {};
+  resetPhotos([]);
   buildEntryForm();
   checkDraftOnLoad();
   if (!editingRecordId) loadBasicInfo(); // 基本情報を共通復元（編集中は上書きしない）
@@ -519,6 +581,7 @@ function loadDataIntoForm(data) {
   if (data.humidity  !== undefined && data.humidity  !== '') document.getElementById('humidity').value  = data.humidity;
   if (data.remarks)     document.getElementById('remarks').value      = data.remarks;
   if (data.repairNotes) document.getElementById('repair-notes').value = data.repairNotes;
+  resetPhotos(data.photos);
   if (data.statuses) {
     Object.entries(data.statuses).forEach(([key, val]) => {
       currentStatuses[key] = val;
@@ -758,9 +821,16 @@ function showTab(tab) {
 
 // ===================== 保存 =====================
 async function saveRecord() {
+  if (!document.getElementById('date').value)      { alert('点検日を入力してください'); return; }
+  if (!document.getElementById('inspector').value) { alert('点検者名を入力してください'); return; }
+  // 写真・動画を先に送る（画像はリサイズ＝EXIF除去）。送信できたものだけ記録に載せる。
+  try {
+    await uploadPendingPhotos();
+  } catch(e) {
+    alert('写真を送信できませんでした：' + e.message);
+    return;
+  }
   const data = collectForm();
-  if (!data.date)      { alert('点検日を入力してください'); return; }
-  if (!data.inspector) { alert('点検者名を入力してください'); return; }
   const recs = getRecords();
   let savedId;
   if (editingRecordId && recs[editingRecordId]) {
@@ -793,6 +863,7 @@ async function saveRecord() {
   }
   clearDraft();
   saveBasicInfo();  // 点検者名・設備名称・天候を次回のデフォルトとして保持
+  resetPhotos([]);  // 写真は記録側に保存済み。次の記録へ持ち越さない
   alert('保存しました');
   renderHistory();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -859,6 +930,7 @@ function collectForm() {
     })),
     remarks: document.getElementById('remarks').value,
     repairNotes: document.getElementById('repair-notes').value,
+    photos: currentPhotos.map(p => ({ ...p })),
     config: JSON.parse(JSON.stringify(cfg)),
   };
 }
@@ -1234,6 +1306,17 @@ function buildRecordHTML(r) {
       ${th2('改修内容')}
       <tr><td style="padding:8px;border:1px solid #ccc;white-space:pre-wrap">${esc(r.repairNotes)}</td></tr>
     </table>`;
+  }
+  const photos = Array.isArray(r.photos) ? r.photos : [];
+  if (photos.length) {
+    html += `<div style="margin-top:8px"><div style="font-weight:bold;font-size:13px;margin-bottom:6px">写真・動画</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">`;
+    photos.forEach(p => {
+      html += (p.content_type || '').startsWith('image/')
+        ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="${esc(p.file_name||'')}" style="width:110px;height:110px;object-fit:cover;border:1px solid #ccc;border-radius:6px"></a>`
+        : `<a href="/api/files/${p.id}" target="_blank" rel="noopener" style="font-size:13px">🎬 ${esc(p.file_name||'')}</a>`;
+    });
+    html += `</div></div>`;
   }
   html += `<div style="margin-top:8px;font-size:11px;color:#aaa;text-align:right">保存日時：${r.savedAt ? new Date(r.savedAt).toLocaleString('ja-JP') : '—'}</div>`;
   return html;
@@ -1687,6 +1770,13 @@ function esc(s) {
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
+</script>
+
+<!-- 写真アップロードはアプリ共通モジュールを使う（容量ガード・EXIF除去つき）。
+     この画面は classic script のため、module から window へ載せて共有する。 -->
+<script type="module">
+import { uploadFile, resizeImageFile } from '/js/files.js';
+window.ElecFiles = { uploadFile, resizeImageFile };
 </script>
 </body>
 </html>

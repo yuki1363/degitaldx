@@ -2,11 +2,13 @@
 //   GET  /api/utility-reports?from=&to=&date=&limit=&with_values=1
 //        → { reports: [...] }（with_values=1 のときは values 配列付き＝CSV出力用）
 //   POST /api/utility-reports（editor以上）
-//        body: { report_date, inspected_at, reporter_name, note, values }
+//        body: { report_date, inspected_at, reporter_name, note, values, file_ids }
+//        file_ids は先に /api/files へアップロード済みの写真・動画のID（02 点検実施と同じ流儀）
 //        同じ日の未削除レコードがあれば 409 + existing_id（1日1件ガード）
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
+import { attachFiles } from '../_lib/storage.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { ensureUtilitySchema } from './_schema.js';
@@ -89,9 +91,19 @@ export async function onRequestPost({ request, env, data }) {
   ).run();
 
   const id = res.meta?.last_row_id;
+
+  // 先にアップロード済みの写真・動画をこの日報に紐づける
+  const attached = await attachFiles(env, {
+    fileIds: body.file_ids,
+    relatedTable: 'utility_report',
+    relatedId: id,
+    userEmail: email,
+    now,
+  });
+
   await writeAuditLog(db, {
     tableName: 'utility_report', recordId: id, action: 'create', changedBy: email,
-    diff: { report_date: reportDate, has_abnormal: built.hasAbnormal, note },
+    diff: { report_date: reportDate, has_abnormal: built.hasAbnormal, note, attached_files: attached },
   });
-  return json({ id, has_abnormal: built.hasAbnormal }, 201);
+  return json({ id, has_abnormal: built.hasAbnormal, attached_files: attached }, 201);
 }
