@@ -930,6 +930,8 @@ check('電気点検: 写真・動画の追加UIがある',
 await page.waitForFunction(() => !!window.ElecFiles, { timeout: 5000 }).catch(() => {});
 check('電気点検: 写真アップロードモジュールが読み込まれる',
   await page.evaluate(() => !!(window.ElecFiles && window.ElecFiles.uploadFile)));
+check('電気点検: 写真の削除UIが用意されている',
+  await page.evaluate(() => typeof deleteCurrentPhoto === 'function' && typeof uploadPendingPhotos === 'function'));
 
 // ---------- 9.7 ユーティリティ日報（13） ----------
 section('9.7 ユーティリティ日報（項目マスタ・1日1件ガード・異常判定）');
@@ -1185,6 +1187,15 @@ await page.goto(`${BASE}/pages/utility?id=${utReAddId}`, { waitUntil: 'networkid
 await page.waitForTimeout(400);
 check('ユーティリティ: 詳細に写真サムネイルが表示される',
   await page.evaluate(() => !!document.querySelector('#app img.thumb')));
+// 添付写真の削除（× ボタン → 論理削除）。confirm() は page.on('dialog') が自動承諾する
+await page.click('#app .thumb-del');
+await page.waitForTimeout(1000);
+check('ユーティリティ: 詳細から写真を削除できる（画面）',
+  await page.evaluate(() => !document.querySelector('#app img.thumb')));
+const utAfterDel = await api(`/api/utility-reports/${utReAddId}`);
+check('ユーティリティ: 削除した写真は詳細APIから消える',
+  !(utAfterDel.json?.files ?? []).some((f) => f.id === utFileId),
+  JSON.stringify(utAfterDel.json?.files));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

@@ -359,7 +359,22 @@ function onPickPhotos(e) {
   scheduleDraftSave();
 }
 function removePendingPhoto(i) { pendingPhotos.splice(i, 1); renderPhotoList(); }
-function removeCurrentPhoto(i) { currentPhotos.splice(i, 1); renderPhotoList(); scheduleDraftSave(); }
+// 送信済みの写真は R2 から論理削除する（管理画面から復元可）。記録側の参照は「保存する」で消える
+async function deleteCurrentPhoto(i) {
+  const p = currentPhotos[i];
+  if (!p) return;
+  if (!confirm(`「${p.file_name || '写真'}」を削除しますか？（管理画面から復元できます）`)) return;
+  try {
+    await api('/files/' + p.id, { method: 'DELETE' });
+  } catch(e) {
+    alert('削除できませんでした：' + e.message);
+    return;
+  }
+  currentPhotos.splice(i, 1);
+  renderPhotoList();
+  scheduleDraftSave();
+  toast('写真を削除しました。「保存する」を押すと記録にも反映されます');
+}
 function resetPhotos(list) {
   currentPhotos = Array.isArray(list) ? list.slice() : [];
   pendingPhotos = [];
@@ -375,10 +390,10 @@ function renderPhotoList() {
   let html = '';
   currentPhotos.forEach((p, i) => {
     const thumb = (p.content_type || '').startsWith('image/')
-      ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
+      ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="" onerror="this.style.display='none'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
       : '<span style="font-size:22px">🎬</span>';
     html += photoRow(thumb, esc(p.file_name || ''),
-      `<button class="btn btn-secondary btn-sm" type="button" onclick="removeCurrentPhoto(${i})">外す</button>`);
+      `<button class="btn btn-danger btn-sm" type="button" onclick="deleteCurrentPhoto(${i})">🗑 削除</button>`);
   });
   pendingPhotos.forEach((f, i) => {
     html += photoRow('<span style="font-size:22px">📷</span>', esc(f.name) + '（未送信）',
@@ -1313,7 +1328,7 @@ function buildRecordHTML(r) {
       <div style="display:flex;flex-wrap:wrap;gap:8px">`;
     photos.forEach(p => {
       html += (p.content_type || '').startsWith('image/')
-        ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="${esc(p.file_name||'')}" style="width:110px;height:110px;object-fit:cover;border:1px solid #ccc;border-radius:6px"></a>`
+        ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="${esc(p.file_name||'')}" onerror="this.parentNode.style.display='none'" style="width:110px;height:110px;object-fit:cover;border:1px solid #ccc;border-radius:6px"></a>`
         : `<a href="/api/files/${p.id}" target="_blank" rel="noopener" style="font-size:13px">🎬 ${esc(p.file_name||'')}</a>`;
     });
     html += `</div></div>`;

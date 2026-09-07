@@ -203,7 +203,7 @@
 - **権限**: 記録の保存/削除=editor、**設定編集=admin**（非adminは設定タブ非表示）、閲覧=全員。点検者名は `/api/me` の氏名を既定。
 - **記録の保存形式**: 元アプリの Record を `record_json` にそのまま保存（config スナップショット含む＝設定変更後も過去記録が壊れない。02 の items_json と同じ思想）。検索用に `equipment_type`/`inspected_date`/`has_abnormal`(caution/repairで1) を列に持つ。`client_id`(元アプリのDate.now() id) で冪等 upsert。
 - **API**: `functions/api/electrical-inspections/`（`index.js` GET一覧`{records:{[client_id]:Record}}`/POST upsert、`[id].js` DELETE論理削除）、`functions/api/electrical-config/`（GET`{main,battery,generator,defaults}`/PUT admin・`master_history`退避）。
-- **写真・動画の添付**: 入力画面の「写真・動画」カードから添付できる（editor以上）。アップロードはアプリ共通の `js/files.js`（`uploadFile`/`resizeImageFile`＝長辺1280pxへ縮小しEXIF除去・R2容量ガード）を使い、classic script のこのページへは末尾の module から `window.ElecFiles` として渡す。「保存する」で先に送信し、記録（`record_json`）に `photos:[{id,file_name,content_type}]` として持つ。サーバー側は `attachFiles` で `related_table='electrical_inspection'` に紐づけ、記録詳細・印刷にサムネイルを出す。保存後はフォームから外す（次の記録へ持ち越さない）。
+- **写真・動画の添付**: 入力画面の「写真・動画」カードから添付できる（editor以上）。アップロードはアプリ共通の `js/files.js`（`uploadFile`/`resizeImageFile`＝長辺1280pxへ縮小しEXIF除去・R2容量ガード）を使い、classic script のこのページへは末尾の module から `window.ElecFiles` として渡す。「保存する」で先に送信し、記録（`record_json`）に `photos:[{id,file_name,content_type}]` として持つ。サーバー側は `attachFiles` で `related_table='electrical_inspection'` に紐づけ、記録詳細・印刷にサムネイルを出す。保存後はフォームから外す（次の記録へ持ち越さない）。**添付は入力・編集画面の「🗑 削除」から削除できる**（`DELETE /api/files/:id` の論理削除。記録側の参照は「保存する」で消えるため、未保存のまま残っても壊れたサムネイルが出ないよう `onerror` で隠す）。
 - **スコープ外（後日）**: オフライン書き込みキュー、横断検索(11)・通知への載せ込み（`has_abnormal`が足場）。
 **テーブル**: `electrical_inspection`（client_id, equipment_type[main/battery/generator], inspected_date, has_abnormal, record_json, +共通監査列）、`electrical_config`（equipment_type PK, config_json, default_json, updated_by/at）
 ### 13. ユーティリティ日報（工場ユーティリティ設備の日常点検）
@@ -217,7 +217,7 @@
 - **1日1件ガード**: 同じ日の未削除レコードがあると登録APIが 409（`error.detail.existing_id`）を返し、画面は既存記録の編集へ誘導する。一覧のボタンも当日分があれば「✅ 本日入力済み（編集する）」に変わる。論理削除した日は再登録できる（`report_date` に UNIQUE 制約は付けていない）
 - **CSV出力**: 一覧から期間指定でCSV出力（UTF-8/BOM・Shift_JIS を選択可）。列は項目マスタから組み立てる
 - **横断検索(11)**: 種別 `utility` として `values_json`・特記事項・入力者名を検索対象にする
-- **写真・動画の添付**: 入力画面の「写真・動画」カードから複数枚添付できる（editor以上）。02 点検実施と同じ流儀＝保存時に `js/files.js` の `uploadFile`（長辺1280pxへ縮小・EXIF除去・R2容量ガード）で送ってから `file_ids` を本文に載せ、サーバーは `attachFiles` で `related_table='utility_report'` に紐づける。詳細画面（`GET /api/utility-reports/:id` の `files`）と編集画面にサムネイルを表示する。送信済みのファイルは再送しないので、保存が409等で失敗して押し直しても二重登録にならない
+- **写真・動画の添付**: 入力画面の「写真・動画」カードから複数枚添付できる（editor以上）。02 点検実施と同じ流儀＝保存時に `js/files.js` の `uploadFile`（長辺1280pxへ縮小・EXIF除去・R2容量ガード）で送ってから `file_ids` を本文に載せ、サーバーは `attachFiles` で `related_table='utility_report'` に紐づける。詳細画面（`GET /api/utility-reports/:id` の `files`）と編集画面にサムネイルを表示する。送信済みのファイルは再送しないので、保存が409等で失敗して押し直しても二重登録にならない。**添付は詳細・編集画面の × から削除できる**（editor以上・`DELETE /api/files/:id` の論理削除。06 設備台帳と同じ `thumb-cell`/`thumb-del`。R2の容量を実際に空けるのは管理画面「ファイル容量」の物理削除）
 - **スコープ外**: オフライン送信キュー、未入力リマインド通知
 **テーブル**: `utility_item`（section, name, input_type[number/select/multi/time/text], unit, min_value, max_value, options_json, alert_options_json, sort_order, +共通監査列）、`utility_report`（report_date, inspected_at, reporter_name, has_abnormal, values_json, note, +共通監査列）
 ---

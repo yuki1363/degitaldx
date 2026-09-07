@@ -30,15 +30,21 @@ function displayValue(v) {
   return v.unit ? `${text} ${v.unit}` : text;
 }
 
-/** 添付ファイル（写真＝サムネイル／動画・その他＝リンク）の表示。02 点検の詳細と同じ形 */
-function buildAttachmentViews(files) {
+/**
+ * 添付ファイル（写真＝サムネイル／動画・その他＝リンク）の表示。02 点検の詳細と同じ形。
+ * onDelete を渡すと削除ボタンを出す（06 設備台帳と同じ thumb-cell / thumb-del）。
+ */
+function buildAttachmentViews(files, { onDelete } = {}) {
   const images = files.filter((f) => (f.content_type || '').startsWith('image/'));
   const others = files.filter((f) => !(f.content_type || '').startsWith('image/'));
   return [
     images.length > 0
       ? el('div', { class: 'thumb-grid' }, images.map((f) =>
-          el('a', { href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' }, [
-            el('img', { class: 'thumb', src: `/api/files/${f.id}`, alt: f.file_name, loading: 'lazy' }),
+          el('div', { class: 'thumb-cell' }, [
+            el('a', { href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' }, [
+              el('img', { class: 'thumb', src: `/api/files/${f.id}`, alt: f.file_name, loading: 'lazy' }),
+            ]),
+            onDelete ? el('button', { class: 'thumb-del', title: '削除', onclick: () => onDelete(f) }, '×') : null,
           ])))
       : null,
     others.length > 0
@@ -46,9 +52,22 @@ function buildAttachmentViews(files) {
           el('div', { class: 'file-row' }, [
             el('a', { class: 'file-name', href: `/api/files/${f.id}`, target: '_blank', rel: 'noopener' },
               `🎬 ${f.file_name}`),
+            onDelete ? el('button', { class: 'btn btn-sm', onclick: () => onDelete(f) }, '削除') : null,
           ])))
       : null,
   ];
+}
+
+/** 添付を1件削除する（論理削除。管理画面の「削除済み」から復元できる） */
+async function deleteAttachment(file) {
+  if (!window.confirm(`「${file.file_name}」を削除しますか？（管理画面から復元できます）`)) return false;
+  try {
+    await api.del(`/api/files/${file.id}`);
+    return true;
+  } catch (err) {
+    window.alert(`削除できませんでした。\n${err.message || err}`);
+    return false;
+  }
 }
 
 /** datetime-local 用のローカル日時文字列（YYYY-MM-DDTHH:MM） */
@@ -235,11 +254,36 @@ async function renderForm(existing, existingFiles = []) {
   //   pendingFiles: これから送るファイル
   const uploaded = [];
   const pendingFiles = [];
+  // 保存済みの添付（編集時）。× で削除できる
+  const savedFiles = [...existingFiles];
+  const savedBox = el('div', {}, []);
+  const renderSaved = () => {
+    render(savedBox, savedFiles.length > 0
+      ? buildAttachmentViews(savedFiles, {
+          onDelete: async (f) => {
+            if (!await deleteAttachment(f)) return;
+            const i = savedFiles.findIndex((x) => x.id === f.id);
+            if (i >= 0) savedFiles.splice(i, 1);
+            renderSaved();
+          },
+        })
+      : []);
+  };
+  renderSaved();
+
   const fileListBox = el('div', { class: 'row-list' }, []);
   const renderPending = () => {
     render(fileListBox, [
-      ...uploaded.map((m) => el('div', { class: 'file-row' }, [
+      ...uploaded.map((m, idx) => el('div', { class: 'file-row' }, [
         el('span', { class: 'file-name' }, `✅ ${m.file_name}`),
+        el('button', {
+          class: 'btn btn-sm', type: 'button',
+          onclick: async () => {
+            if (!await deleteAttachment(m)) return;
+            uploaded.splice(idx, 1);
+            renderPending();
+          },
+        }, '削除'),
       ])),
       ...pendingFiles.map((f, idx) => el('div', { class: 'file-row' }, [
         el('span', { class: 'file-name' }, f.name),
@@ -338,7 +382,7 @@ async function renderForm(existing, existingFiles = []) {
     ]),
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, '写真・動画'),
-      ...(existingFiles.length > 0 ? buildAttachmentViews(existingFiles) : []),
+      savedBox,
       fileInput,
       el('button', { class: 'btn', type: 'button', onclick: () => fileInput.click() }, '📷 写真・動画を追加'),
       fileListBox,
@@ -392,7 +436,9 @@ async function renderDetail(id) {
     ]) : null,
     files.length > 0 ? el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, '写真・動画'),
-      ...buildAttachmentViews(files),
+      ...buildAttachmentViews(files, hasRole(currentUser, 'editor')
+        ? { onDelete: async (f) => { if (await deleteAttachment(f)) await renderDetail(id); } }
+        : {}),
     ]) : null,
     hasRole(currentUser, 'editor') ? el('div', { class: 'action-row' }, [
       el('button', { class: 'btn btn-primary', onclick: () => go(`?edit=${report.id}`) }, '✏️ 編集'),
