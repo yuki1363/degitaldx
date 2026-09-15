@@ -51,10 +51,28 @@ function setupUpdateToast() {
   });
 }
 
+// register() だけではブラウザ既定の更新チェック（ページ遷移のたびに実施されるが
+// 前回チェックから24時間はスキップされる）に頼ることになり、デプロイ直後にアプリを
+// 開いても新バージョンが検知されず「新しいバージョンがあります」が出ないことがある
+// （registration.update() は24時間の間隔を無視して即座にチェックする）。
+// ページ読み込み時とタブ復帰時に明示的にチェックし、検知を早める。
+async function checkForSwUpdate() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    reg?.update();
+  } catch { /* オフライン等での失敗は無視（次のチェック機会に任せる） */ }
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => { setupBackNav(); setupUpdateToast(); setupAutoSync(); });
+  document.addEventListener('DOMContentLoaded', () => { setupBackNav(); setupUpdateToast(); setupAutoSync(); checkForSwUpdate(); });
 } else {
   setupBackNav();
   setupUpdateToast();
   setupAutoSync();
+  checkForSwUpdate();
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForSwUpdate();
+});
