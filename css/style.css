@@ -1339,6 +1339,22 @@ input.is-abnormal {
   color: var(--color-text);
 }
 
+.ranking-tied {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.ranking-tied summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  padding: 4px 0;
+}
+.ranking-tied-list {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--color-text-muted);
+}
+
 /* 抽出レポート */
 .type-check {
   display: inline-flex;

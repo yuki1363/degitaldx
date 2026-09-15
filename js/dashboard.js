@@ -60,8 +60,8 @@ function drawEquipmentRanking(canvasId, data) {
   new Chart(document.getElementById(canvasId), {
     type: 'bar',
     data: {
-      labels:   data.slice(0, 8).map((d) => d.equipment_name),
-      datasets: [{ label: 'トラブル件数', data: data.slice(0, 8).map((d) => d.trouble_count), backgroundColor: CHART_COLORS.orange }],
+      labels:   data.map((d) => d.equipment_name),
+      datasets: [{ label: 'トラブル件数', data: data.map((d) => d.trouble_count), backgroundColor: CHART_COLORS.orange }],
     },
     options: {
       indexAxis: 'y',
@@ -70,6 +70,16 @@ function drawEquipmentRanking(canvasId, data) {
       scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
     },
   });
+}
+
+// 10位と同数（同着）で上位10件の表示枠に入りきらなかった設備を折りたたみ表示する
+function buildTiedRankingDetails(tiedExtra) {
+  if (!tiedExtra || tiedExtra.length === 0) return null;
+  const count = tiedExtra[0].trouble_count;
+  return el('details', { class: 'ranking-tied' }, [
+    el('summary', {}, `10位タイ（${count}件）が他に${tiedExtra.length}件あります`),
+    el('ul', { class: 'ranking-tied-list' }, tiedExtra.map((r) => el('li', {}, `${r.equipment_name}（${r.trouble_count}件）`))),
+  ]);
 }
 
 function drawRepairSummary(canvasId, summary) {
@@ -142,6 +152,7 @@ async function renderSummary(fromStr, toStr) {
       el('div', { class: 'chart-wrap' }, [
         el('h3', { class: 'chart-title' }, '設備別故障ランキング'),
         stats.equipment_ranking.length > 0 ? canRanking : el('p', { class: 'empty' }, 'データがありません'),
+        buildTiedRankingDetails(stats.equipment_ranking_tied),
       ]),
       el('div', { class: 'chart-wrap' }, [
         el('h3', { class: 'chart-title' }, '業務依頼 ステータス内訳'),
