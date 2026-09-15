@@ -60,7 +60,7 @@ async function checkForSwUpdate() {
   if (!('serviceWorker' in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
-    reg?.update();
+    await reg?.update();
   } catch { /* オフライン等での失敗は無視（次のチェック機会に任せる） */ }
 }
 
