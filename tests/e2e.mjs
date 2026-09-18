@@ -76,7 +76,8 @@ await page.waitForFunction(async () => {
   return false;
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
-  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications'];
+  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications',
+  'ai-support'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
@@ -1201,6 +1202,97 @@ const utAfterDel = await api(`/api/utility-reports/${utReAddId}`);
 check('ユーティリティ: 削除した写真は詳細APIから消える',
   !(utAfterDel.json?.files ?? []).some((f) => f.id === utFileId),
   JSON.stringify(utAfterDel.json?.files));
+
+// ---------- 9.8 AIサポート（14） ----------
+section('9.8 AIサポート（14 トラブル・部品・業務依頼＋AI）');
+// 1つのキーワードで3種類すべてに当たるデータを作る（現場の1入力を再現）
+const FS_KW = 'E2Eゲンバサポート';
+await api('/api/troubles', { method: 'POST', body: {
+  occurred_at: new Date().toISOString(), phenomenon: `${FS_KW}現象 異音がする` } });
+await api('/api/parts', { method: 'POST', body: {
+  name: `${FS_KW}部品ゼロ`, quantity: 0, safety_stock: 1 } });           // 在庫0
+await api('/api/parts', { method: 'POST', body: {
+  name: `${FS_KW}部品フソク`, quantity: 1, safety_stock: 5 } });          // 要発注
+const fsRepair = await api('/api/repairs', { method: 'POST', body: { title: `${FS_KW}依頼` } });
+check('AIサポート: 前提データ（業務依頼）を作成', fsRepair.status === 201, `status=${fsRepair.status}`);
+
+// ホームはタイルから遷移する形（埋め込みカードは置かない）
+await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+check('AIサポート: ホームにタイルがあり /pages/ai-support へ行く',
+  await page.evaluate(() => [...document.querySelectorAll('a.tile')]
+    .some((a) => a.getAttribute('href') === '/pages/ai-support' && a.innerText.includes('AIサポート'))));
+check('AIサポート: ホームに検索カードを埋め込んでいない',
+  await page.evaluate(() => !document.querySelector('.home-ai') && !document.querySelector('#home-ai')));
+
+await page.goto(`${BASE}/pages/ai-support`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(500);
+check('AIサポート: 検索欄がある（[ai]未構成でも開ける）',
+  await page.evaluate(() => !!document.querySelector('#app .search-input')));
+check('AIサポート: [ai]未構成なら「対応策の案」ボタンを出さない',
+  await page.evaluate(() => !document.body.innerText.includes('対応策の案をもらう')));
+
+// 検索を実行（入力 → 🔍 探す）
+const fsSearch = async (q) => {
+  await page.fill('#app .search-input', q);
+  await page.click('.ai-sup-bar .btn');
+  await page.waitForFunction(
+    () => !document.querySelector('#app .loading'), { timeout: 15000 }
+  ).catch(() => {});
+  await page.waitForTimeout(300);
+  return page.evaluate(() => document.getElementById('app')?.innerText || '');
+};
+
+const fsText = await fsSearch(FS_KW);
+check('AIサポート: 過去の似たトラブルが出る',
+  fsText.includes('過去の似たトラブル') && fsText.includes(`${FS_KW}現象`), fsText.slice(0, 200));
+check('AIサポート: トラブル行のリンク先が詳細ページ',
+  await page.evaluate(() => [...document.querySelectorAll('#app a')]
+    .some((a) => /\/pages\/trouble\?id=\d+/.test(a.getAttribute('href') || ''))));
+check('AIサポート: 関連する部品在庫が出る', fsText.includes('部品在庫'), fsText.slice(0, 300));
+check('AIサポート: 在庫0の部品に「在庫0」バッジが付く', fsText.includes('在庫0'), fsText.slice(0, 300));
+check('AIサポート: 在庫不足の部品に「要発注」バッジが付く', fsText.includes('要発注'), fsText.slice(0, 300));
+check('AIサポート: 関連する業務依頼が出る',
+  fsText.includes('関連する業務依頼') && fsText.includes(`${FS_KW}依頼`), fsText.slice(0, 400));
+check('AIサポート: 業務依頼にステータスが出る', fsText.includes('受付'), fsText.slice(0, 400));
+// 各セクションから横断検索へ全件を見に行ける（種別つき）
+const fsAllLinks = await page.evaluate(() => [...document.querySelectorAll('#app a')]
+  .map((a) => a.getAttribute('href') || '').filter((h) => h.startsWith('/pages/search?q=')));
+check('AIサポート: 3セクションすべてに「すべて見る（横断検索）」がある',
+  ['type=trouble', 'type=parts', 'type=repair'].every((t) => fsAllLinks.some((h) => h.includes(t))),
+  fsAllLinks.join(' | '));
+
+// 部品はAND検索。現象の語を混ぜると全キーワードを含む部品は0件になるが、
+// そこで「0件」と畳んでしまうと関係のある部品が隠れてしまう（実機で発覚）。
+// いずれかの語に一致した部品を最初から開いて出すこと。
+const fsOrText = await fsSearch(`${FS_KW}部品ゼロ ${FS_KW}部品フソク`);
+check('AIサポート: AND0件でも類似の部品を畳まずに出す',
+  fsOrText.includes('関連しそうな部品在庫') && fsOrText.includes(`${FS_KW}部品ゼロ`)
+    && fsOrText.includes(`${FS_KW}部品フソク`), fsOrText.slice(0, 400));
+
+// 業務依頼は /api/search の AND 検索。存在しない語を混ぜて0件にし、先頭1語での再検索を確認する
+const fsRetryText = await fsSearch(`${FS_KW}依頼 ゼッタイニナイ語`);
+check('AIサポート: 業務依頼が0件なら先頭1語で再検索する',
+  fsRetryText.includes('で再検索') && fsRetryText.includes(`${FS_KW}依頼`), fsRetryText.slice(0, 400));
+
+// どれにも当たらない語
+const fsEmptyText = await fsSearch('ZZZ存在しないキーワードZZZ');
+check('AIサポート: 0件なら見つからなかった旨と横断検索リンクを出す',
+  fsEmptyText.includes('見つかりませんでした') && fsEmptyText.includes('横断検索で探す'),
+  fsEmptyText.slice(0, 300));
+
+check('AIサポート: 検索しても pageerror が出ていない',
+  pageErrors.filter((e) => e.includes('/pages/ai-support')).length === 0, pageErrors.join(' | '));
+
+// スマホ幅（375px）: 入力欄＋ボタン、結果のバッジ行が横に溢れないこと
+await page.setViewportSize({ width: 375, height: 720 });
+await fsSearch(FS_KW);
+const fsOverflow = await page.evaluate(() => ({
+  scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth,
+}));
+check('AIサポート: 375px幅で横に溢れない',
+  fsOverflow.scroll <= fsOverflow.client + 1, JSON.stringify(fsOverflow));
+await page.setViewportSize({ width: 1280, height: 720 });
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
