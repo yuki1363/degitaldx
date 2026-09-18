@@ -220,6 +220,30 @@
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから複数枚添付できる（editor以上）。02 点検実施と同じ流儀＝保存時に `js/files.js` の `uploadFile`（長辺1280pxへ縮小・EXIF除去・R2容量ガード）で送ってから `file_ids` を本文に載せ、サーバーは `attachFiles` で `related_table='utility_report'` に紐づける。詳細画面（`GET /api/utility-reports/:id` の `files`）と編集画面にサムネイルを表示する。送信済みのファイルは再送しないので、保存が409等で失敗して押し直しても二重登録にならない。**添付は詳細・編集画面の × から削除できる**（editor以上・`DELETE /api/files/:id` の論理削除。06 設備台帳と同じ `thumb-cell`/`thumb-del`。R2の容量を実際に空けるのは管理画面「ファイル容量」の物理削除）
 - **スコープ外**: オフライン送信キュー、未入力リマインド通知
 **テーブル**: `utility_item`（section, name, input_type[number/select/multi/time/text], unit, min_value, max_value, options_json, alert_options_json, sort_order, +共通監査列）、`utility_report`（report_date, inspected_at, reporter_name, has_abnormal, values_json, note, +共通監査列）
+### 14. AIサポート（現場の困りごとから横断して探す）
+設備が止まった瞬間に「前に同じことがあったか・部品は在庫にあるか・もう依頼が出ているか・どう直すか」を、
+記録を書き始めずにその場で引ける画面（`/pages/ai-support`・`js/ai-support.js`）。
+ホームの機能タイル `🤖 AIサポート`（横断検索11のとなり）から入る。
+- **1行入力→4ブロック**: 例「3号機 コンプレッサ 異音」と入力して🔍探すと、
+  ① 過去の似たトラブル ② 関連する部品在庫 ③ 関連する業務依頼 を各最大10件、セクションごとのカードで表示。
+  ④ **🤖 対応策の案**（推定原因・推奨対策・確度）はボタンを押したときだけAIが動く
+- **新規APIは作っていない**。既存エンドポイントの組み合わせのみ（バックエンド・スキーマ変更ゼロ）:
+  `GET /api/troubles/similar`（あいまいOR検索）／`GET /api/parts?q=&include_similar=1`（あいまいAND＋類似OR枠）／
+  `GET /api/search?q=&type=repair`（あいまいAND検索）／`POST /api/ai/suggest-trouble`（editor以上）
+- **①②③はAI非依存**なので `env.AI` 未構成でもページは開いて動く。AIに依存するのは④だけなので、
+  **④のボタンだけ**を `ai_enabled`（`/api/me`）＋ editor で出し分ける（無効化ではなく非表示）
+- **業務依頼は `/api/search` に渡すキーワードを先頭2語までに切る**。`/api/search` は検索列7列・
+  キーワード最大5語で bind数 = 語数 × 列数 × バリアント数となり、長音付きカタカナ（1語で最大6バリアント）を
+  3語以上入れると D1 の bind 上限100を超えるため（実測: 3語で126・5語で210。横断検索11側の既存課題で、
+  根本修正は別件）。さらに**AND検索が0件のときだけ先頭1語で1回だけ再検索**し、見出しに「（「◯◯」で再検索）」と出す
+- **部品はAND検索が0件のとき、類似（いずれかの語に一致）を畳まずに「関連しそうな部品在庫」として展開**する。
+  「コンプレッサ 異音」のように現象の語を混ぜるとANDは必ず0件になり、「0件」表示で関係のある部品が隠れるため
+- 在庫バッジ（`在庫0` / `要発注` / `📨 発注中`）は 05 部品在庫と同じクラス・同じ判定
+- 各セクションの「すべて見る（横断検索）›」は `/pages/search?q=…&type=trouble|parts|repair` へ
+  （部品一覧は `q` パラメータを受け付けないため3種とも横断検索へ寄せる）
+- AI結果の下から「この内容でトラブルを記録する ›」「業務依頼を出す ›」で既存フォームへプリフィル遷移
+  （機能10のチャット→記録化と同じ既存URLプリフィルの流用）
+**テーブル**: なし（既存テーブルの読み取りのみ。新規レコードを作らないため監査列・論理削除の対象外）
 ---
 ## ディレクトリ構成（想定）
 ```
@@ -228,7 +252,7 @@
 ├── manifest.json           # PWAマニフェスト
 ├── sw.js                   # Service Worker
 ├── icons/                  # PWAアイコン
-├── pages/                  # 各機能のHTML
+├── pages/                  # 各機能のHTML（ai-support.html = 14 AIサポート）
 ├── css/
 │   └── style.css
 ├── js/
@@ -245,7 +269,8 @@
 │   ├── dashboard.js        # 08 グラフ（サマリー/カスタム。抽出→CSVは横断検索へ集約）
 │   ├── admin.js            # 09 管理機能・監査ログ・復元
 │   ├── chat.js             # 10 チャット（個人情報検知）
-│   └── search.js           # 11 横断検索
+│   ├── search.js           # 11 横断検索
+│   └── ai-support.js       # 14 AIサポート（トラブル・部品・業務依頼＋AI対応策）
 ├── functions/
 │   └── api/
 │       ├── equipment/ inspections/ repairs/ troubles/
@@ -277,6 +302,7 @@
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
 ### AI機能（Workers AI）の出し分け
 - テキスト系AI（トラブルの原因・対策提案など）は `env.AI` 未構成なら `/api/me` の `ai_enabled:false` でボタンを出さない
+- 14 AIサポートの「🤖 対応策の案をもらう」も同じ方式で出し分ける（`ai_enabled` ＋ editor 以上）。同ページのトラブル・部品・業務依頼の検索はAIを使わないので、AI未構成でも画面は開いて動く
 - **画像を読むAI（計器の📷自動読み取り＝`/api/ai/read-meter`・設備銘板の自動読み取り＝`/api/ai/extract-equipment`）は既定で非表示**。既定モデル `@cf/meta/llama-3.2-11b-vision-instruct` は Cloudflare アカウントでの**ライセンス同意が必要**で、未同意だと実行時に `5016: … you must submit the prompt 'agree'` で失敗し、現場の入力画面に英文のライセンス文がそのまま出てしまうため（実際に発生）。表示するには Cloudflare ダッシュボード → Pages → 設定 → 環境変数に **`AI_VISION_ENABLED=1`** を設定する（`/api/me` の `ai_vision_enabled`／`js/auth.js` の `getAiVisionEnabled()`／`js/inspection-items.js`・`js/ledger.js`。再デプロイ不要）
 - ライセンス同意が不要なモデルに変えたい場合は `AI_VISION_MODEL` を設定する（`functions/api/_lib/ai-models.js`）
 
