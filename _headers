@@ -1,0 +1,18 @@
+# Cloudflare Pages の静的ファイルに付けるセキュリティヘッダー
+#   （API＝Pages Functions の応答には付かないため functions/api/_middleware.js 側でも付ける）
+#
+# CSP: 外部サイトからのスクリプト・画像・通信を禁止し、万一XSSがあっても外部へ送信させない。
+#   すべてのライブラリは js/vendor/ に同梱しているので 'self' だけで動く。
+#   各ページのインラインの <script type="module"> と電気設備点検（/electrical/）の onclick のため
+#   script-src に 'unsafe-inline' が必要。外部CDN等を使う場合はここへ追記すること。
+# Permissions-Policy: カメラはQR読み取り（js/qr-scan.js）で使うため自サイトのみ許可。
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: same-origin
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()
+
+# Service Worker 自身の通信（ページ取得の中継・Accessの再認証リダイレクト）を CSP で妨げないよう外す
+/sw.js
+  ! Content-Security-Policy

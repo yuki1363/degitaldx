@@ -161,6 +161,7 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
   `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を設定すると Access の署名付きJWTを検証するため、
   保護漏れのURLがあってもなりすましできなくなる（上記「6. Access」参照。設定を推奨）
 - `DEV_USER_EMAIL` はローカル開発専用。**本番環境の環境変数には絶対に設定しない**
+- セキュリティヘッダー（CSP 等）はルートの `_headers` で付けている。外部のCDNやAPIをブラウザから使う機能を追加するときは CSP に追記しないと読み込みが止められる
 - R2 バケットは非公開で運用し、`r2.dev` パブリックURLは有効化しない（ファイルは Functions 経由で配信）
 - Cloudflare アカウントの 2FA 必須
 - **ストレージ容量ガード**: R2 の無料枠（10GB）を超えて課金が発生しないよう、

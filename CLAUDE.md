@@ -316,6 +316,7 @@
 - アップロード時に Content-Type / 拡張子 / サイズ上限（画像10MB・動画100MB・PDF20MB目安）を Functions 側で検証
 - **R2 容量上限ガード**: アップロードAPIは `files` テーブルで使用量を集計し、警告 8GB / 上限 9GB（環境変数 `R2_WARN_BYTES` / `R2_HARD_LIMIT_BYTES` で変更可）。上限超過は HTTP 507 で拒否し、**無料枠 10GB を超えて課金が発生しない**ようにする。論理削除（`deleted_at`）されたファイルも R2 に残る間は使用量に含める。容量を実際に空けるには**物理削除**（管理画面「ファイル容量」タブ → admin が個別に実行）で R2 オブジェクトを削除し `purged_at` を記録する。物理削除済みは使用量集計から除外される（復元不可）。API は `DELETE /api/files/:id?physical=1`（admin）、一覧は `GET /api/files`（admin）
 - **容量の管理者報告**: 上限拒否・警告時にアップロード側の報告画面（`js/files.js` のダイアログ）から管理者へ報告できる（`storage_reports` テーブル）。管理者はホーム画面で使用量警告と報告件数を確認できる
+- **セキュリティヘッダー**: 静的ファイルはルートの `_headers`（CSP・nosniff・X-Frame-Options・Referrer-Policy・Permissions-Policy）、API 応答は `functions/api/_middleware.js` の `withSecurityHeaders`（nosniff 等）で付ける。CSP は `connect-src 'self'` 等で外部への通信・読み込みを禁止している（ライブラリは `js/vendor/` に同梱）。**外部CDN・外部APIをブラウザから使う機能を足すときは `_headers` の CSP へ追記する**こと（E2E がテスト全体の CSP 違反を検出する）。インラインの `<script type="module">` と電気設備点検の `onclick` のため `script-src 'unsafe-inline'` は残している
 - **Cloudflare アカウントの 2FA 必須**（運用開始前）
 - 写真は Canvas リサイズ経由で EXIF（GPS等）を自動除去
 - 現場周知: 写真への人の顔・社外秘文書の写り込み禁止、チャットへの個人情報入力禁止

@@ -50,6 +50,11 @@ const context = await browser.newContext();
 const page = await context.newPage();
 const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(`${page.url()}: ${e.message}`));
+// CSP（_headers）で本来の動作が妨げられていないかをテスト全体で監視する
+const cspViolations = [];
+page.on('console', (m) => {
+  if (/Content Security Policy/i.test(m.text())) cspViolations.push(`${page.url()}: ${m.text()}`);
+});
 const dialogs = [];
 page.on('dialog', async (d) => { dialogs.push(d.message()); await d.accept(); });
 
@@ -1369,6 +1374,23 @@ check('CSV: 数値（-5・+1.5）と「-」はそのまま', csvOut.neg === '-5'
   JSON.stringify(csvOut));
 check('CSV: 通常の文字と excelText(="…") はそのまま', csvOut.text === '3号機 異音' && csvOut.excel === '"=""3-25"""',
   JSON.stringify(csvOut));
+
+// ---------- 9.11 セキュリティヘッダー ----------
+section('9.11 セキュリティヘッダー（_headers / API）');
+const hdr = await page.evaluate(async () => {
+  const pick = (r) => ({
+    csp: r.headers.get('content-security-policy') || '', nosniff: r.headers.get('x-content-type-options') || '',
+    frame: r.headers.get('x-frame-options') || '',
+  });
+  return { page: pick(await fetch('/', { cache: 'no-store' })), api: pick(await fetch('/api/me', { cache: 'no-store' })) };
+});
+check('ヘッダー: ページに CSP（外部への通信禁止・frame-ancestors none）が付く',
+  hdr.page.csp.includes("connect-src 'self'") && hdr.page.csp.includes("frame-ancestors 'none'"), hdr.page.csp);
+check('ヘッダー: ページに nosniff / X-Frame-Options が付く', hdr.page.nosniff === 'nosniff' && hdr.page.frame === 'DENY',
+  JSON.stringify(hdr.page));
+check('ヘッダー: API 応答に nosniff / X-Frame-Options が付く', hdr.api.nosniff === 'nosniff' && hdr.api.frame === 'DENY',
+  JSON.stringify(hdr.api));
+check('ヘッダー: テスト全体を通して CSP 違反が出ていない', cspViolations.length === 0, cspViolations.slice(0, 3).join(' / '));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
