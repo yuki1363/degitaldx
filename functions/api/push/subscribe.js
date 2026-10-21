@@ -4,6 +4,7 @@
 
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { isAllowedPushEndpoint } from '../_lib/webpush.js';
 
 export async function onRequestPost({ request, env, data }) {
   const db = env.DB;
@@ -13,6 +14,9 @@ export async function onRequestPost({ request, env, data }) {
   const auth = body?.keys?.auth;
   if (!endpoint || !p256dh || !auth) {
     return jsonError(400, 'endpoint / keys.p256dh / keys.auth は必須です');
+  }
+  if (!isAllowedPushEndpoint(endpoint)) {
+    return jsonError(400, 'このブラウザのプッシュ通知サービスには対応していません');
   }
 
   await db
