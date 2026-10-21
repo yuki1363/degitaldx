@@ -1,7 +1,10 @@
 /* Service Worker — PWA基盤
  *
  * 方針:
- *   - 静的アセット: キャッシュ優先 + 裏で最新化（オフラインでもアプリが起動する）
+ *   - ページ（画面遷移）: ネットワーク優先。数秒で応答が無い・通信できないときだけ保存済みの画面を使う
+ *                  （Access のログイン切れでも古い画面に閉じ込められず、ログイン画面へ進める。
+ *                    オフラインでもアプリが起動する）
+ *   - 静的アセット（JS/CSS等）: キャッシュ優先 + 裏で最新化
  *   - /api/*     : ネットワークのみ（業務データはキャッシュしない。
  *                  オフライン時は offline:true の JSON エラーを返す）
  *   - /cdn-cgi/* : Cloudflare（Access ログイン等）の領域のため一切関与しない
@@ -15,7 +18,7 @@
  *   push イベントでプッシュ通知を表示し、notificationclick でアプリの該当画面を開く。
  *   ペイロードは functions/api/_lib/notify.js が { title, body, url } のJSONで送る。
  */
-const CACHE_VERSION = 'v1.24.0';
+const CACHE_VERSION = 'v1.25.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -94,6 +97,43 @@ const PRECACHE_URLS = [
   '/icons/apple-touch-icon.png',
 ];
 
+// 画面HTMLは静的でクエリ（?id=5 等）に依存しないため、パス単位で保存・照合する。
+// （記録ごとのURLがキャッシュに溜まらず、未訪問の ?id= 付きリンクもオフラインで該当ページの枠が開く）
+const NAV_TIMEOUT_MS = 4000;
+
+async function navigateNetworkFirst(request, url) {
+  const cache = await caches.open(CACHE_NAME);
+  const key = url.pathname;
+  const store = (response) => {
+    if (response.ok && response.type === 'basic') cache.put(key, response.clone());
+  };
+  const network = fetch(request);
+  network.catch(() => {}); // タイムアウトで見限った後の失敗を未処理にしない
+  try {
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), NAV_TIMEOUT_MS));
+    const response = await Promise.race([network, timeout]);
+    if (response) {
+      store(response);
+      return response;
+    }
+    // 遅い回線: 保存済みの画面があればそれを使い、裏で最新化。無ければ応答を待つ
+    const cached = await cache.match(key);
+    if (cached) {
+      network.then(store).catch(() => {});
+      return cached;
+    }
+    return await network;
+  } catch {
+    // 通信できない（オフライン等）: 保存済みの画面 → アプリシェル
+    const cached = (await cache.match(key)) || (await cache.match('/index.html'));
+    if (cached) return cached;
+    return new Response('オフラインのため表示できません。', {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
@@ -126,6 +166,14 @@ self.addEventListener('fetch', (event) => {
   // 静的キャッシュを返してしまうと Cloudflare Access のログインリダイレクトが発生せず
   // 再認証できないため（js/api.js の tryReauthNavigate から来る）。
   if (request.mode === 'navigate' && url.searchParams.has('reauth')) return;
+
+  // ページ遷移: ネットワーク優先（キャッシュ優先だと、Access のログインが切れた端末が
+  // 古い画面だけを表示し続け、ログイン画面に進めない＝「オフライン」表示のまま止まる）。
+  // Access のログイン画面への302は opaqueredirect のためそのまま返してブラウザに任せる。
+  if (request.mode === 'navigate') {
+    event.respondWith(navigateNetworkFirst(request, url));
+    return;
+  }
 
   // API: ネットワークのみ。オフライン時は JSON エラー（フロントで offline 判定に使う）
   if (url.pathname.startsWith('/api/')) {

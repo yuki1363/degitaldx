@@ -1318,6 +1318,17 @@ check('再ログインバナーの文言', (await page.locator('#relogin-banner'
 await context.unroute('**/api/me');
 await page.evaluate(() => sessionStorage.clear());
 
+// ---------- 9.95 ページ遷移はネットワーク優先（ログイン切れで古い画面に閉じ込められない） ----------
+section('9.95 ページ遷移はネットワーク優先');
+await page.goto(`${BASE}/pages/search`, { waitUntil: 'networkidle' }); // 保存済みの画面を用意
+await context.route('**/pages/search', (route) => route.fulfill({
+  status: 200, contentType: 'text/html; charset=utf-8', body: '<html><body>NETWORK-FIRST-OK</body></html>',
+}));
+await page.goto(`${BASE}/pages/search`, { waitUntil: 'domcontentloaded' });
+check('保存済みがあってもサーバーの応答を優先して表示する',
+  (await page.evaluate(() => document.body.innerText)).includes('NETWORK-FIRST-OK'));
+await context.unroute('**/pages/search');
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
@@ -1325,6 +1336,10 @@ const resp = await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeou
 const offlineOk = !!resp && resp.status() === 200 &&
   await page.evaluate(() => document.body.innerText.includes('設備保全'));
 check('オフラインでホームが表示される', offlineOk);
+// 未訪問の ?id= 付きリンクでも、オフラインでホームではなく該当ページの枠が開く
+const respDeep = await page.goto(`${BASE}/pages/trouble?id=987654`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
+const deepOk = !!respDeep && respDeep.status() === 200 && /\/pages\/trouble/.test(page.url());
+check('オフラインで ?id= 付きリンクが該当ページの枠で開く', deepOk, `status=${respDeep?.status()} url=${page.url()}`);
 await context.setOffline(false);
 
 // ---------- 結果 ----------
