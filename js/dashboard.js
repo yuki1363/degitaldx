@@ -1,10 +1,12 @@
 // 08 ダッシュボード — サマリー/グラフ・カスタムグラフ
-//   （抽出→表→CSV/PDF は横断検索(11)へ集約。ダッシュボードは「見る（グラフ）」に専念）
+//   （抽出→表→CSV/PDF は横断検索(11)へ集約。ダッシュボードは「見る（グラフ）」に専念。
+//    例外としてトラブル記録だけは、集計期間のまま CSV を出せる＝04 一覧と同じ列）
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
+import { exportTroubleCsv } from '/js/trouble-csv.js';
 
 const app = document.getElementById('app');
 
@@ -356,6 +358,27 @@ async function renderDashboard() {
   const toInput   = el('input', { type: 'date', value: defaultTo });
   const applyBtn  = el('button', { class: 'btn btn-sm', onclick: () => loadTab() }, '集計');
 
+  // トラブル記録CSV: 画面の FROM〜TO（集計期間）で /api/troubles を取得して出力（列は 04 一覧と共通）
+  const exportTroubles = async (enc, btn) => {
+    const from = fromInput.value || defaultFrom;
+    const to   = toInput.value   || defaultTo;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '出力中…';
+    try {
+      const { troubles } = await api.get(`/api/troubles?${new URLSearchParams({ from, to })}`);
+      if (troubles.length === 0) { alert('期間内のトラブル記録がありません。'); return; }
+      exportTroubleCsv(troubles, enc);
+    } catch (err) {
+      alert(err.message || String(err));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  };
+  const csvUtf8Btn = el('button', { class: 'btn btn-sm', onclick: () => exportTroubles('utf8', csvUtf8Btn) }, '📥 CSV（UTF-8/BOM）');
+  const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportTroubles('sjis', csvSjisBtn) }, '📥 CSV（Shift_JIS）');
+
   let activeTab = 'summary';
   const tabContent = el('div', { id: 'tab-content' }, []);
 
@@ -390,6 +413,11 @@ async function renderDashboard() {
       el('label', { class: 'filter-label' }, ['FROM ', fromInput]),
       el('label', { class: 'filter-label' }, ['TO ', toInput]),
       applyBtn,
+    ]),
+    el('div', { class: 'period-bar', id: 'trouble-csv-bar' }, [
+      el('span', { class: 'filter-label' }, 'トラブル記録（期間内）'),
+      csvUtf8Btn,
+      csvSjisBtn,
     ]),
     el('div', { class: 'tab-bar' }, tabBtns),
     tabContent,

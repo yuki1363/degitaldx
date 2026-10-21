@@ -8,26 +8,13 @@ import { api } from '/js/api.js';
 import { getCurrentUser, hasRole, getAiEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
-import { buildCsvText, downloadCsv, excelText } from '/js/csv.js';
+import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
-
-// CSV出力の列定義（トラブル履歴）
-const CSV_COLUMNS = [
-  { label: '発生日時', value: (t) => formatDateTime(t.occurred_at) },
-  { label: '設備番号', value: (t) => excelText(t.equipment_code) },
-  { label: '設備',     value: (t) => t.equipment_name || '' },
-  { label: 'ジャンル', value: (t) => t.category_name || '' },
-  { label: '現象',     value: (t) => t.phenomenon || '' },
-  { label: '原因',     value: (t) => t.cause || '' },
-  { label: '対策',     value: (t) => t.countermeasure || '' },
-  { label: '記録者',   value: (t) => t.reporter_name || t.creator_name || t.created_by || '' },
-  { label: '登録日時', value: (t) => formatDateTime(t.created_at) },
-];
 
 // 業務依頼ステータスの表示ラベル（このトラブルから作成された依頼の状況表示に使う）
 const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
@@ -118,9 +105,7 @@ async function renderList(equipmentId) {
   // CSV出力（現在の絞り込み結果をそのまま出力。Shift_JIS は Excel 文字化け対策）
   const exportCsv = (enc) => {
     if (currentTroubles.length === 0) return;
-    const text = buildCsvText(currentTroubles, CSV_COLUMNS);
-    const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
-    downloadCsv(`trouble_${dateStr}.csv`, text, enc);
+    exportTroubleCsv(currentTroubles, enc);
   };
   const csvUtf8Btn = el('button', { class: 'btn btn-sm', onclick: () => exportCsv('utf8') }, '📥 CSV（UTF-8/BOM）');
   const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportCsv('sjis') }, '📥 CSV（Shift_JIS）');

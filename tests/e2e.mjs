@@ -704,6 +704,16 @@ const graph = await page.evaluate(() => ({
 }));
 check('カスタムグラフ描画', graph.canvas && graph.chart, JSON.stringify(graph));
 
+// ダッシュボードからもトラブル記録CSV（集計期間・04一覧と同じ列）を出力できる
+const [dashDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 10000 }).catch(() => null),
+  page.click('#trouble-csv-bar button:has-text("UTF-8")'),
+]);
+const dashCsv = dashDl ? (await (await dashDl.createReadStream()).toArray()).map(String).join('') : '';
+check('ダッシュボード: トラブルCSVを出力（04と同じ列）',
+  /^\uFEFF?発生日時,設備番号,設備,ジャンル,現象/.test(dashCsv) && dashCsv.split('\n').length >= 2,
+  `file=${dashDl?.suggestedFilename()} head=${dashCsv.slice(0, 60)}`);
+
 // ---------- 9. チャット: 投稿→取得→既読 ----------
 section('9. チャット（投稿・取得・既読）');
 const chatPost = await api('/api/chat', { method: 'POST', body: { body: 'E2Eチャットテスト', channel: 'general' } });
