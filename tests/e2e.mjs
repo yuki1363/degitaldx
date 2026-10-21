@@ -411,15 +411,19 @@ check('通知センター: 「⏰ 期限超過」フィルタが表示される'
 // 別途確認済み）。ここでは購読の登録・解除・入力検証というAPI契約の部分を確認する。
 section('6.8 Web Push 購読API');
 const fakeSub = {
-  endpoint: 'https://push.example.com/e2e-test-endpoint',
+  endpoint: 'https://fcm.googleapis.com/fcm/send/e2e-test-endpoint',
   keys: { p256dh: 'BEXAMPLE_P256DH_KEY_BASE64URL', auth: 'EXAMPLE_AUTH_BASE64URL' },
 };
 const subRes = await api('/api/push/subscribe', { method: 'POST', body: fakeSub });
 check('Push購読: 登録できる（201）', subRes.status === 201, `status=${subRes.status}`);
 const subAgain = await api('/api/push/subscribe', { method: 'POST', body: fakeSub });
 check('Push購読: 同じendpointを再登録しても成功する（ON CONFLICT UPDATE）', subAgain.status === 201, `status=${subAgain.status}`);
-const subMissing = await api('/api/push/subscribe', { method: 'POST', body: { endpoint: 'https://push.example.com/x' } });
+const subMissing = await api('/api/push/subscribe', { method: 'POST', body: { endpoint: 'https://fcm.googleapis.com/fcm/send/x' } });
 check('Push購読: keys不足は400', subMissing.status === 400, `status=${subMissing.status}`);
+const subEvil = await api('/api/push/subscribe', { method: 'POST', body: { ...fakeSub, endpoint: 'https://attacker.example.com/collect' } });
+check('Push購読: プッシュサービス以外のURLは400（SSRF防止）', subEvil.status === 400, `status=${subEvil.status}`);
+const subLookalike = await api('/api/push/subscribe', { method: 'POST', body: { ...fakeSub, endpoint: 'https://fcm.googleapis.com.attacker.example/x' } });
+check('Push購読: 似せたドメインも400', subLookalike.status === 400, `status=${subLookalike.status}`);
 const unsubRes = await api('/api/push/unsubscribe', { method: 'POST', body: { endpoint: fakeSub.endpoint } });
 check('Push購読解除: 200', unsubRes.status === 200, `status=${unsubRes.status}`);
 const unsubMissing = await api('/api/push/unsubscribe', { method: 'POST', body: {} });

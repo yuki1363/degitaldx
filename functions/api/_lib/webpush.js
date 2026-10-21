@@ -127,12 +127,29 @@ export async function encryptAes128Gcm(uaPublicB64u, authB64u, payloadObj) {
  * @param {{VAPID_PUBLIC_KEY:string, VAPID_PRIVATE_KEY:string, VAPID_SUBJECT?:string}} env
  * @returns {Promise<{ok:boolean, status?:number, error?:string}>}
  */
+// 購読の endpoint はブラウザが返す各社のプッシュサービスのURLに限る。
+// 任意のURLを登録されると、通知のたびにサーバーがそこへPOSTしてしまう（SSRF）ため。
+const PUSH_HOST_SUFFIXES = [
+  'fcm.googleapis.com',          // Chrome / Edge(Chromium) / Android
+  'push.services.mozilla.com',   // Firefox
+  'notify.windows.com',          // 旧Edge・Windows
+  'push.apple.com',              // Safari / iPhone（web.push.apple.com）
+];
+export function isAllowedPushEndpoint(endpoint) {
+  let u;
+  try { u = new URL(String(endpoint)); } catch { return false; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return false;
+  const host = u.hostname.toLowerCase();
+  return PUSH_HOST_SUFFIXES.some((s) => host === s || host.endsWith('.' + s));
+}
+
 export async function sendWebPush(subscription, payloadObj, env) {
   try {
     const vapidPublicKeyB64u = env.VAPID_PUBLIC_KEY;
     const vapidPrivateKeyStr = env.VAPID_PRIVATE_KEY;
     if (!vapidPublicKeyB64u || !vapidPrivateKeyStr) return { ok: false, error: 'VAPID鍵が未設定です' };
 
+    if (!isAllowedPushEndpoint(subscription.endpoint)) return { ok: false, error: '許可されていない送信先です' };
     const endpointUrl = new URL(subscription.endpoint);
     const audience = `${endpointUrl.protocol}//${endpointUrl.host}`;
     const subject = env.VAPID_SUBJECT || 'mailto:admin@example.com';
