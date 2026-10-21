@@ -71,6 +71,19 @@ Zero Trust → Access → Applications →「Self-hosted」を追加する。
 - ポリシー: Allow / 会社ドメインのメール（または利用者10名を個別登録）
 - 認証方式: One-time PIN / セッション期間: 1ヶ月
 
+**署名の検証を有効にする（推奨）**: Access が付ける署名付きトークン（JWT）を API 側で検証し、
+ヘッダー偽装によるなりすましを防ぐ。Pages → 設定 → 環境変数 に次の2つを
+**本番（Production）とプレビュー（Preview）の両方**へ追加して再デプロイする。
+
+| 変数 | 値の確認場所 |
+|---|---|
+| `ACCESS_TEAM_DOMAIN` | Zero Trust → 設定 → カスタムページ等に出る「チームドメイン」（例 `yourteam.cloudflareaccess.com`） |
+| `ACCESS_AUD` | Zero Trust → Access → Applications → 本アプリ → 「Application Audience (AUD) Tag」 |
+
+設定後は JWT の email だけを信頼し、`Cf-Access-Authenticated-User-Email` ヘッダーと
+`DEV_USER_EMAIL` は無視される。値を間違えると全員が 401（「認証情報が確認できません」）になるので、
+その場合は変数を見直すか削除すれば元の動作に戻る。未設定の間は従来どおりヘッダーで識別する。
+
 **Access の設定が完了するまでアプリの URL を共有しないこと**（下記セキュリティ運用メモ参照）。
 
 ### 7. 動作確認
@@ -144,7 +157,9 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 
 - **Cloudflare Access を必ず有効にしてから運用する。** API はAccess が付与するヘッダー
   `Cf-Access-Authenticated-User-Email` でユーザーを識別するため、Access の保護が無い状態で
-  公開するとヘッダー偽装によるなりすましが可能になる（プレビューURLも保護対象に含める）
+  公開するとヘッダー偽装によるなりすましが可能になる（プレビューURLも保護対象に含める）。
+  `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を設定すると Access の署名付きJWTを検証するため、
+  保護漏れのURLがあってもなりすましできなくなる（上記「6. Access」参照。設定を推奨）
 - `DEV_USER_EMAIL` はローカル開発専用。**本番環境の環境変数には絶対に設定しない**
 - R2 バケットは非公開で運用し、`r2.dev` パブリックURLは有効化しない（ファイルは Functions 経由で配信）
 - Cloudflare アカウントの 2FA 必須

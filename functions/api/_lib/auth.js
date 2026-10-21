@@ -4,8 +4,11 @@
 // Functions 側では Access が付与するヘッダーのメールアドレスを読み取り、
 // users テーブルと突合してアプリ上のユーザー・権限を特定する。
 // ※ このヘッダーは Access の保護下でのみ信頼できる（README のセキュリティ節を参照）
+//   環境変数 ACCESS_TEAM_DOMAIN / ACCESS_AUD を設定すると、ヘッダーではなく
+//   Access の署名付き JWT を検証して email を取り出す（access-jwt.js。本番では設定を推奨）
 
 import { jsonError } from './http.js';
+import { accessJwtConfig, getAccessToken, verifyAccessJwt } from './access-jwt.js';
 
 const ACCESS_EMAIL_HEADER = 'Cf-Access-Authenticated-User-Email';
 
@@ -20,8 +23,16 @@ const ROLE_LEVEL = { viewer: 1, editor: 2, admin: 3 };
  * .dev.vars の DEV_USER_EMAIL を代わりに使う（本番では設定しないこと）。
  */
 export async function resolveUser(request, env) {
-  const email =
-    request.headers.get(ACCESS_EMAIL_HEADER) || env.DEV_USER_EMAIL || null;
+  let email;
+  const jwtConfig = accessJwtConfig(env);
+  if (jwtConfig) {
+    // ACCESS_TEAM_DOMAIN / ACCESS_AUD 設定時: Access の署名付き JWT の email だけを信頼する
+    // （メールのヘッダーや DEV_USER_EMAIL は見ない＝ヘッダー偽装によるなりすましを防ぐ）
+    const payload = await verifyAccessJwt(getAccessToken(request), jwtConfig);
+    email = payload?.email || null;
+  } else {
+    email = request.headers.get(ACCESS_EMAIL_HEADER) || env.DEV_USER_EMAIL || null;
+  }
 
   if (!email) {
     return {

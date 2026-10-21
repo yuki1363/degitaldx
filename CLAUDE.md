@@ -34,7 +34,7 @@
 - Access の保護が外れた状態でURLを共有しない
 ### 運用前提
 - **利用者**: 3名（設計上は10名程度まで余裕あり）、全員が会社メールアドレス保有。同時アクセスも少数
-- **アクセス制御**: Cloudflare Access のワンタイムコード認証（会社メールの許可リスト方式）。アプリ側にログイン画面は実装しない。ログインユーザーの識別は Access が付与するヘッダー `Cf-Access-Authenticated-User-Email` を Functions 側で読み取り、`users` テーブルと突合する
+- **アクセス制御**: Cloudflare Access のワンタイムコード認証（会社メールの許可リスト方式）。アプリ側にログイン画面は実装しない。ログインユーザーの識別は Access が付与するヘッダー `Cf-Access-Authenticated-User-Email` を Functions 側で読み取り、`users` テーブルと突合する。環境変数 `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` を設定すると、ヘッダーの代わりに Access の署名付きJWT（`Cf-Access-Jwt-Assertion`／Cookie `CF_Authorization`）を Web Crypto で検証して email を取り出す（`functions/api/_lib/access-jwt.js`。署名鍵は `https://<チーム>/cdn-cgi/access/certs` から取得し1時間キャッシュ）。設定時はメールヘッダーと `DEV_USER_EMAIL` を無視する＝保護漏れのURL（プレビューURL等）でもヘッダー偽装でなりすませない。未設定なら従来どおりヘッダーで識別
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
 - **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期
@@ -61,7 +61,7 @@
 3. R2 バケット作成: `wrangler r2 bucket create mainte-files`（ロケーションヒント APAC）→ バインディング `FILES` を設定
 4. Workers & Pages → **「Pages」タブ** → 「Gitに接続」→ 本リポジトリを選択。ビルドコマンドなし / 出力ディレクトリ `/` でデプロイ（**Worker として接続しないこと**。「Deploy command: npx wrangler deploy」が出る画面は Worker 用で、Missing entry-point エラーになる。詳細は README）
 5. Zero Trust → Access → Applications → Self-hosted を追加し、対象に `アプリ名.pages.dev` を指定
-6. ポリシー: Allow / 会社ドメインのメール（または利用者10名を個別登録）。認証方式は One-time PIN。セッション期間は1ヶ月
+6. ポリシー: Allow / 会社ドメインのメール（または利用者10名を個別登録）。認証方式は One-time PIN。セッション期間は1ヶ月。Pages の環境変数（本番・プレビュー両方）に `ACCESS_TEAM_DOMAIN`・`ACCESS_AUD`（AccessアプリのAUDタグ）を設定してJWT検証を有効にする
 7. 部品在庫の初期データ移行（機能05参照）
 ### コーディング方針
 - フロントはフレームワークレス（Vanilla JS + HTML + CSS）。ビルド工程なしでデプロイできること

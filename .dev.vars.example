@@ -11,6 +11,12 @@
 #   ※ 本番（Cloudflare 上）ではこの変数を設定しないこと（Access のヘッダーのみを信頼する）
 DEV_USER_EMAIL=admin@example.com
 
+# ACCESS_TEAM_DOMAIN / ACCESS_AUD:
+#   本番（Cloudflare）で設定する Access の JWT 検証用。設定するとヘッダーや DEV_USER_EMAIL は無視される。
+#   ローカル開発では Access を通らないため設定しないこと（設定すると全リクエストが 401 になる）。
+# ACCESS_TEAM_DOMAIN=yourteam.cloudflareaccess.com
+# ACCESS_AUD=<Access アプリの Application Audience (AUD) Tag>
+
 # R2 容量上限ガードの上限値（バイト）。未設定なら既定値（9GB / 8GB）。
 # ローカルで拒否・警告の動作確認をするときに小さい値にして使う。
 # R2_HARD_LIMIT_BYTES=9000000000
