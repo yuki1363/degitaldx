@@ -83,8 +83,11 @@ export async function onRequestPost({ env, request, data }) {
   const type = String(rec.equipmentType || '').trim();
   const date = String(rec.date || '').slice(0, 10);
   if (!clientId) return jsonError(400, 'record.id は必須です');
+  // id は画面の onclick 等にも埋め込まれるため英数字・_・- に限定する（元アプリは Date.now() の数字）
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(clientId)) return jsonError(400, 'record.id が不正です');
   if (!EQUIPMENT_TYPES.includes(type)) return jsonError(400, 'equipmentType が不正です');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonError(400, 'date は YYYY-MM-DD 形式で指定してください');
+  rec.date = date; // 検証済みの値で保存（先頭10文字だけ検証して残りに任意の文字列を付けられないように）
 
   const hasAbnormal = computeHasAbnormal(rec.statuses);
   const recordJson = JSON.stringify(rec);

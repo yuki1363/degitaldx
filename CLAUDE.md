@@ -206,6 +206,7 @@
 - **記録の保存形式**: 元アプリの Record を `record_json` にそのまま保存（config スナップショット含む＝設定変更後も過去記録が壊れない。02 の items_json と同じ思想）。検索用に `equipment_type`/`inspected_date`/`has_abnormal`(caution/repairで1) を列に持つ。`client_id`(元アプリのDate.now() id) で冪等 upsert。
 - **API**: `functions/api/electrical-inspections/`（`index.js` GET一覧`{records:{[client_id]:Record}}`/POST upsert、`[id].js` DELETE論理削除）、`functions/api/electrical-config/`（GET`{main,battery,generator,defaults}`/PUT admin・`master_history`退避）。
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから添付できる（editor以上）。アップロードはアプリ共通の `js/files.js`（`uploadFile`/`resizeImageFile`＝長辺1280pxへ縮小しEXIF除去・R2容量ガード）を使い、classic script のこのページへは末尾の module から `window.ElecFiles` として渡す。「保存する」で先に送信し、記録（`record_json`）に `photos:[{id,file_name,content_type}]` として持つ。サーバー側は `attachFiles` で `related_table='electrical_inspection'` に紐づけ、記録詳細・印刷にサムネイルを出す。保存後はフォームから外す（次の記録へ持ち越さない）。**添付は入力・編集画面の「🗑 削除」から削除できる**（`DELETE /api/files/:id` の論理削除。記録側の参照は「保存する」で消えるため、未保存のまま残っても壊れたサムネイルが出ないよう `onerror` で隠す）。
+- **XSS対策**: 記録（`record_json`）は他の利用者が保存した値で、記録内の `config` スナップショットも含め任意の文字列が入り得る。`innerHTML` に入れる値は必ず `esc()`、`onclick` の引数は `jsArg()`（JSON化＋属性エスケープ）を通す。サーバー側も `record.id` を英数字・`_`・`-`（64文字まで）に限定し、`date` は検証済みの `YYYY-MM-DD` で保存し直す
 - **スコープ外（後日）**: オフライン書き込みキュー、横断検索(11)・通知への載せ込み（`has_abnormal`が足場）。
 **テーブル**: `electrical_inspection`（client_id, equipment_type[main/battery/generator], inspected_date, has_abnormal, record_json, +共通監査列）、`electrical_config`（equipment_type PK, config_json, default_json, updated_by/at）
 ### 13. ユーティリティ日報（工場ユーティリティ設備の日常点検）

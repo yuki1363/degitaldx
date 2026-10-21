@@ -390,7 +390,7 @@ function renderPhotoList() {
   let html = '';
   currentPhotos.forEach((p, i) => {
     const thumb = (p.content_type || '').startsWith('image/')
-      ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="" onerror="this.style.display='none'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
+      ? `<a href="/api/files/${encodeURIComponent(p.id)}" target="_blank" rel="noopener"><img src="/api/files/${encodeURIComponent(p.id)}" alt="" onerror="this.style.display='none'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
       : '<span style="font-size:22px">🎬</span>';
     html += photoRow(thumb, esc(p.file_name || ''),
       `<button class="btn btn-danger btn-sm" type="button" onclick="deleteCurrentPhoto(${i})">🗑 削除</button>`);
@@ -601,7 +601,7 @@ function loadDataIntoForm(data) {
     Object.entries(data.statuses).forEach(([key, val]) => {
       currentStatuses[key] = val;
       document.querySelectorAll('.status-group').forEach(grp => {
-        const btn = grp.querySelector(`[onclick*="'${key}'"][onclick*="'${val}'"]`);
+        const btn = grp.querySelector(`[onclick*="'${CSS.escape(key)}'"][onclick*="'${CSS.escape(String(val))}'"]`);
         if (btn) {
           grp.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
@@ -705,9 +705,9 @@ function buildEntryForm() {
           const pv = prevMs[m.key];
           const prevHtml = (pv !== undefined && pv !== '')
             ? `<div class="prev-val" style="display:flex;align-items:center;gap:6px;width:100%">
-                <span>前回${prevDate}: ${pv} ${esc(m.unit)}</span>
+                <span>前回${prevDate}: ${esc(pv)} ${esc(m.unit)}</span>
                 <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0"
-                  onclick="(function(){var e=document.getElementById('m_${m.key}');if(e)e.value='${pv}';})()">前回値コピー</button>
+                  onclick="setPrevVals(${jsArg([['m_' + m.key, String(pv)]])})">前回値コピー</button>
                </div>` : '';
           const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
           row.style.flexWrap = 'wrap';
@@ -725,7 +725,7 @@ function buildEntryForm() {
           const cells = phaseLabels.map((lbl, i) => {
             const pv = Array.isArray(pvArr) ? pvArr[i] : undefined;
             const prevCell = (pv !== undefined && pv !== '')
-              ? `<span style="font-size:10px;color:#aaa">前:${pv}</span>` : '';
+              ? `<span style="font-size:10px;color:#aaa">前:${esc(pv)}</span>` : '';
             return `<div class="meas-cell">
                <span class="meas-lbl">${lbl}</span>
                <input type="number" inputmode="decimal" id="m_${m.key}_${i}" placeholder="—" step="any">
@@ -735,7 +735,7 @@ function buildEntryForm() {
           }).join('');
           const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel" style="margin-top:4px"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
           const copyBtn = copyPairs.length ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0;margin-top:4px"
-            onclick="setPrevVals(${JSON.stringify(copyPairs).replace(/"/g, '&quot;')})">前回値コピー</button>` : '';
+            onclick="setPrevVals(${jsArg(copyPairs)})">前回値コピー</button>` : '';
           row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
             <div class="meas-grid">${cells}</div>
             ${qualSel}${copyBtn}`;
@@ -754,12 +754,12 @@ function buildEntryForm() {
           const pv = prevMs[m.key];
           const prevText = pv
             ? (Array.isArray(pv)
-                ? phaseLabels.map((lbl,i) => (pv[i]!==undefined && pv[i]!=='') ? `${lbl}:${pv[i]}${esc(m.unit)}` : '').filter(Boolean).join('　')
-                : `${pv} ${esc(m.unit)}`)
+                ? phaseLabels.map((lbl,i) => (pv[i]!==undefined && pv[i]!=='') ? `${lbl}:${esc(pv[i])}${esc(m.unit)}` : '').filter(Boolean).join('　')
+                : `${esc(pv)} ${esc(m.unit)}`)
             : '';
           const qualSel = m.qualifier ? `<select id="q_${m.key}" class="q-sel"><option value="">—</option><option value="未満">未満</option><option value="以上">以上</option></select>` : '';
           const copyBtn2 = copyPairs.length ? `<button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;min-height:0"
-            onclick="setPrevVals(${JSON.stringify(copyPairs).replace(/"/g, '&quot;')})">前回値コピー</button>` : '';
+            onclick="setPrevVals(${jsArg(copyPairs)})">前回値コピー</button>` : '';
           const prevHtml = prevText ? `<div class="prev-val" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%">
             <span>前回${prevDate}: ${prevText}</span>${copyBtn2}</div>` : '';
           row.innerHTML = `<label style="width:100%;margin-bottom:4px">${esc(m.label)}</label>
@@ -782,7 +782,7 @@ function buildEntryForm() {
       cat.checks.forEach(item => {
         const cur = currentStatuses[item.key] || null;
         const ps = prevSt[item.key];
-        const prevHtml = ps ? `<div class="prev-val">前回${prevDate}: ${SL[ps]||ps}</div>` : '';
+        const prevHtml = ps ? `<div class="prev-val">前回${prevDate}: ${SL[ps]||esc(ps)}</div>` : '';
         const row = document.createElement('div');
         row.className = 'form-row';
         row.style.cssText = 'flex-direction:column;align-items:stretch;gap:4px';
@@ -983,16 +983,16 @@ function renderHistory() {
       (!re && !ca && go) ? '<span class="badge badge-good">異常なし</span>' : '',
       (!re && !ca && !go) ? '<span class="badge" style="background:#f4f6f7;color:var(--muted);border:1px solid var(--border)">未確認</span>' : '',
     ].join('');
-    return `<div class="history-item" onclick="openRecord('${r.id}')">
+    return `<div class="history-item" onclick="openRecord(${jsArg(String(r.id))})">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div style="flex:1;min-width:0">
           <div class="history-date">${fmtDate(r.date)}</div>
-          <div class="history-meta">${r.inspector||'—'} / ${r.facility||'—'} / ${r.weather||'—'}</div>
+          <div class="history-meta">${esc(r.inspector||'—')} / ${esc(r.facility||'—')} / ${esc(r.weather||'—')}</div>
           <div class="history-badges">${badges}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0" onclick="event.stopPropagation()">
-          <button class="btn btn-success btn-sm" style="min-height:44px;padding:8px 14px" onclick="editRecord('${r.id}')">編集</button>
-          <button class="btn btn-danger btn-sm" style="min-height:44px;padding:8px 14px" onclick="deleteRecordById('${r.id}')">削除</button>
+          <button class="btn btn-success btn-sm" style="min-height:44px;padding:8px 14px" onclick="editRecord(${jsArg(String(r.id))})">編集</button>
+          <button class="btn btn-danger btn-sm" style="min-height:44px;padding:8px 14px" onclick="deleteRecordById(${jsArg(String(r.id))})">削除</button>
         </div>
       </div>
     </div>`;
@@ -1002,7 +1002,7 @@ function renderHistory() {
 function fmtDate(d) {
   if (!d) return '—';
   const [y,m,day] = d.split('-');
-  return `${y}年${+m}月${+day}日`;
+  return `${+y}年${+m}月${+day}日`;
 }
 
 // ===================== 詳細モーダル =====================
@@ -1150,7 +1150,7 @@ function buildAnnualHTML(recs, year, eq) {
         mnums.forEach(mo => {
           const rec = recs.find(r => r.date.slice(5, 7) === String(mo).padStart(2, '0'));
           const val = rec ? ((rec.measurements || {})[m.key] || '') : '';
-          row += TD(val !== '' ? applyMult(val, mult) : '', 'text-align:center');
+          row += TD(val !== '' ? esc(applyMult(val, mult)) : '', 'text-align:center');
         });
         measRows += row + '</tr>';
       } else {
@@ -1160,7 +1160,7 @@ function buildAnnualHTML(recs, year, eq) {
             const rec = recs.find(r => r.date.slice(5, 7) === String(mo).padStart(2, '0'));
             const vals = rec ? ((rec.measurements || {})[m.key] || []) : [];
             const val = Array.isArray(vals) ? (vals[i] || '') : '';
-            row += TD(val !== '' ? applyMult(val, mult) : '', 'text-align:center');
+            row += TD(val !== '' ? esc(applyMult(val, mult)) : '', 'text-align:center');
           });
           measRows += row + '</tr>';
         });
@@ -1229,11 +1229,11 @@ function buildRecordHTML(r) {
   let html = `<table class="ptable" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">
     ${th2('基本情報')}
     <tr>${td('点検日','40%',true)}${td(fmtDate(r.date))}</tr>
-    <tr>${td('点検者','',true)}${td(r.inspector||'—')}</tr>
-    <tr>${td('設備名称','',true)}${td(r.facility||'—')}</tr>
-    <tr>${td('天候','',true)}${td(r.weather||'—')}</tr>
-    <tr>${td('室温','',true)}${td((r.room_temp||'—')+' ℃')}</tr>
-    <tr>${td('湿度','',true)}${td((r.humidity||'—')+' %')}</tr>
+    <tr>${td('点検者','',true)}${td(esc(r.inspector||'—'))}</tr>
+    <tr>${td('設備名称','',true)}${td(esc(r.facility||'—'))}</tr>
+    <tr>${td('天候','',true)}${td(esc(r.weather||'—'))}</tr>
+    <tr>${td('室温','',true)}${td(esc(r.room_temp||'—')+' ℃')}</tr>
+    <tr>${td('湿度','',true)}${td(esc(r.humidity||'—')+' %')}</tr>
   </table>`;
 
   // 計測値（カテゴリ別ヘッダー付き・先に表示）
@@ -1245,14 +1245,14 @@ function buildRecordHTML(r) {
       const val = ms[m.key];
       if (val === undefined || val === '') return;
       const mult = m.multiplier || 1;
-      const q = qs[m.key] ? `　${qs[m.key]}` : '';
+      const q = qs[m.key] ? `　${esc(qs[m.key])}` : '';
       if (Array.isArray(val)) {
         const phases = m.phases || val.length;
         const labels = getPhaseLabels(phases, m.phasePrefix) || val.map((_,i)=>`${i+1}`);
-        const display = val.map((v,i) => v!=='' ? `${labels[i]}: ${applyMult(v,mult)} ${esc(m.unit)}` : '').filter(Boolean).join('　') + q;
+        const display = val.map((v,i) => v!=='' ? `${esc(labels[i])}: ${esc(applyMult(v,mult))} ${esc(m.unit)}` : '').filter(Boolean).join('　') + q;
         if (display) catRows.push(`<tr>${td(esc(m.label),'45%',true)}${td(display)}</tr>`);
       } else {
-        catRows.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%',true)}${td(applyMult(val,mult)+' '+esc(m.unit)+q)}</tr>`);
+        catRows.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%',true)}${td(esc(applyMult(val,mult))+' '+esc(m.unit)+q)}</tr>`);
       }
     });
     if (catRows.length) {
@@ -1270,14 +1270,14 @@ function buildRecordHTML(r) {
           const val = ms[m.key];
           if (val === undefined || val === '') return;
           const mult = m.multiplier || 1;
-          const q = qs[m.key] ? `　${qs[m.key]}` : '';
+          const q = qs[m.key] ? `　${esc(qs[m.key])}` : '';
           if (Array.isArray(val)) {
             const phases = m.phases || val.length;
             const labels = getPhaseLabels(phases, m.phasePrefix) || val.map((_,i)=>`${i+1}`);
-            const display = val.map((v,i) => v!=='' ? `${labels[i]}: ${applyMult(v,mult)} ${esc(m.unit)}` : '').filter(Boolean).join('　') + q;
+            const display = val.map((v,i) => v!=='' ? `${esc(labels[i])}: ${esc(applyMult(v,mult))} ${esc(m.unit)}` : '').filter(Boolean).join('　') + q;
             if (display) catRows2.push(`<tr>${td(esc(m.label),'45%',true)}${td(display)}</tr>`);
           } else {
-            catRows2.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%',true)}${td(applyMult(val,mult)+' '+esc(m.unit)+q)}</tr>`);
+            catRows2.push(`<tr>${td(esc(m.label)+' ('+esc(m.unit)+')', '45%',true)}${td(esc(applyMult(val,mult))+' '+esc(m.unit)+q)}</tr>`);
           }
         });
         if (catRows2.length) {
@@ -1303,7 +1303,7 @@ function buildRecordHTML(r) {
       cat.checks.forEach(item => {
         const v = st[item.key] || 'good';
         if (v === 'na') return;
-        html += `<tr>${td(esc(item.label),'45%',true)}<td class="sc-${v}" style="padding:5px 7px;border:1px solid #ccc">${SL[v]||v}</td></tr>`;
+        html += `<tr>${td(esc(item.label),'45%',true)}<td class="sc-${esc(v)}" style="padding:5px 7px;border:1px solid #ccc">${SL[v]||esc(v)}</td></tr>`;
       });
       if (cr[cat.id]) {
         html += `<tr><td style="padding:4px 7px;border:1px solid #ccc;font-size:12px;color:#666" colspan="2">備考：${esc(cr[cat.id])}</td></tr>`;
@@ -1328,8 +1328,8 @@ function buildRecordHTML(r) {
       <div style="display:flex;flex-wrap:wrap;gap:8px">`;
     photos.forEach(p => {
       html += (p.content_type || '').startsWith('image/')
-        ? `<a href="/api/files/${p.id}" target="_blank" rel="noopener"><img src="/api/files/${p.id}" alt="${esc(p.file_name||'')}" onerror="this.parentNode.style.display='none'" style="width:110px;height:110px;object-fit:cover;border:1px solid #ccc;border-radius:6px"></a>`
-        : `<a href="/api/files/${p.id}" target="_blank" rel="noopener" style="font-size:13px">🎬 ${esc(p.file_name||'')}</a>`;
+        ? `<a href="/api/files/${encodeURIComponent(p.id)}" target="_blank" rel="noopener"><img src="/api/files/${encodeURIComponent(p.id)}" alt="${esc(p.file_name||'')}" onerror="this.parentNode.style.display='none'" style="width:110px;height:110px;object-fit:cover;border:1px solid #ccc;border-radius:6px"></a>`
+        : `<a href="/api/files/${encodeURIComponent(p.id)}" target="_blank" rel="noopener" style="font-size:13px">🎬 ${esc(p.file_name||'')}</a>`;
     });
     html += `</div></div>`;
   }
@@ -1778,7 +1778,12 @@ function applyMult(val, mult) {
 }
 
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// onclick="fn(...)" の引数に値を埋め込む（JSONで文字列化してから属性用にエスケープ）。
+// 記録データ（他の利用者が保存した値）をそのまま埋め込むとスクリプトを仕込まれるため必ずこれを通す
+function jsArg(v) {
+  return esc(JSON.stringify(v));
 }
 
 // Service Worker 登録（HTTPS環境のみ）

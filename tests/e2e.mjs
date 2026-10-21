@@ -947,6 +947,40 @@ check('電気点検: 写真アップロードモジュールが読み込まれ�
 check('電気点検: 写真の削除UIが用意されている',
   await page.evaluate(() => typeof deleteCurrentPhoto === 'function' && typeof uploadPendingPhotos === 'function'));
 
+// XSS対策: 他の利用者が保存した記録に HTML/スクリプトが入っていても実行されない
+const elBadId = await api('/api/electrical-inspections', { method: 'POST', body: { ...elRec, id: "x');alert(1)//" } });
+check('電気点検: 不正な record.id は 400', elBadId.status === 400, `status=${elBadId.status}`);
+const xssId = 'E2EXSS' + Date.now();
+const xss = (tag) => `<img src=x onerror="window.__xss='${tag}'">`;
+const xssPost = await api('/api/electrical-inspections', {
+  method: 'POST',
+  body: {
+    ...elRec, id: xssId, date: '2026-09-04' + xss('date'),
+    inspector: xss('inspector'), facility: xss('facility'), weather: xss('weather'),
+    room_temp: xss('temp'), humidity: xss('hum'),
+    statuses: { g_noise: xss('status') }, qualifiers: { tr_ot: xss('qual') },
+    measurements: { tr_ot: xss('meas'), tr_v1: [xss('phase'), '1', '2'] },
+  },
+});
+check('電気点検: XSS検証用の記録を保存（201）', xssPost.status === 201, `status=${xssPost.status}`);
+const xssGet = await api('/api/electrical-inspections?equipment_type=main');
+check('電気点検: date は検証済みの YYYY-MM-DD で保存される', xssGet.json?.records?.[xssId]?.date === '2026-09-04',
+  xssGet.json?.records?.[xssId]?.date);
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+const xssModalText = await page.evaluate((id) => {
+  showTab('history');
+  openRecord(id);
+  const text = document.getElementById('modal-content')?.textContent || '';
+  showTab('entry');
+  editRecord(id); // 前回値表示・編集フォームへの復元
+  return text;
+}, xssId);
+await page.waitForTimeout(400);
+check('電気点検: 記録の HTML が実行されない（一覧・詳細・編集）',
+  await page.evaluate(() => window.__xss === undefined), await page.evaluate(() => String(window.__xss)));
+check('電気点検: 点検者名は文字としてそのまま表示される', xssModalText.includes('<img src=x'));
+await api(`/api/electrical-inspections/${encodeURIComponent(xssId)}`, { method: 'DELETE' });
+
 // ---------- 9.7 ユーティリティ日報（13） ----------
 section('9.7 ユーティリティ日報（項目マスタ・1日1件ガード・異常判定）');
 const utItems = await api('/api/utility-reports/items');
