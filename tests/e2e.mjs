@@ -1304,6 +1304,20 @@ check('AIサポート: 375px幅で横に溢れない',
   fsOverflow.scroll <= fsOverflow.client + 1, JSON.stringify(fsOverflow));
 await page.setViewportSize({ width: 1280, height: 720 });
 
+// ---------- 9.9 ログイン切れの疑い → 「再ログイン」ボタン ----------
+section('9.9 Accessログイン切れ時の再ログインボタン');
+await page.goto(`${BASE}/pages/trouble`, { waitUntil: 'networkidle' });
+check('通常時は再ログインバナーが出ない', (await page.locator('#relogin-banner').count()) === 0);
+// オンラインなのに /api/me だけ届かない状態（＝Access のログイン画面へのリダイレクトで fetch が弾かれる状況）を再現
+await context.route('**/api/me', (route) => route.abort());
+await page.goto(`${BASE}/pages/trouble`, { waitUntil: 'domcontentloaded' });
+// 1回目は自動で再認証へ誘導（?reauth=付きで再読込）、2回目は15秒ガードで止まりバナーが出る
+const reloginShown = await page.waitForSelector('#relogin-banner button', { timeout: 15000 }).then(() => true).catch(() => false);
+check('ログイン切れの疑い時に「再ログインする」ボタンが出る', reloginShown);
+check('再ログインバナーの文言', (await page.locator('#relogin-banner').innerText().catch(() => '')).includes('再ログインする'));
+await context.unroute('**/api/me');
+await page.evaluate(() => sessionStorage.clear());
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

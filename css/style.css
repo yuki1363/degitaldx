@@ -121,6 +121,27 @@ body {
   color: var(--color-warning);
 }
 
+/* ログイン切れの疑い時に出す「再ログイン」バナー（js/api.js の showReloginBanner） */
+.relogin-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 14px;
+}
+
+.relogin-banner span {
+  flex: 1;
+  min-width: 180px;
+}
+
 /* ---- モーダルダイアログ（容量報告などの共通UI） ---- */
 .modal-backdrop {
   position: fixed;

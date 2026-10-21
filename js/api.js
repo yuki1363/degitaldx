@@ -50,6 +50,34 @@ function tryReauthNavigate(method) {
   return true;
 }
 
+// 自動の再認証誘導を使い切ってもなお「オンラインなのにAPIに届かない」ときは、Access のログイン切れ
+// の可能性が高い。メールアプリ内ブラウザ・PCにインストールしたPWAの窓などでは自動誘導が通らない
+// ことがあるため、画面上部に「再ログイン」ボタンを出して手動で再認証できるようにする。
+//   - Access 標準の /cdn-cgi/access/logout へ移動（sw.js は /cdn-cgi/ に介入しない）。
+//     returnTo で今のページへ戻す（未対応の場合はログアウト表示になるので、アプリを開き直してもらう）
+//   - 本当にオフライン（navigator.onLine === false）のときは出さない
+function showReloginBanner() {
+  if (navigator.onLine !== true) return;
+  if (!document.body || document.getElementById('relogin-banner')) return;
+  const back = new URL(window.location.href);
+  back.searchParams.delete('reauth');
+  const bar = document.createElement('div');
+  bar.id = 'relogin-banner';
+  bar.className = 'relogin-banner';
+  bar.setAttribute('role', 'alert');
+  const msg = document.createElement('span');
+  msg.textContent = '🔑 ログインの有効期限が切れた可能性があります。';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-sm btn-primary';
+  btn.textContent = '再ログインする';
+  btn.addEventListener('click', () => {
+    window.location.href = `/cdn-cgi/access/logout?returnTo=${encodeURIComponent(back.toString())}`;
+  });
+  bar.append(msg, btn);
+  document.body.prepend(bar);
+}
+
 async function request(path, { method = 'GET', body, headers } = {}) {
   let response;
   try {
@@ -67,6 +95,7 @@ async function request(path, { method = 'GET', body, headers } = {}) {
     if (tryReauthNavigate(method)) {
       throw new ApiError(0, '認証を確認しています。再読み込みします。', undefined, true);
     }
+    showReloginBanner();
     throw new ApiError(0, 'ネットワークに接続できません。通信環境を確認してください。', undefined, true);
   }
 
@@ -89,6 +118,7 @@ async function request(path, { method = 'GET', body, headers } = {}) {
     if (offline && tryReauthNavigate(method)) {
       throw new ApiError(response.status, '認証を確認しています。再読み込みします。', undefined, true);
     }
+    if (offline) showReloginBanner();
     throw new ApiError(
       response.status,
       err.message || `エラーが発生しました（HTTP ${response.status}）`,
