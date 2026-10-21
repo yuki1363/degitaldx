@@ -322,6 +322,7 @@
 ### その他
 - 写真はアップロード前に Canvas でリサイズ（長辺1280px、JPEG品質0.7目安）
 - CSV入出力は UTF-8 / Shift_JIS 両対応（Excel互換のため出力デフォルトは BOM付きUTF-8 か Shift_JIS を選択可に）
+- CSV出力は必ず `js/csv.js` の `buildCsvText`/`escCsv` を通す（CSVインジェクション対策＝`=`/`+`/`-`/`@`/タブ/CR で始まる値は先頭に `'` を付けて Excel に数式として実行させない。数値・単独の「-」・`excelText()` の `="…"` は対象外）
 - QR読み取りは `jsQR`、QR生成は `qrcode.js`、PDF生成は印刷用CSS + 必要に応じ jsPDF（日本語フォント埋め込み）
 - カレンダーは自作 or `FullCalendar`（CDN）。軽量性優先なら自作
 - 日時は UTC の ISO 8601 で保存し、表示時に JST へ変換

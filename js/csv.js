@@ -1,6 +1,6 @@
 // CSV出力の共通モジュール（クライアント側で生成）
 //
-//   - escCsv(v)               … 値をCSV用にエスケープ（カンマ・改行・"" を安全化）
+//   - escCsv(v)               … 値をCSV用にエスケープ（カンマ・改行・"" を安全化。数式で始まる値は先頭に ' を付ける）
 //   - buildCsvText(rows, cols) … 行データと列定義（{label, value(row)}）からCSVテキスト生成
 //   - downloadCsv(name, text, enc) … Blobとしてダウンロード
 //       enc='sjis' のときは encoding-japanese（グローバル Encoding）で Shift_JIS 変換。
@@ -9,8 +9,18 @@
 //   ※ Shift_JIS 出力を使うページは encoding-japanese の <script> を読み込むこと
 //     （未読込でも UTF-8/BOM に自動フォールバックするため動作はする）。
 
+// CSVインジェクション対策: = + - @（とタブ・CR）で始まる値は Excel が数式として実行するため、
+// 先頭に ' を付けて文字列として扱わせる。ただし数値（-5・+1.2）と excelText() の ="…" はそのまま。
+const FORMULA_START = /^[=+\-@\t\r]/;
+const PLAIN_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+const EXCEL_TEXT = /^="(?:[^"]|"")*"$/;
+export function neutralizeFormula(s) {
+  if (!FORMULA_START.test(s) || PLAIN_NUMBER.test(s) || EXCEL_TEXT.test(s) || s === '-') return s;
+  return `'${s}`;
+}
+
 export function escCsv(v) {
-  const s = v == null ? '' : String(v);
+  const s = neutralizeFormula(v == null ? '' : String(v));
   return s.includes(',') || s.includes('"') || s.includes('\n')
     ? `"${s.replace(/"/g, '""')}"` : s;
 }

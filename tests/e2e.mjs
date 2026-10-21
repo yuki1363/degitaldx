@@ -1352,6 +1352,24 @@ check('再ログインバナーの文言', (await page.locator('#relogin-banner'
 await context.unroute('**/api/me');
 await page.evaluate(() => sessionStorage.clear());
 
+// ---------- 9.10 CSVインジェクション対策 ----------
+section('9.10 CSV出力: 数式で始まる値を無害化する');
+const csvOut = await page.evaluate(async () => {
+  const { escCsv, excelText } = await import('/js/csv.js');
+  return {
+    eq: escCsv('=HYPERLINK("http://x","y")'), plus: escCsv('+cmd'), at: escCsv('@SUM(A1)'), tab: escCsv('\t=1'),
+    neg: escCsv('-5'), dec: escCsv('+1.5'), dash: escCsv('-'), text: escCsv('3号機 異音'),
+    excel: escCsv(excelText('3-25')),
+  };
+});
+check('CSV: = で始まる値に \' が付く', csvOut.eq === `"'=HYPERLINK(""http://x"",""y"")"`, csvOut.eq);
+check('CSV: + / @ / タブ始まりも無害化', csvOut.plus === "'+cmd" && csvOut.at === "'@SUM(A1)" && csvOut.tab === "'\t=1",
+  JSON.stringify(csvOut));
+check('CSV: 数値（-5・+1.5）と「-」はそのまま', csvOut.neg === '-5' && csvOut.dec === '+1.5' && csvOut.dash === '-',
+  JSON.stringify(csvOut));
+check('CSV: 通常の文字と excelText(="…") はそのまま', csvOut.text === '3号機 異音' && csvOut.excel === '"=""3-25"""',
+  JSON.stringify(csvOut));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
