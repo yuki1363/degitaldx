@@ -252,44 +252,59 @@
   （機能10のチャット→記録化と同じ既存URLプリフィルの流用）
 **テーブル**: なし（既存テーブルの読み取りのみ。新規レコードを作らないため監査列・論理削除の対象外）
 ---
-## ディレクトリ構成（想定）
+## ディレクトリ構成
 ```
 /
-├── index.html              # ダッシュボード（ホーム）
-├── manifest.json           # PWAマニフェスト
-├── sw.js                   # Service Worker
-├── icons/                  # PWAアイコン
-├── pages/                  # 各機能のHTML（ai-support.html = 14 AIサポート）
-├── css/
-│   └── style.css
+├── index.html              # ホーム（機能タイル・通知ベル・容量警告）
+├── manifest.json / sw.js   # PWA（Service Worker）
+├── _headers                # 静的ファイルのセキュリティヘッダー（CSP 等）
+├── icons/                  # PWAアイコン（scripts/make-icons.mjs で生成）
+├── electrical/index.html   # 12 電気設備点検（独立ドキュメント）
+├── pages/                  # 各機能のHTML（plan / plan-annual / inspection / inspection-batch /
+│                           #   inspection-report / repair / trouble / parts / ledger / labels / report /
+│                           #   utility / dashboard / admin / chat / search / ai-support / notifications）
+├── css/style.css
 ├── js/
-│   ├── api.js              # fetchラッパー
-│   ├── auth.js             # ログインユーザー情報・権限判定
-│   ├── plan.js             # 01 保全計画（工事予定含む）
-│   ├── inspection.js       # 02 点検実施
+│   ├── api.js auth.js nav.js util.js home-tabs.js   # 共通（fetch・権限・ナビ・DOMヘルパ）
+│   ├── offline-queue.js draft.js                    # オフライン送信キュー・入力下書き
+│   ├── files.js admin-files.js                      # R2アップロード（縮小・EXIF除去）・容量管理
+│   ├── csv.js trouble-csv.js                        # CSV出力（インジェクション対策）
+│   ├── excel-fill.js xlsx-image.js hanko.js permit-fields.js print-templates.js  # 帳票（Excel差込・印影）
+│   ├── equip-picker.js equip-names.js qr-scan.js    # 設備選択・QR読取
+│   ├── plan.js plan-annual.js plan-import.js plan-summary.js plan-inspection-link.js  # 01
+│   ├── inspection.js inspection-items.js inspection-batch.js inspection-report.js     # 02
 │   ├── repair.js           # 03 業務依頼
-│   ├── trouble.js          # 04 トラブル記録（ジャンル抽出）
+│   ├── trouble.js          # 04 トラブル記録
 │   ├── parts.js            # 05 部品在庫（CSVインポート）
-│   ├── ledger.js           # 06 設備台帳・QR
+│   ├── ledger.js labels.js # 06 設備台帳・QRラベル
 │   ├── report.js           # 07 日報
-│   ├── utility.js          # 13 ユーティリティ日報（項目マスタ・CSV出力）
-│   ├── dashboard.js        # 08 グラフ（サマリー/カスタム。抽出→CSVは横断検索へ集約）
+│   ├── dashboard.js        # 08 グラフ
 │   ├── admin.js            # 09 管理機能・監査ログ・復元
-│   ├── chat.js             # 10 チャット（個人情報検知）
+│   ├── chat.js notifications.js  # 10 チャット・通知センター／Web Push購読
 │   ├── search.js           # 11 横断検索
-│   └── ai-support.js       # 14 AIサポート（トラブル・部品・業務依頼＋AI対応策）
-├── functions/
-│   └── api/
-│       ├── equipment/ inspections/ repairs/ troubles/
-│       ├── parts/          # CRUD + import.js（CSV取込）
-│       ├── reports/ plans/
-│       ├── utility-reports/ # 13 ユーティリティ日報（items/ = 項目マスタ）
-│       ├── stats/          # 集計・CSV出力
-│       ├── files/          # R2アップロード/取得
-│       ├── search.js       # 横断検索（キーワード+フィルタ）
-│       ├── admin/          # audit.js / restore.js / masters.js
-│       └── me.js           # ログインユーザー情報
+│   ├── utility.js          # 13 ユーティリティ日報
+│   ├── ai-support.js ai-assistant.js  # 14 AIサポート・AI提案UI
+│   └── vendor/             # 同梱ライブラリ（CSPで外部CDN禁止のため）
+├── functions/api/
+│   ├── _middleware.js      # 認証・未捕捉エラーのJSON化・セキュリティヘッダー
+│   ├── _lib/               # access-jwt / auth / audit / history / fuzzy / trouble-similar /
+│   │                       #   notify / overdue-notify / webpush / storage / ai-models / ai-context 等
+│   ├── [[path]].js         # 未定義APIの404
+│   ├── me.js
+│   ├── equipment/ equipment-names/ inspections/ plans/ troubles/ repairs/ reports/
+│   ├── parts/              # CRUD + import.js（CSV取込）・import-from-equipment.js
+│   ├── utility-reports/    # 13（items/ = 項目マスタ）
+│   ├── electrical-inspections/ electrical-config/  # 12
+│   ├── chat/ notifications/ push/                  # 10・通知・Web Push
+│   ├── search/index.js     # 11 横断検索
+│   ├── stats/              # 集計
+│   ├── files/              # R2アップロード/取得
+│   ├── print-templates/    # 帳票テンプレート
+│   ├── ai/                 # Workers AI（suggest-trouble / analyze-trouble / read-meter / extract-equipment / parse-search / parse-trouble-pdf / chat）
+│   ├── users/
+│   └── admin/              # audit/ restore/ masters/ users/ backup.js usage.js normalize.js
 ├── tests/                  # E2Eテスト（実ブラウザ検証。cd tests && npm test）
+├── docs/                   # 現場向け使い方ガイド
 ├── schema.sql              # D1テーブル定義
 └── wrangler.toml           # D1/R2/Secretバインディング
 ```
