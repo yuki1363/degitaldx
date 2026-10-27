@@ -5,6 +5,7 @@
 //   閲覧は全ログインユーザー可（GET・読み取り専用）。
 
 import { json } from '../_lib/http.js';
+import { jstDayStartUtc, jstNextDayStartUtc } from '../_lib/util.js';
 
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
@@ -18,13 +19,13 @@ export async function onRequestGet({ request, env }) {
   }
   const from = url.searchParams.get('from');
   if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
-    binds.push(`${from}T00:00:00Z`);
+    binds.push(jstDayStartUtc(from)); // JST の日付境界（_lib/util.js）
     conditions.push(`r.inspected_at >= ?${binds.length}`);
   }
   const to = url.searchParams.get('to');
   if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    binds.push(`${to}T23:59:59Z`);
-    conditions.push(`r.inspected_at <= ?${binds.length}`);
+    binds.push(jstNextDayStartUtc(to));
+    conditions.push(`r.inspected_at < ?${binds.length}`);
   }
   if (url.searchParams.get('abnormal_only') === '1') {
     conditions.push('r.has_abnormal = 1');

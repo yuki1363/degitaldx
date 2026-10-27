@@ -9,10 +9,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import {
-  el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso,
-  ACTION_LABELS,
-} from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
@@ -510,8 +507,8 @@ async function renderDetail(id) {
       canEdit
         ? (() => {
             const date = inspection.inspected_at
-              ? new Date(inspection.inspected_at).toLocaleDateString('sv-SE')
-              : new Date().toLocaleDateString('sv-SE');
+              ? toJstDateStr(inspection.inspected_at)
+              : jstTodayStr();
             const q = new URLSearchParams({ new: '1', date });
             // 点検結果（全項目）を日報本文へプリフィル。異常項目には ⚠ を付ける
             const resultLines = (inspection.items || [])

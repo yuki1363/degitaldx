@@ -6,7 +6,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
@@ -23,7 +23,7 @@ function showError(err) {
 
 // 今日の日付を YYYY-MM-DD で返す
 function todayStr() {
-  return new Date().toLocaleDateString('sv-SE');
+  return jstTodayStr();
 }
 
 // ---------------- 一覧 ----------------
@@ -36,7 +36,7 @@ async function renderList() {
   // 開いた時点で直近30日分を自動表示する（期間は入力で変更可）
   let filterCategory = '';
   let filterReporter = '';
-  let filterFrom     = new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE');
+  let filterFrom     = toJstDateStr(new Date(Date.now() - 30 * 86400000).toISOString());
   let filterTo       = todayStr();
   let reporterTimer  = null;
   const listBox = el('div', { class: 'row-list' }, []);

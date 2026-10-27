@@ -2,7 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { notifyTeam } from '../_lib/notify.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, jstDayStartUtc, jstNextDayStartUtc } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 import { ensureColumns } from '../_lib/db-compat.js';
 
@@ -67,16 +67,15 @@ export async function onRequestGet({ request, env }) {
     sql += ` AND t.equipment_id = ?`;
     binds.push(equipmentId);
   }
+  // 期間は JST の日付。occurred_at は UTC 保存なので JST の日付境界へ変換して比べる（_lib/util.js）
   if (from) {
     sql += ` AND t.occurred_at >= ?`;
-    binds.push(from);
+    binds.push(jstDayStartUtc(from));
   }
   if (to) {
-    // to is inclusive: compare against start of next day
+    // to はその日を含む: 翌日 0:00（JST）未満
     sql += ` AND t.occurred_at < ?`;
-    const toDate = new Date(to);
-    toDate.setDate(toDate.getDate() + 1);
-    binds.push(toDate.toISOString().slice(0, 10));
+    binds.push(jstNextDayStartUtc(to));
   }
 
   sql += ` ORDER BY t.occurred_at DESC, t.id DESC`;

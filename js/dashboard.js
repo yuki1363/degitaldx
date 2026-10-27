@@ -4,7 +4,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
-import { el, render } from '/js/util.js';
+import { el, render, toJstDateStr, jstTodayStr } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
 
@@ -240,7 +240,7 @@ async function renderCustom(fromStr, toStr) {
       if (equipId) p.set('equipment_id', equipId);
       const { troubles } = await api.get(`/api/troubles?${p}`);
       return (troubles || []).map((t) => ({
-        date: (t.occurred_at || '').slice(0, 10),
+        date: toJstDateStr(t.occurred_at),
         category: t.category_name || '未設定',
         equipment: t.equipment_name || '設備未指定',
         person: t.reporter_name || t.creator_name || '未設定',
@@ -251,9 +251,9 @@ async function renderCustom(fromStr, toStr) {
       if (equipId) p.set('equipment_id', equipId);
       const { inspections } = await api.get(`/api/inspections${p.size ? '?' + p : ''}`);
       return (inspections || [])
-        .filter((i) => { const d = (i.inspected_at || '').slice(0, 10); return d >= fromStr && d <= toStr; })
+        .filter((i) => { const d = toJstDateStr(i.inspected_at); return d >= fromStr && d <= toStr; })
         .map((i) => ({
-          date: (i.inspected_at || '').slice(0, 10),
+          date: toJstDateStr(i.inspected_at),
           category: '—',
           equipment: i.equipment_name || '設備未指定',
           person: i.assignee_name || '未設定',
@@ -263,9 +263,9 @@ async function renderCustom(fromStr, toStr) {
     if (equipId) p.set('equipment_id', equipId);
     const { repairs } = await api.get(`/api/repairs${p.size ? '?' + p : ''}`);
     return (repairs || [])
-      .filter((r) => { const d = (r.created_at || '').slice(0, 10); return d >= fromStr && d <= toStr; })
+      .filter((r) => { const d = toJstDateStr(r.created_at); return d >= fromStr && d <= toStr; })
       .map((r) => ({
-        date: (r.created_at || '').slice(0, 10),
+        date: toJstDateStr(r.created_at),
         category: '—',
         equipment: r.equipment_name || '設備未指定',
         person: r.assignee_name || '未設定',
@@ -348,11 +348,12 @@ async function renderCustom(fromStr, toStr) {
 // ---------------- タブ付きレイアウト ----------------
 
 async function renderDashboard() {
-  // 期間デフォルト（直近6ヶ月）
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth() - 5, 1);
-  const defaultFrom = firstDay.toLocaleDateString('sv-SE');
-  const defaultTo   = today.toLocaleDateString('sv-SE');
+  // 期間デフォルト（直近6ヶ月）。端末の時刻設定に依らず JST の今日を基準にする
+  // （期間は JST の日付として API が日付境界を変換するため、端末が UTC だと今日の記録が外れる）
+  const defaultTo = jstTodayStr();
+  const [ty, tm] = defaultTo.split('-').map(Number);
+  const fromIdx = ty * 12 + (tm - 1) - 5; // 5ヶ月前の1日
+  const defaultFrom = `${Math.floor(fromIdx / 12)}-${String((fromIdx % 12) + 1).padStart(2, '0')}-01`;
 
   const fromInput = el('input', { type: 'date', value: defaultFrom });
   const toInput   = el('input', { type: 'date', value: defaultTo });

@@ -9,7 +9,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
-import { el, render } from '/js/util.js';
+import { el, render, jstTodayStr } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { renderPlanImport } from '/js/plan-import.js';
 import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
@@ -612,7 +612,7 @@ function renderView() {
     el('div', { class: 'card' }, [
       el('div', { class: 'print-only report-print-header' }, [
         el('h2', {}, printTitle),
-        el('p', {}, `種別: ${typeLabel()}　出力日: ${new Date().toLocaleDateString('sv-SE')}`),
+        el('p', {}, `種別: ${typeLabel()}　出力日: ${jstTodayStr()}`),
       ]),
       toolbar(),
       el('div', { class: 'cal-legend no-print', style: 'margin-bottom:8px' },

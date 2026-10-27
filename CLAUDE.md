@@ -351,4 +351,7 @@
 - QR読み取りは `jsQR`、QR生成は `qrcode.js`、PDF生成は印刷用CSS + 必要に応じ jsPDF（日本語フォント埋め込み）
 - カレンダーは自作 or `FullCalendar`（CDN）。軽量性優先なら自作
 - 日時は UTC の ISO 8601 で保存し、表示時に JST へ変換
+- **期間指定・日付の切り出し・「今日」はすべて JST で扱う**（JST 0:00〜8:59 の記録が前日・前月にずれるのを防ぐ）
+  - API: 日時列（occurred_at / inspected_at / created_at / changed_at）の期間絞り込みは `functions/api/_lib/util.js` の `jstDayStartUtc`（>=）／`jstNextDayStartUtc`（< 翌日0:00 JST）で境界を変換する。`T00:00:00Z`／`T23:59:59Z` を付けて比べない。月集計は `strftime('%Y-%m', 列, '+9 hours')`。応答で日付だけを返すときは `toJstDate`。日付だけの列（report_date / planned_date）は変換不要
+  - 画面: `js/util.js` の `toJstDateStr`（ISO→JSTの 'YYYY-MM-DD'）・`jstTodayStr`（JSTの今日）を使う。`toISOString().slice(0, 10)` や端末依存の `toLocaleDateString('sv-SE')` で日付を作らない。表示は `formatDate`／`formatDateTime`
 - テーブル・列名はスネークケースの英語で統一

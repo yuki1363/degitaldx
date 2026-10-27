@@ -1,7 +1,7 @@
 // トラブル記録の CSV 出力（04 トラブル一覧・08 ダッシュボードで共有）
 //   列定義を1か所にまとめ、どちらから出しても同じ形式の CSV になるようにする。
 
-import { formatDateTime } from '/js/util.js';
+import { formatDateTime, jstTodayStr } from '/js/util.js';
 import { buildCsvText, downloadCsv, excelText } from '/js/csv.js';
 
 // CSV出力の列定義（トラブル履歴）
@@ -20,6 +20,6 @@ export const TROUBLE_CSV_COLUMNS = [
 // troubles（/api/troubles の結果）を CSV でダウンロード。enc='sjis' で Shift_JIS
 export function exportTroubleCsv(troubles, enc) {
   const text = buildCsvText(troubles, TROUBLE_CSV_COLUMNS);
-  const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
+  const dateStr = jstTodayStr().replace(/-/g, '');
   downloadCsv(`trouble_${dateStr}.csv`, text, enc);
 }

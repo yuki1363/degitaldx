@@ -3,7 +3,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, jstTodayStr } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildCsvText, downloadCsv, excelText } from '/js/csv.js';
 
@@ -38,7 +38,7 @@ function exportSearchCsv(enc) {
     { label: 'カテゴリ', value: (r) => r.category_name || '' },
   ];
   const text = buildCsvText(currentResults, columns);
-  const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
+  const dateStr = jstTodayStr().replace(/-/g, '');
   downloadCsv(`search_${dateStr}.csv`, text, enc);
 }
 
@@ -136,7 +136,7 @@ async function doSearch(params, resultsBox) {
           return el('a', { class: 'search-result-item', href: r.url }, [
             el('div', { class: 'search-result-meta' }, [
               el('span', { class: 'type-badge', style: `background:${cfg.bg};color:${cfg.color}` }, cfg.label || r.type),
-              r.date ? el('span', { class: 'search-date' }, r.date) : null,
+              r.date ? el('span', { class: 'search-date' }, formatDate(r.date)) : null,
               r.category_name ? el('span', { class: 'cat-badge' }, r.category_name) : null,
             ]),
             el('div', { class: 'search-result-title' }, [titleEl]),

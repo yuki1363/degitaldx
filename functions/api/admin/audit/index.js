@@ -1,5 +1,6 @@
 import { requireRole } from '../../_lib/auth.js';
 import { json } from '../../_lib/http.js';
+import { jstDayStartUtc, jstNextDayStartUtc } from '../../_lib/util.js';
 
 export async function onRequestGet({ request, env, data }) {
   const denied = requireRole(data.user, 'admin');
@@ -21,8 +22,8 @@ export async function onRequestGet({ request, env, data }) {
   if (table)  { sql += ` AND table_name = ?`;  binds.push(table); }
   if (action) { sql += ` AND action = ?`;       binds.push(action); }
   if (user)   { sql += ` AND changed_by LIKE ?`; binds.push(`%${user}%`); }
-  if (from)   { sql += ` AND changed_at >= ?`;  binds.push(from); }
-  if (to)     { sql += ` AND changed_at <= ?`;  binds.push(to + 'T23:59:59Z'); }
+  if (from)   { sql += ` AND changed_at >= ?`;  binds.push(jstDayStartUtc(from)); } // JST の日付境界
+  if (to)     { sql += ` AND changed_at < ?`;   binds.push(jstNextDayStartUtc(to)); }
 
   sql += ` ORDER BY changed_at DESC LIMIT ? OFFSET ?`;
   binds.push(limit, offset);
@@ -34,8 +35,8 @@ export async function onRequestGet({ request, env, data }) {
   if (table)  { countSql += ` AND table_name = ?`; countBinds.push(table); }
   if (action) { countSql += ` AND action = ?`;      countBinds.push(action); }
   if (user)   { countSql += ` AND changed_by LIKE ?`; countBinds.push(`%${user}%`); }
-  if (from)   { countSql += ` AND changed_at >= ?`; countBinds.push(from); }
-  if (to)     { countSql += ` AND changed_at <= ?`; countBinds.push(to + 'T23:59:59Z'); }
+  if (from)   { countSql += ` AND changed_at >= ?`; countBinds.push(jstDayStartUtc(from)); }
+  if (to)     { countSql += ` AND changed_at < ?`;  countBinds.push(jstNextDayStartUtc(to)); }
   const total = await db.prepare(countSql).bind(...countBinds).first();
 
   return json({ logs: results ?? [], total: total?.n ?? 0, limit, offset });

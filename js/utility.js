@@ -10,7 +10,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail, ACTION_LABELS } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { buildItemInput, normalizeNumberText } from '/js/inspection-items.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
@@ -21,7 +21,7 @@ let currentUser = null;
 
 const go = (query = '') => { window.location.href = `/pages/utility${query}`; };
 const showError = (err) => render(app, el('p', { class: 'notice is-error' }, err.message || String(err)));
-const todayStr = () => new Date().toLocaleDateString('sv-SE');
+const todayStr = () => jstTodayStr();
 
 /** 保存値を表示用の文字列にする（複数選択は「1号機、2号機」） */
 function displayValue(v) {
@@ -81,7 +81,7 @@ function toLocalInput(iso) {
 // ---------------- 一覧 ----------------
 
 async function renderList() {
-  let from = new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE');
+  let from = toJstDateStr(new Date(Date.now() - 30 * 86400000).toISOString());
   let to = todayStr();
   let loaded = [];
 

@@ -3,7 +3,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, maskEmail, jstTodayStr } from '/js/util.js';
 import { renderPrintTemplates } from '/js/print-templates.js';
 import { renderFileManager } from '/js/admin-files.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
@@ -396,7 +396,7 @@ async function renderAudit() {
           el('thead', {}, [el('tr', {}, ['日時', 'テーブル', 'ID', '操作', '操作者', '内容'].map((h) => el('th', {}, h)))]),
           el('tbody', {}, logs.map((log) =>
             el('tr', {}, [
-              el('td', {}, log.changed_at?.slice(0, 16).replace('T', ' ')),
+              el('td', {}, formatDateTime(log.changed_at)), // UTC保存 → JST表示
               el('td', {}, log.table_name),
               el('td', {}, String(log.record_id)),
               el('td', {}, el('span', {
@@ -464,9 +464,9 @@ async function renderRestore() {
         el('tbody', {}, records.map((r) =>
           el('tr', { style: 'opacity:0.7' }, [
             el('td', {}, String(r.display || '').slice(0, 40)),
-            el('td', {}, r.date_val?.slice(0, 10) || '—'),
+            el('td', {}, formatDate(r.date_val) || '—'),
             el('td', {}, maskEmail(r.deleted_by) || '—'),
-            el('td', {}, r.deleted_at?.slice(0, 16).replace('T', ' ') || '—'),
+            el('td', {}, formatDateTime(r.deleted_at) || '—'),
             el('td', {}, el('button', {
               class: 'btn btn-sm',
               onclick: async () => {
@@ -521,7 +521,7 @@ async function renderMasters() {
             el('td', {}, MASTER_LABELS[h.master_name] || h.master_name),
             el('td', {}, h.record_id != null ? String(h.record_id) : '—'),
             el('td', {}, maskEmail(h.changed_by)),
-            el('td', {}, h.changed_at?.slice(0, 16).replace('T', ' ') || '—'),
+            el('td', {}, formatDateTime(h.changed_at) || '—'),
             el('td', { style: 'font-size:11px;max-width:200px;word-break:break-all' },
               String(h.snapshot_json || '').slice(0, 120)
             ),
@@ -570,7 +570,7 @@ async function renderBackup() {
           throw new Error(body?.error?.message || `エラー ${res.status}`);
         }
         const blob = await res.blob();
-        const date = new Date().toISOString().slice(0, 10);
+        const date = jstTodayStr();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = filename.replace('DATE', date);

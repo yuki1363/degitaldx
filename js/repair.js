@@ -8,7 +8,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
@@ -299,8 +299,8 @@ async function renderDetail(id) {
           // この業務依頼を日報に記録（タイトル・設備・状況・内容を本文へプリフィル＋起票元リンク）
           (() => {
             const date = repair.created_at
-              ? new Date(repair.created_at).toLocaleDateString('sv-SE')
-              : new Date().toLocaleDateString('sv-SE');
+              ? toJstDateStr(repair.created_at)
+              : jstTodayStr();
             const q = new URLSearchParams({ new: '1', link_type: 'repair', link_id: String(repair.id), date });
             q.set('body', [
               `【業務依頼】${repair.title}`,

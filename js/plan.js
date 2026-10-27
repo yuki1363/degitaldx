@@ -7,7 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
-import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue, jstTodayStr } from '/js/util.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
@@ -253,7 +253,7 @@ async function renderMonthCalendar(year, month) {
   const { plans } = await api.get(`/api/plans?month=${monthStr}`);
 
   const { firstDay, daysInMonth } = monthInfo(year, month);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = jstTodayStr(); // JST（UTCだと0:00〜8:59に前日がハイライトされる）
 
   const cells = [];
   for (let i = 0; i < firstDay; i++) {
@@ -341,7 +341,7 @@ async function renderWeekCalendar(weekStart) {
 
   const { plans } = await api.get(`/api/plans?from=${fromStr}&to=${toStr}`);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = jstTodayStr(); // JST（UTCだと0:00〜8:59に前日がハイライトされる）
   const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
   const prevWeek = new Date(weekStart);

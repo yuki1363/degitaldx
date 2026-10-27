@@ -8,7 +8,7 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { notifyTeam } from '../_lib/notify.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, jstDayStartUtc, jstNextDayStartUtc } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 
 const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z$/;
@@ -149,13 +149,13 @@ export async function onRequestGet({ request, env }) {
   }
   const from = url.searchParams.get('from');
   if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
-    binds.push(`${from}T00:00:00Z`);
+    binds.push(jstDayStartUtc(from)); // JST の日付境界（_lib/util.js）
     conditions.push(`r.inspected_at >= ?${binds.length}`);
   }
   const to = url.searchParams.get('to');
   if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    binds.push(`${to}T23:59:59Z`);
-    conditions.push(`r.inspected_at <= ?${binds.length}`);
+    binds.push(jstNextDayStartUtc(to));
+    conditions.push(`r.inspected_at < ?${binds.length}`);
   }
 
   const { results } = await env.DB.prepare(
