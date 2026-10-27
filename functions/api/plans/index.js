@@ -135,11 +135,14 @@ export async function insertMaintenancePlan(db, cols, vals) {
 
 // 予定の INSERT 文を「実行せずに」返す（D1 の batch に入れて、他の書き込みと1トランザクションにする用）。
 //   dropCols に入っている列は外す（未マイグレーション環境で列が無いとき。runPlanBatch が使う）。
-export function insertMaintenancePlanStatement(db, cols, vals, dropCols = new Set()) {
+//   ifPrevChanged: true なら「直前の文がちょうど1行を変えたときだけ」登録する（changes() = 1。
+//   guardedPlanUpdate を先頭に置いた連鎖で、競合したときに何も作らないために使う）。
+export function insertMaintenancePlanStatement(db, cols, vals, dropCols = new Set(), { ifPrevChanged = false } = {}) {
   const c = [], v = [];
   cols.forEach((col, i) => { if (!dropCols.has(col)) { c.push(col); v.push(vals[i]); } });
+  const cond = ifPrevChanged ? ' WHERE changes() = 1' : '';
   return db.prepare(
-    `INSERT INTO maintenance_plan (${c.join(', ')}) VALUES (${c.map(() => '?').join(', ')})`
+    `INSERT INTO maintenance_plan (${c.join(', ')}) SELECT ${c.map(() => '?').join(', ')}${cond}`
   ).bind(...v);
 }
 
@@ -162,17 +165,17 @@ export async function runPlanBatch(db, build) {
   throw new Error('予定の登録に失敗しました（列の不一致）。');
 }
 
-// 期間予定を分割する操作（1日だけ削除・完了）の前に、その予定を「処理中」として確保する。
-//   読み取った時点の updated_at が変わっていなければ updated_at を進めて1件更新できる＝確保できた。
-//   同じ予定への同時操作（ボタンの2回押し・2人が同時に操作）は2つ目が0件更新になるので、
-//   呼び出し側は 409 で止める（完了済みの単日レコードが2件できる等を防ぐ）。
-//   この文自体は日付を変えないので、後続の batch が失敗しても予定の中身は壊れない。
-export async function claimPlanForSplit(db, plan, userEmail, now) {
-  const res = await db.prepare(
-    `UPDATE maintenance_plan SET updated_by = ?, updated_at = ?
-      WHERE id = ? AND deleted_at IS NULL AND updated_at IS ?`
-  ).bind(userEmail, now, plan.id, plan.updated_at ?? null).run();
-  return (res.meta?.changes ?? 0) === 1;
+// 期間予定を分割する操作（1日だけ削除・完了）の先頭に置く、条件付きの UPDATE 文。
+//   「読み取った時点の日程・状態のまま」のときだけ元の予定を書き換える（setSql の内容）。
+//   同じ予定への同時操作（ボタンの2回押し・2人が同時に操作）は、先に実行された側が日程か状態を
+//   変えるため、後の側はこの文が0件更新になる。後続の文は ifPrevChanged（changes() = 1）で連鎖させ、
+//   0件なら何も作らない（完了済みの単日レコードが2件できる等を防ぐ）。呼び出し側は results[0] の
+//   changes が 0 なら 409 を返す。updated_at（秒精度）での比較は同じ秒の2回押しを防げないため使わない。
+export function guardedPlanUpdate(db, plan, setSql, setBinds) {
+  return db.prepare(
+    `UPDATE maintenance_plan SET ${setSql}
+      WHERE id = ? AND deleted_at IS NULL AND status = ? AND planned_date = ? AND planned_end_date IS ?`
+  ).bind(...setBinds, plan.id, plan.status, plan.planned_date, plan.planned_end_date ?? null);
 }
 
 export const addDays = (dateStr, n) => {

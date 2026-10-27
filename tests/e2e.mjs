@@ -1639,20 +1639,27 @@ const ibId = ib.json?.saved?.[0]?.id;
 check('点検まとめ入力: 監査ログが点検記録のIDで残る',
   (await auditFor('inspection_result')).some((l) => Number(l.record_id) === ibId && l.action === 'create'));
 
-// 期間予定の「1日だけ完了」を同時に2回押しても、完了済みの単日レコードは1件だけ（2つ目は409）
-const cc = await api('/api/plans', { method: 'POST', body: { title: 'E2E同時完了', plan_type: 'construction', planned_date: '2032-05-10', planned_end_date: '2032-05-14' } });
-await api(`/api/plans/${cc.json?.id}/printed`, { method: 'POST' });
-const [cc1, cc2] = await page.evaluate(async (pid) => Promise.all([1, 2].map(() =>
-  fetch(`/api/plans/${pid}/complete-day`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: '2032-05-12' }) })
-    .then((r) => r.status))), cc.json?.id);
-// 2つ目は、1つ目と同時に読んでいれば 409（処理中の確保に失敗）、1つ目の完了後に読めば 400（その日は切り出し済み）
-check('1日完了: 同時に2回押すと片方だけ成功（もう片方は409/400）',
-  [cc1, cc2].filter((x) => x === 200).length === 1 && [cc1, cc2].some((x) => x === 409 || x === 400), `${cc1},${cc2}`);
-const ccPlans = ((await api('/api/plans?from=2032-05-01&to=2032-05-31')).json?.plans || []).filter((p) => p.title === 'E2E同時完了');
-check('1日完了: 完了済みの単日レコードは1件だけ', ccPlans.filter((p) => p.status === 'done').length === 1, JSON.stringify(ccPlans.map((p) => [p.planned_date, p.planned_end_date, p.status])));
-check('1日完了: 分割した予定にも工事連絡書の印刷日が引き継がれる', ccPlans.length === 3 && ccPlans.every((p) => !!p.printed_at),
-  JSON.stringify(ccPlans.map((p) => p.printed_at)));
-for (const p of ccPlans) await api(`/api/plans/${p.id}`, { method: 'DELETE' });
+// 期間予定の「1日だけ完了」を同時に2回押しても、完了済みの単日レコードは1件だけ。
+// 同時に処理されたかはタイミング次第のため5回くり返す（同じ秒に作成・印刷した直後の2回押しも含む）
+const ccStatuses = [];
+let ccDupFree = true, ccPrintedOk = true;
+for (let k = 0; k < 5; k++) {
+  const d2 = (n) => `2032-05-${String(n).padStart(2, '0')}`;
+  const day = 1 + k * 5; // 5/1〜5/5, 5/6〜5/10, … 5/21〜5/25
+  const cc = await api('/api/plans', { method: 'POST', body: { title: `E2E同時完了${k}`, plan_type: 'construction', planned_date: d2(day), planned_end_date: d2(day + 4) } });
+  await api(`/api/plans/${cc.json?.id}/printed`, { method: 'POST' });
+  const sts = await page.evaluate(async ({ pid, date }) => Promise.all([1, 2].map(() =>
+    fetch(`/api/plans/${pid}/complete-day`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) })
+      .then((r) => r.status))), { pid: cc.json?.id, date: d2(day + 2) });
+  ccStatuses.push(sts.join('/'));
+  const rows = ((await api('/api/plans?from=2032-05-01&to=2032-06-30')).json?.plans || []).filter((p) => p.title === `E2E同時完了${k}`);
+  if (rows.filter((p) => p.status === 'done').length !== 1 || rows.length !== 3 || sts.filter((x) => x === 200).length !== 1) ccDupFree = false;
+  if (!rows.every((p) => !!p.printed_at)) ccPrintedOk = false;
+  for (const p of rows) await api(`/api/plans/${p.id}`, { method: 'DELETE' });
+}
+console.log(`  （同時2回押しの応答: ${ccStatuses.join(' , ')}）`);
+check('1日完了: 同時に2回押しても成功は1回・完了済みの単日レコードは1件だけ（5回）', ccDupFree, ccStatuses.join(' , '));
+check('1日完了: 分割した予定にも工事連絡書の印刷日が引き継がれる', ccPrintedOk);
 
 // 棚卸調整: 履歴の増減は「書き込む瞬間の在庫」から計算される（在庫 3 → 実数 10 なら +7）
 const adjPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E棚卸調整部品', quantity: 3, safety_stock: 0 } });

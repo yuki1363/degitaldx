@@ -14,7 +14,7 @@ import { requireRole } from '../../_lib/auth.js';
 import { auditStatement, LAST_INSERT_ID } from '../../_lib/audit.js';
 import { json, jsonError, readJson } from '../../_lib/http.js';
 import { nowIso } from '../../_lib/util.js';
-import { insertMaintenancePlanStatement, runPlanBatch, claimPlanForSplit, addDays, buildCloneColumns } from '../index.js';
+import { insertMaintenancePlanStatement, runPlanBatch, guardedPlanUpdate, addDays, buildCloneColumns } from '../index.js';
 
 export async function onRequestPost({ request, params, env, data }) {
   const denied = requireRole(data.user, 'editor');
@@ -43,27 +43,29 @@ export async function onRequestPost({ request, params, env, data }) {
     return jsonError(400, '指定日はこの予定の期間内にありません');
   }
 
-  // 同じ予定への同時操作を防ぐ（2回押しで完了済みの単日レコードが2件できる等）。確保できなければ 409
-  if (!(await claimPlanForSplit(db, plan, userEmail, now))) {
-    return jsonError(409, 'この予定は他の操作で更新されました。画面を更新してからやり直してください。');
-  }
-  // 以降の書き込みは1トランザクション（D1 batch）で行い、途中で失敗しても中途半端な状態を残さない
-  const upd = (sql, ...binds) => db.prepare(sql).bind(...binds);
-  const audit = (recordId, action, diff) => auditStatement(db, { tableName: 'maintenance_plan', recordId, action, changedBy: userEmail, diff });
+  // 書き込みは1トランザクション（D1 batch）で行い、途中で失敗しても中途半端な状態を残さない。
+  // 先頭の文は「読んだ時点の日程・状態のまま」のときだけ元の予定を書き換え（guardedPlanUpdate）、
+  // 後続は直前の文が1行を変えたときだけ実行する（then）。同じ予定への同時操作（2回押しで完了済みの
+  // 単日レコードが2件できる等）は、後の側が先頭で0件になり何も作らずに 409 になる。
+  const guard = (setSql, ...binds) => guardedPlanUpdate(db, plan, setSql, binds);
+  const then = { ifPrevChanged: true };
+  const audit = (recordId, action, diff) => auditStatement(db, { tableName: 'maintenance_plan', recordId, action, changedBy: userEmail, diff }, then);
+  const conflicted = (results) => (results[0].meta?.changes ?? 0) === 0;
 
   // 単日予定は「1日だけ完了」＝全体完了と同じ（従来の完了操作と揃える）
   if (start === end) {
-    await db.batch([
-      upd(`UPDATE maintenance_plan SET status = 'done', updated_by = ?, updated_at = ? WHERE id = ?`, userEmail, now, id),
+    const results = await db.batch([
+      guard(`status = 'done', updated_by = ?, updated_at = ?`, userEmail, now),
       audit(String(id), 'update', { status: { from: plan.status, to: 'done' }, done_day: date, mode: 'single_day' }),
     ]);
+    if (conflicted(results)) return jsonError(409, 'この予定は他の操作で更新されました。画面を更新してからやり直してください。');
     return json({ ok: true, mode: 'done' });
   }
 
   // その日だけを「完了済みの単日レコード」として切り出す（残りは未完了のまま存続）
   const doneCols = buildCloneColumns(plan, userEmail, now, date, null, 'done');
   const doneStatements = (dropCols) => [
-    insertMaintenancePlanStatement(db, doneCols.cols, doneCols.vals, dropCols),
+    insertMaintenancePlanStatement(db, doneCols.cols, doneCols.vals, dropCols, then),
     audit(LAST_INSERT_ID, 'create', { planned_date: date, planned_end_date: null, status: 'done', split_from: Number(id), mode: 'split' }),
   ];
 
@@ -72,11 +74,12 @@ export async function onRequestPost({ request, params, env, data }) {
     const newStart = addDays(date, 1);
     const newEndVal = newStart === end ? null : end;
     const results = await runPlanBatch(db, (dropCols) => [
-      ...doneStatements(dropCols),
-      upd(`UPDATE maintenance_plan SET planned_date = ?, planned_end_date = ?, updated_by = ?, updated_at = ? WHERE id = ?`, newStart, newEndVal, userEmail, now, id),
+      guard('planned_date = ?, planned_end_date = ?, updated_by = ?, updated_at = ?', newStart, newEndVal, userEmail, now),
       audit(String(id), 'update', { planned_date: { from: start, to: newStart }, done_day: date, mode: 'split_head' }),
+      ...doneStatements(dropCols),
     ]);
-    return json({ ok: true, mode: 'split', done_id: results[0].meta?.last_row_id, tail_id: null });
+    if (conflicted(results)) return jsonError(409, 'この予定は他の操作で更新されました。画面を更新してからやり直してください。');
+    return json({ ok: true, mode: 'split', done_id: results[2].meta?.last_row_id, tail_id: null });
   }
 
   if (date === end) {
@@ -84,11 +87,12 @@ export async function onRequestPost({ request, params, env, data }) {
     const newEnd = addDays(date, -1);
     const newEndVal = newEnd === start ? null : newEnd;
     const results = await runPlanBatch(db, (dropCols) => [
-      ...doneStatements(dropCols),
-      upd(`UPDATE maintenance_plan SET planned_end_date = ?, updated_by = ?, updated_at = ? WHERE id = ?`, newEndVal, userEmail, now, id),
+      guard('planned_end_date = ?, updated_by = ?, updated_at = ?', newEndVal, userEmail, now),
       audit(String(id), 'update', { planned_end_date: { from: end, to: newEndVal }, done_day: date, mode: 'split_tail' }),
+      ...doneStatements(dropCols),
     ]);
-    return json({ ok: true, mode: 'split', done_id: results[0].meta?.last_row_id, tail_id: null });
+    if (conflicted(results)) return jsonError(409, 'この予定は他の操作で更新されました。画面を更新してからやり直してください。');
+    return json({ ok: true, mode: 'split', done_id: results[2].meta?.last_row_id, tail_id: null });
   }
 
   // 期間途中の日を完了 → 前後は未完了のまま2レコードに分割する
@@ -99,11 +103,12 @@ export async function onRequestPost({ request, params, env, data }) {
   const tailCols = buildCloneColumns(plan, userEmail, now, tailStart, tailEndVal);
 
   const results = await runPlanBatch(db, (dropCols) => [
-    ...doneStatements(dropCols),
-    insertMaintenancePlanStatement(db, tailCols.cols, tailCols.vals, dropCols),
-    audit(LAST_INSERT_ID, 'create', { planned_date: tailStart, planned_end_date: tailEndVal, split_from: Number(id), done_day: date, mode: 'split_middle' }),
-    upd(`UPDATE maintenance_plan SET planned_end_date = ?, updated_by = ?, updated_at = ? WHERE id = ?`, headEndVal, userEmail, now, id),
+    guard('planned_end_date = ?, updated_by = ?, updated_at = ?', headEndVal, userEmail, now),
     audit(String(id), 'update', { planned_end_date: { from: end, to: headEndVal }, done_day: date, mode: 'split_middle' }),
+    ...doneStatements(dropCols),
+    insertMaintenancePlanStatement(db, tailCols.cols, tailCols.vals, dropCols, then),
+    audit(LAST_INSERT_ID, 'create', { planned_date: tailStart, planned_end_date: tailEndVal, split_from: Number(id), done_day: date, mode: 'split_middle' }),
   ]);
-  return json({ ok: true, mode: 'split', done_id: results[0].meta?.last_row_id, tail_id: results[2].meta?.last_row_id });
+  if (conflicted(results)) return jsonError(409, 'この予定は他の操作で更新されました。画面を更新してからやり直してください。');
+  return json({ ok: true, mode: 'split', done_id: results[2].meta?.last_row_id, tail_id: results[4].meta?.last_row_id });
 }
