@@ -259,7 +259,7 @@ async function renderDetail(id) {
 
   // QRコード（この詳細ページのURLを埋め込む → カメラで読むと直接開く）
   const detailUrl = `${window.location.origin}/pages/ledger?id=${eq.id}`;
-  const qr = qrcode(0, 'M');
+  const qr = qrcode(0, 'Q');
   qr.addData(detailUrl);
   qr.make();
   const qrImg = el('img', { class: 'qr-img', alt: `QRコード: ${eq.code}`, src: qr.createDataURL(6, 4) });
