@@ -57,6 +57,10 @@ export async function onRequestDelete({ env, data, params }) {
   const userEmail = data.user.email;
 
   await db.prepare(`DELETE FROM users WHERE id=?`).bind(id).run();
+  // 削除したユーザーの端末へ Web Push が届き続けないよう購読も消す（購読は端末設定のため物理削除）
+  try {
+    await db.prepare(`DELETE FROM push_subscriptions WHERE lower(user_email) = lower(?)`).bind(existing.email).run();
+  } catch { /* push_subscriptions が無い旧DBでもユーザー削除は完了させる */ }
   await writeAuditLog(db, {
     tableName: 'users', recordId: id, action: 'delete', changedBy: userEmail,
     diff: { email: existing.email, name: existing.name, group_name: existing.group_name, role: existing.role },
