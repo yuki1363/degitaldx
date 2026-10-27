@@ -1447,6 +1447,10 @@ const resp = await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeou
 const offlineOk = !!resp && resp.status() === 200 &&
   await page.evaluate(() => document.body.innerText.includes('設備保全'));
 check('オフラインでホームが表示される', offlineOk);
+// クエリ付きのページ（QRの遷移先 /pages/ledger?id= 等）もオフラインで開ける（ホームに戻されない）
+const respQ = await page.goto(`${BASE}/pages/ledger?id=999999&e2e=offline`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
+check('オフラインでクエリ付きページ（設備台帳）が開ける', !!respQ && respQ.status() === 200 && (await page.title()).includes('設備台帳'),
+  respQ ? `status=${respQ.status()} title=${await page.title()}` : 'no response');
 await context.setOffline(false);
 
 // ---------- 結果 ----------
