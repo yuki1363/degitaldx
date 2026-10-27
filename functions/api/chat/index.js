@@ -143,7 +143,7 @@ export async function onRequestGet({ request, env, data, waitUntil }) {
   const sp = new URL(request.url).searchParams;
   const channel = sp.get('channel') || 'general';
   const since   = sp.get('since');
-  const limit   = Math.min(Number(sp.get('limit')) || 50, 200);
+  const limit   = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 50), 200);
 
   // count_unread=1: 現ユーザーの未読数 + 最新メッセージの既読者数を返す（ホーム概要タブ用）
   if (sp.get('count_unread') === '1') {
