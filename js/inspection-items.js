@@ -7,7 +7,7 @@
 //   （基準内でも前回からの変化で劣化の兆候に気づけるようにする）。
 
 import { api } from '/js/api.js';
-import { el } from '/js/util.js';
+import { el, formatDate } from '/js/util.js';
 import { getAiVisionEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 
@@ -159,7 +159,7 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
       if (Number.isFinite(prevNum)) {
         lastHint = el('p', { class: 'hint last-value-hint' }, '');
         const renderLastHint = () => {
-          const dateStr = lastInfo.date ? `（${String(lastInfo.date).slice(0, 10).replace(/-/g, '/')}）` : '';
+          const dateStr = lastInfo.date ? `（${formatDate(lastInfo.date)}）` : ''; // 点検は inspected_at（UTC）なので JST の日付で出す
           let diffText = '';
           const cur = parseNumberText(input.value);
           if (cur !== undefined) {
@@ -250,7 +250,7 @@ export function buildItemInput(master, existingValue, lastInfo = null) {
   if (!lastHint && lastInfo != null && lastInfo.value !== undefined
       && lastInfo.value !== null && lastInfo.value !== '') {
     const prev = Array.isArray(lastInfo.value) ? lastInfo.value.join('、') : String(lastInfo.value);
-    const dateStr = lastInfo.date ? `（${String(lastInfo.date).slice(0, 10).replace(/-/g, '/')}）` : '';
+    const dateStr = lastInfo.date ? `（${formatDate(lastInfo.date)}）` : ''; // 点検は inspected_at（UTC）なので JST の日付で出す
     lastHint = el('p', { class: 'hint last-value-hint' },
       `前回 ${prev}${master.unit ? ' ' + master.unit : ''}${dateStr}`);
   }

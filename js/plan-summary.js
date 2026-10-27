@@ -4,7 +4,7 @@
 //   対象はカレンダーの予定（年間計画表専用・未定は /api/plans の範囲クエリで除外済み）。
 
 import { api } from '/js/api.js';
-import { el, render, formatDate } from '/js/util.js';
+import { el, render, formatDate, toJstDateStr } from '/js/util.js';
 
 const TYPE_BADGE = {
   inspection: { label: '点検', color: '#1e40af', bg: '#dbeafe' },
@@ -15,8 +15,9 @@ const TYPE_BADGE = {
 
 export async function fetchPlanStatus(upcomingDays = 7) {
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
-  const fmt = (d) => d.toISOString().slice(0, 10);
+  // JST の日付で比べる（UTC だと 0:00〜8:59 に「今日」が前日になり、昨日期限の予定が超過にならない）
+  const fmt = (d) => toJstDateStr(d.toISOString());
+  const todayStr = fmt(today);
   const from = new Date(today.getTime() - 120 * 86400000);
   const to = new Date(today.getTime() + (upcomingDays + 1) * 86400000);
   const limitStr = fmt(new Date(today.getTime() + upcomingDays * 86400000));

@@ -7,7 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole, getAiEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
@@ -44,7 +44,7 @@ async function renderList(equipmentId) {
   // 開いた時点で直近30日分を自動表示する（期間は入力で変更可）
   let filterCategory = '';
   let filterEquipment = equipmentId ? String(equipmentId) : '';
-  let filterFrom = new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE');
+  let filterFrom = toJstDateStr(new Date(Date.now() - 30 * 86400000).toISOString());
   let filterTo = '';
   let currentTroubles = []; // 現在表示中の絞り込み結果（CSV出力用）
 
@@ -297,8 +297,8 @@ async function renderDetail(id) {
           // このトラブルを日報に記録（発生日を初期日付に設定・現象/原因/対策を本文へプリフィル・プリチェック済みで開く）
           (() => {
             const date = trouble.occurred_at
-              ? new Date(trouble.occurred_at).toLocaleDateString('sv-SE')
-              : new Date().toLocaleDateString('sv-SE');
+              ? toJstDateStr(trouble.occurred_at)
+              : jstTodayStr();
             const q = new URLSearchParams({ new: '1', date });
             // トラブル対応の日報は、カテゴリ「…突発故障修理」を初期選択にする
             // （カテゴリ名の部分一致で解決。マスタ名を変えた場合は選択されないだけで無害）

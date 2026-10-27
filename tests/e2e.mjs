@@ -180,6 +180,29 @@ await page.goto(`${BASE}/pages/search?q=${encodeURIComponent(manyKw)}`, { waitUn
 await page.waitForFunction(() => !!document.querySelector('.search-notice'), { timeout: 10000 }).catch(() => {});
 check('横断検索: 外した語の注意書きが画面に出る',
   await page.evaluate((kw) => !!kw && (document.querySelector('.search-notice')?.textContent || '').includes(kw), manyIgnored[0]));
+// JST の日付境界: 日時列は UTC 保存。JST 2031/10/01 08:00（= 2031-09-30T23:00Z）の記録は、
+// 期間「2031/10/01」に入り「2031/09/30」には入らない（UTC の日付境界だと逆になっていた）
+const jstEarly = await api('/api/troubles', { method: 'POST', body: { occurred_at: '2031-09-30T23:00:00Z', phenomenon: 'E2E早朝JSTトラブル' } });
+check('JST境界: 早朝のトラブル登録（201）', jstEarly.status === 201, `status=${jstEarly.status}`);
+const jstOct = await api('/api/troubles?from=2031-10-01&to=2031-10-01');
+check('JST境界: トラブル一覧の期間（当日）に入る', (jstOct.json?.troubles || []).some((t) => t.id === jstEarly.json?.id));
+const jstSep = await api('/api/troubles?from=2031-09-30&to=2031-09-30');
+check('JST境界: トラブル一覧の前日には入らない', !(jstSep.json?.troubles || []).some((t) => t.id === jstEarly.json?.id));
+const jstSearch = await api(`/api/search?q=${encodeURIComponent('E2E早朝JST')}&type=trouble&from=2031-10-01&to=2031-10-01`);
+const jstHit = (jstSearch.json?.results || []).find((r) => r.id === jstEarly.json?.id);
+check('JST境界: 横断検索の期間に入り、日付は JST（2031-10-01）', jstHit?.date === '2031-10-01', `date=${jstHit?.date}`);
+const jstStats = await api('/api/stats?from=2031-10-01&to=2031-10-31');
+check('JST境界: ダッシュボード集計は JST の月（2031-10）に数える',
+  (jstStats.json?.trouble_trend || []).some((m) => m.month === '2031-10' && m.count >= 1)
+  && !(jstStats.json?.trouble_trend || []).some((m) => m.month === '2031-09'),
+  JSON.stringify(jstStats.json?.trouble_trend));
+const jstUtil = await page.evaluate(async () => {
+  const u = await import('/js/util.js');
+  return { d: u.toJstDateStr('2031-09-30T23:00:00Z'), f: u.formatDate('2031-09-30T23:00:00Z'), today: u.jstTodayStr() };
+});
+check('JST境界: 画面の日付変換（toJstDateStr / formatDate）', jstUtil.d === '2031-10-01' && jstUtil.f === '2031/10/01', JSON.stringify(jstUtil));
+check('JST境界: jstTodayStr は JST の今日', jstUtil.today === new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10), JSON.stringify(jstUtil));
+await api(`/api/troubles/${jstEarly.json?.id}`, { method: 'DELETE' });
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});

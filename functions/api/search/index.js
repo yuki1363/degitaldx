@@ -6,6 +6,7 @@
 // 実装: D1 の LIKE 検索（FTS5 への移行は将来の課題）
 
 import { json } from '../_lib/http.js';
+import { jstDayStartUtc, jstNextDayStartUtc, toJstDate } from '../_lib/util.js';
 import { APP_VERSION } from '../me.js';
 // あいまい検索（表記ゆれ吸収）のロジックは _lib/fuzzy.js に集約し、
 // トラブル類似検索・部品検索と共有する。ここでは複数キーワードのAND検索として使う。
@@ -97,8 +98,8 @@ export async function onRequestGet({ request, env }) {
       `;
       const binds = [...kwBinds];
       if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-      if (from)       { sql += ` AND t.occurred_at >= ?`; binds.push(from); }
-      if (to)         { sql += ` AND t.occurred_at <= ?`; binds.push(to + 'T23:59:59Z'); }
+      if (from)       { sql += ` AND t.occurred_at >= ?`; binds.push(jstDayStartUtc(from)); }
+      if (to)         { sql += ` AND t.occurred_at < ?`; binds.push(jstNextDayStartUtc(to)); }
       if (equipId)    { sql += ` AND t.equipment_id = ?`; binds.push(equipId); }
       if (categoryId) { sql += ` AND t.category_id = ?`;  binds.push(categoryId); }
       sql += ` ORDER BY t.occurred_at DESC LIMIT ${limit}`;
@@ -113,7 +114,7 @@ export async function onRequestGet({ request, env }) {
       results.push({
         type:           'trouble',
         id:             r.id,
-        date:           r.date_val?.slice(0, 10),
+        date:           toJstDate(r.date_val),
         title:          r.title,
         snippet:        [r.cause, r.countermeasure].filter(Boolean).join(' / ').slice(0, 80),
         category_name:  r.category_name,
@@ -138,8 +139,8 @@ export async function onRequestGet({ request, env }) {
       `;
       const binds = [...kwBinds];
       if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-      if (from)    { sql += ` AND r.created_at >= ?`; binds.push(from); }
-      if (to)      { sql += ` AND r.created_at <= ?`; binds.push(to + 'T23:59:59Z'); }
+      if (from)    { sql += ` AND r.created_at >= ?`; binds.push(jstDayStartUtc(from)); }
+      if (to)      { sql += ` AND r.created_at < ?`; binds.push(jstNextDayStartUtc(to)); }
       if (equipId) { sql += ` AND r.equipment_id = ?`; binds.push(equipId); }
       sql += ` ORDER BY r.created_at DESC LIMIT ${limit}`;
       return (await db.prepare(sql).bind(...binds).all()).results;
@@ -152,7 +153,7 @@ export async function onRequestGet({ request, env }) {
       results.push({
         type:           'repair',
         id:             r.id,
-        date:           r.date_val?.slice(0, 10),
+        date:           toJstDate(r.date_val),
         title:          r.title,
         snippet:        STATUS[r.status] || r.status,
         category_name:  null,
@@ -217,8 +218,8 @@ export async function onRequestGet({ request, env }) {
       `;
       const binds = [...kwBinds];
       if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
-      if (from)    { sql += ` AND ir.inspected_at >= ?`; binds.push(from); }
-      if (to)      { sql += ` AND ir.inspected_at <= ?`; binds.push(to + 'T23:59:59Z'); }
+      if (from)    { sql += ` AND ir.inspected_at >= ?`; binds.push(jstDayStartUtc(from)); }
+      if (to)      { sql += ` AND ir.inspected_at < ?`; binds.push(jstNextDayStartUtc(to)); }
       if (equipId) { sql += ` AND ir.equipment_id = ?`;  binds.push(equipId); }
       sql += ` ORDER BY ir.inspected_at DESC LIMIT ${limit}`;
       return (await db.prepare(sql).bind(...binds).all()).results;
@@ -234,7 +235,7 @@ export async function onRequestGet({ request, env }) {
         results.push({
           type:           'inspection',
           id:             r.id,
-          date:           r.date_val?.slice(0, 10),
+          date:           toJstDate(r.date_val),
           title:          `${r.equipment_name || ''}の点検${r.has_abnormal ? '（異常あり）' : ''}`,
           snippet:        r.note?.slice(0, 80) || '',
           category_name:  null,

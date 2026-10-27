@@ -28,6 +28,24 @@ export function formatDate(value) {
   return JST_DATE.format(d);
 }
 
+// JST の日付 'YYYY-MM-DD'（sv-SE ロケールは ISO 形式で出る）。UTC の toISOString().slice(0, 10) は
+// JST 0:00〜8:59 に前日になるため、日付の切り出し・「今日」の判定はこちらを使う。
+const JST_YMD = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' });
+
+/** ISO日時（UTC）or 'YYYY-MM-DD' → JST の日付 'YYYY-MM-DD'（集計・グループ分け・比較用。表示は formatDate） */
+export function toJstDateStr(value) {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  return JST_YMD.format(d);
+}
+
+/** 今日（JST）の 'YYYY-MM-DD' */
+export function jstTodayStr() {
+  return JST_YMD.format(new Date());
+}
+
 /** 現在時刻を <input type="datetime-local"> 用の値にする */
 export function nowLocalInputValue() {
   const d = new Date();

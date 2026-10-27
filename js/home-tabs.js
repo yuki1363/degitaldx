@@ -4,7 +4,7 @@
 //   「通知」    : チャット未読（ユーザー別既読数付き）＋ システム通知
 
 import { api } from '/js/api.js';
-import { el, render, formatDate, formatDateTime } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, jstTodayStr } from '/js/util.js';
 import { fetchPlanStatus } from '/js/plan-summary.js';
 
 const TYPE_BADGE = {
@@ -23,7 +23,7 @@ const LEVEL_DOT = { alert: '#dc2626', warning: '#b45309', info: '#1e40af' };
 //   API が会計年度に当てはめて判定した status（deriveOverdue）を使い、ここでは年を比べない。
 async function fetchAnnualAlerts() {
   // JSTの今月を基準にする（toISOStringはUTCのため朝9時まで前日扱いになる）
-  const curMonth = new Date().toLocaleDateString('sv-SE').slice(5, 7); // 例: '07'
+  const curMonth = jstTodayStr().slice(5, 7); // 例: '07'
 
   const { plans } = await api.get('/api/plans?annual_only=1');
   const overdue = [], thisMonth = [];

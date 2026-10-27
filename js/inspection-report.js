@@ -6,7 +6,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
-import { el, render, formatDateTime } from '/js/util.js';
+import { el, render, formatDateTime, toJstDateStr, jstTodayStr } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 
@@ -34,7 +34,7 @@ function fmtVal(item) {
   }
   return String(item.value ?? '');
 }
-const dateOf = (insp) => (insp.inspected_at || '').slice(0, 10);
+const dateOf = (insp) => toJstDateStr(insp.inspected_at); // JST の日付（UTCだと早朝の点検が前日になる）
 
 // ---- データ取得 ----
 async function loadData(filters) {
@@ -148,7 +148,7 @@ function thSort(label, key) {
 
 // ---- CSV 出力 ----
 function exportCsv(enc) {
-  const dateStr = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
+  const dateStr = jstTodayStr().replace(/-/g, '');
   let text;
 
   if (layout === 'detail') {
@@ -202,7 +202,7 @@ function renderPreview() {
     el('p', {}, [
       metaFrom || metaTo ? `期間: ${metaFrom || '—'} 〜 ${metaTo || '—'}　` : '',
       `対象: ${metaEquip}　`,
-      `出力日: ${new Date().toLocaleDateString('sv-SE')}`,
+      `出力日: ${jstTodayStr()}`,
     ].join('')),
   ]);
 
@@ -245,7 +245,7 @@ function buildDetailTable() {
   for (const r of rows) {
     if (groupByDate && r.date !== lastDate) {
       lastDate = r.date;
-      body.push(el('tr', { class: 'report-date-row' }, [el('td', { colspan: '7' }, `📅 ${r.date}`)]));
+      body.push(el('tr', { class: 'report-date-row' }, [el('td', { colspan: '7' }, `📅 ${r.date.replaceAll('-', '/')}`)]));
     }
     body.push(el('tr', r.judge ? { class: 'is-abn-row' } : {}, [
       el('td', {}, r.datetime),
@@ -280,7 +280,7 @@ function buildWideTable() {
       const d = dateOf(insp);
       if (d !== lastDate) {
         lastDate = d;
-        body.push(el('tr', { class: 'report-date-row' }, [el('td', { colspan: String(colCount) }, `📅 ${d}`)]));
+        body.push(el('tr', { class: 'report-date-row' }, [el('td', { colspan: String(colCount) }, `📅 ${d.replaceAll('-', '/')}`)]));
       }
     }
     const m = inspItemMap(insp);
@@ -329,9 +329,9 @@ function buildItemPicker() {
 }
 
 // ---- フィルタ＋オプションUI ----
-const today = new Date();
-const defFrom = new Date(today.getFullYear(), today.getMonth(), 1).toLocaleDateString('sv-SE');
-const defTo = today.toLocaleDateString('sv-SE');
+// 既定の期間は JST の今月1日〜今日（端末の時刻設定に依らない）
+const defTo = jstTodayStr();
+const defFrom = `${defTo.slice(0, 8)}01`;
 
 let equipment = [];
 const fromInput = el('input', { type: 'date', value: defFrom });

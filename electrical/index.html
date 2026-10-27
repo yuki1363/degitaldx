@@ -504,7 +504,7 @@ async function _init() {
   }
   try {
     await loadServerData();                 // D1 から記録・設定・ユーザーを localStorage へ充填
-    document.getElementById('date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('date').value = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); // JSTの今日（UTCだと0:00〜8:59に前日になる）
     loadBasicInfo();
     var _insp = document.getElementById('inspector');
     if (_insp && !_insp.value && SERVER.user && SERVER.user.name) _insp.value = SERVER.user.name; // 点検者名の既定
