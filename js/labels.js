@@ -10,9 +10,13 @@ import qrcode from '/js/vendor/qrcode.mjs';
 
 const app = document.getElementById('app');
 
+// 台紙: 40×40mm・24面（4列×6段）A4。1ページ分の枚数（レイアウトは style.css の .label-page）
+const LABELS_PER_PAGE = 24;
+
 // 設備詳細URLを埋め込んだQRコードの dataURL を生成（単票ラベルと同じ仕様）
+// 誤り訂正は Q（汚れ・擦れのある現場向け。H は40mm角では密度が上がり過ぎるため使わない）
 function qrDataUrl(text) {
-  const qr = qrcode(0, 'M');
+  const qr = qrcode(0, 'Q');
   qr.addData(text);
   qr.make();
   return qr.createDataURL(6, 4);
@@ -47,7 +51,12 @@ function labelCell(eq) {
         render(sheet, el('p', { class: 'empty' }, '印刷する設備を選択してください。'));
         return;
       }
-      render(sheet, items.map(labelCell));
+      // 台紙1枚（24面）ごとにページを分け、印刷時はページ単位で改ページする
+      const pages = [];
+      for (let i = 0; i < items.length; i += LABELS_PER_PAGE) {
+        pages.push(el('div', { class: 'label-page' }, items.slice(i, i + LABELS_PER_PAGE).map(labelCell)));
+      }
+      render(sheet, pages);
     };
 
     const countLabel = el('span', { class: 'hint' }, '');
@@ -92,7 +101,9 @@ function labelCell(eq) {
         countLabel,
       ]),
       el('p', { class: 'hint' },
-        'QRコードを読み取ると、その設備の詳細ページが開きます。印刷ダイアログで用紙サイズ・余白を調整してください。下はプレビューです。'),
+        'QRコードを読み取ると、その設備の詳細ページが開きます。台紙は A4・40×40mm・24面（4列×6段）用です。'
+        + '印刷ダイアログは「用紙 A4／倍率 100%（拡大縮小なし）／余白 なし」にしてください。'
+        + '最初は普通紙に印刷し、台紙に重ねて位置を確認してからラベル紙に印刷すると失敗しません。下はプレビューです。'),
     ]);
 
     render(app, [controls, sheet]);

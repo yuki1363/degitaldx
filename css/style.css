@@ -922,40 +922,62 @@ input.is-abnormal {
   font-size: 14px;
 }
 
+/* 台紙: A4・40×40mm・24面（4列×6段）。余白 左右19mm/上下18.5mm、ラベル間の隙間 4mm */
 .label-sheet {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px;
   margin-top: 12px;
+  overflow-x: auto;
+}
+
+.label-page {
+  display: grid;
+  grid-template-columns: repeat(4, 40mm);
+  grid-auto-rows: 40mm;
+  gap: 4mm;
+  width: max-content;
+  margin-bottom: 12px;
 }
 
 .label-cell {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 10px;
+  box-sizing: border-box;
+  width: 40mm;
+  height: 40mm;
+  padding: 1.5mm;
+  border: 1px dashed var(--color-border);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 0.5mm;
   text-align: center;
   background: #fff;
+  overflow: hidden;
   break-inside: avoid;
 }
 
 .label-cell img {
-  width: 120px;
-  height: 120px;
+  width: 27mm;
+  height: 27mm;
+  flex-shrink: 0;
 }
 
 .label-cell .label-code {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 8pt;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .label-cell .label-name {
-  font-size: 12px;
+  font-size: 6.5pt;
+  line-height: 1.15;
   color: var(--color-text-muted);
-  word-break: break-word;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* ---- 部品在庫（05） ---- */
@@ -2159,7 +2181,16 @@ input.is-abnormal {
     padding: 4px 6px;
   }
 
-  /* 設備ラベル一括印刷: 操作UIを隠し、ラベルだけを用紙幅いっぱいに並べる */
+  /* 設備ラベル一括印刷: A4・40×40mm・24面の台紙に位置を合わせる（余白は @page で0、台紙の余白は .label-page の padding） */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body.labels-page {
+    background: #fff;
+  }
+
   body.labels-page .app-header,
   body.labels-page .labels-controls {
     display: none !important;
@@ -2172,31 +2203,35 @@ input.is-abnormal {
   }
 
   body.labels-page .label-sheet {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 4mm;
     margin: 0;
+    overflow: visible;
   }
 
+  body.labels-page .label-page {
+    box-sizing: border-box;
+    width: 210mm;
+    height: 297mm;
+    padding: 18.5mm 19mm;
+    margin: 0;
+    break-after: page;
+    page-break-after: always;
+    overflow: hidden;
+  }
+
+  body.labels-page .label-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  /* 台紙にラベルの縁があるので枠線は印刷しない */
   body.labels-page .label-cell {
-    border: 1px solid #000;
-    border-radius: 0;
-    padding: 5mm;
-    break-inside: avoid;
+    border: none;
+    background: transparent;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  body.labels-page .label-cell img {
-    width: 40mm;
-    height: 40mm;
-  }
-
-  body.labels-page .label-cell .label-code {
-    font-size: 15pt;
-  }
-
   body.labels-page .label-cell .label-name {
-    font-size: 10pt;
     color: #000;
   }
 
