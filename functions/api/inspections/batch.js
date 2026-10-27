@@ -4,10 +4,11 @@
 //          実施日時・担当者は全設備で共通。設備ごとに inspection_result を1件作成する。
 //   検証は通常登録（index.js の validateInspectionInput）を流用。
 //   全件を先に検証し、1件でもエラーがあれば何も保存しない（部分保存を避ける）。
+//   保存は1トランザクション（D1 batch）で行い、途中で失敗しても一部だけ残らない。
 
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { auditStatement, LAST_INSERT_ID } from '../_lib/audit.js';
 import { notifyTeam } from '../_lib/notify.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
@@ -51,34 +52,22 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
     validated.push({ v: parsed.value, fileIds: entry.file_ids });
   }
 
-  // 2) まとめて保存（各設備 = inspection_result 1件 + audit_log）
+  // 2) まとめて保存（各設備 = inspection_result 1件 + audit_log）。
+  //    全件を1トランザクション（D1 batch）で登録し、途中で失敗しても一部だけ残らないようにする
+  //    （押し直し・オフライン送信キューの再送で一部の設備だけ重複登録されるのを防ぐ）。
   const now = nowIso();
-  const saved = [];
-  for (const { v, fileIds } of validated) {
-    const result = await env.DB.prepare(
+  const statements = validated.flatMap(({ v, fileIds }) => [
+    env.DB.prepare(
       `INSERT INTO inspection_result
          (equipment_id, assignee_id, assignee_name, inspected_at, items_json, has_abnormal, note, created_by, created_at)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
-    )
-      .bind(
-        v.equipment_id, data.user.id, v.assignee_name, v.inspected_at,
-        JSON.stringify(v.items), v.has_abnormal, v.note, data.user.email, now
-      )
-      .run();
-
-    const id = result.meta.last_row_id;
-
-    const attached = await attachFiles(env, {
-      fileIds,
-      relatedTable: 'inspection_result',
-      relatedId: id,
-      userEmail: data.user.email,
-      now,
-    });
-
-    await writeAuditLog(env.DB, {
+    ).bind(
+      v.equipment_id, data.user.id, v.assignee_name, v.inspected_at,
+      JSON.stringify(v.items), v.has_abnormal, v.note, data.user.email, now
+    ),
+    auditStatement(env.DB, {
       tableName: 'inspection_result',
-      recordId: id,
+      recordId: LAST_INSERT_ID, // 直前の INSERT（この設備の点検記録）の ID
       action: 'create',
       changedBy: data.user.email,
       diff: {
@@ -87,9 +76,25 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
         inspected_at: v.inspected_at,
         item_count: v.items.length,
         has_abnormal: v.has_abnormal === 1,
-        attached_files: attached,
+        file_ids: Array.isArray(fileIds) ? fileIds : [],
         batch: true,
       },
+    }),
+  ]);
+  const results = await env.DB.batch(statements);
+
+  // 3) 記録の保存後に、添付の紐づけと異常値の通知を行う（失敗しても記録は保存済み）
+  const saved = [];
+  for (let i = 0; i < validated.length; i++) {
+    const { v, fileIds } = validated[i];
+    const id = results[i * 2].meta.last_row_id;
+
+    await attachFiles(env, {
+      fileIds,
+      relatedTable: 'inspection_result',
+      relatedId: id,
+      userEmail: data.user.email,
+      now,
     });
 
     if (v.has_abnormal === 1) {

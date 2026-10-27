@@ -19,3 +19,26 @@ export async function writeAuditLog(db, { tableName, recordId, action, changedBy
     .bind(tableName, recordId, action, changedBy, diff === null ? null : JSON.stringify(diff))
     .run();
 }
+
+// D1 の batch（1トランザクション）に入れるための監査ログ INSERT 文。
+//   writeAuditLog と同じ内容を、実行せずに prepared statement として返す。業務データの書き込みと
+//   同じ batch に入れれば「データは変わったのに監査ログが無い／その逆」が起きない。
+//   recordId に LAST_INSERT_ID を渡すと、同じ batch で直前に実行した INSERT の ID を記録する
+//   （batch は同じ接続で順に実行されるため last_insert_rowid() が直前の INSERT を指す）。
+//   ifPrevChanged: true なら「直前の文がちょうど1行を変えたときだけ」記録する（changes() = 1）。
+//   条件付き UPDATE を先頭に置いた連鎖（競合したら後続を何もしない）で使う。
+export const LAST_INSERT_ID = Symbol('last_insert_rowid');
+export function auditStatement(db, { tableName, recordId, action, changedBy, diff = null }, { ifPrevChanged = false } = {}) {
+  const diffJson = diff === null ? null : JSON.stringify(diff);
+  const cond = ifPrevChanged ? ' WHERE changes() = 1' : '';
+  if (recordId === LAST_INSERT_ID) {
+    return db.prepare(
+      `INSERT INTO audit_log (table_name, record_id, action, changed_by, diff_json)
+       SELECT ?1, last_insert_rowid(), ?2, ?3, ?4${cond}`
+    ).bind(tableName, action, changedBy, diffJson);
+  }
+  return db.prepare(
+    `INSERT INTO audit_log (table_name, record_id, action, changed_by, diff_json)
+     SELECT ?1, ?2, ?3, ?4, ?5${cond}`
+  ).bind(tableName, recordId, action, changedBy, diffJson);
+}

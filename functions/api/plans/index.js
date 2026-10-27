@@ -133,6 +133,51 @@ export async function insertMaintenancePlan(db, cols, vals) {
   throw new Error('予定の登録に失敗しました（列の不一致）。');
 }
 
+// 予定の INSERT 文を「実行せずに」返す（D1 の batch に入れて、他の書き込みと1トランザクションにする用）。
+//   dropCols に入っている列は外す（未マイグレーション環境で列が無いとき。runPlanBatch が使う）。
+//   ifPrevChanged: true なら「直前の文がちょうど1行を変えたときだけ」登録する（changes() = 1。
+//   guardedPlanUpdate を先頭に置いた連鎖で、競合したときに何も作らないために使う）。
+export function insertMaintenancePlanStatement(db, cols, vals, dropCols = new Set(), { ifPrevChanged = false } = {}) {
+  const c = [], v = [];
+  cols.forEach((col, i) => { if (!dropCols.has(col)) { c.push(col); v.push(vals[i]); } });
+  const cond = ifPrevChanged ? ' WHERE changes() = 1' : '';
+  return db.prepare(
+    `INSERT INTO maintenance_plan (${c.join(', ')}) SELECT ${c.map(() => '?').join(', ')}${cond}`
+  ).bind(...v);
+}
+
+// build(dropCols) が返す文の配列を D1 の batch（1トランザクション）で実行する。途中で失敗すれば
+// 全部取り消されるので「期間を詰めたのに後半の予定が作られない」等の中途半端な状態が残らない。
+// 未マイグレーション環境の「列が無い」エラーは、その列を外して batch ごと再試行する
+// （insertMaintenancePlan の1件ずつの再試行と同じ考え方。batch は全体が巻き戻るので再試行して安全）。
+export async function runPlanBatch(db, build) {
+  const dropCols = new Set();
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      return await db.batch(build(dropCols));
+    } catch (err) {
+      const msg = String(err?.message || err?.cause?.message || '');
+      const m = /(?:has no column named|no such column):?\s*([A-Za-z_]\w*)/i.exec(msg);
+      if (!m || dropCols.has(m[1])) throw err;
+      dropCols.add(m[1]);
+    }
+  }
+  throw new Error('予定の登録に失敗しました（列の不一致）。');
+}
+
+// 期間予定を分割する操作（1日だけ削除・完了）の先頭に置く、条件付きの UPDATE 文。
+//   「読み取った時点の日程・状態のまま」のときだけ元の予定を書き換える（setSql の内容）。
+//   同じ予定への同時操作（ボタンの2回押し・2人が同時に操作）は、先に実行された側が日程か状態を
+//   変えるため、後の側はこの文が0件更新になる。後続の文は ifPrevChanged（changes() = 1）で連鎖させ、
+//   0件なら何も作らない（完了済みの単日レコードが2件できる等を防ぐ）。呼び出し側は results[0] の
+//   changes が 0 なら 409 を返す。updated_at（秒精度）での比較は同じ秒の2回押しを防げないため使わない。
+export function guardedPlanUpdate(db, plan, setSql, setBinds) {
+  return db.prepare(
+    `UPDATE maintenance_plan SET ${setSql}
+      WHERE id = ? AND deleted_at IS NULL AND status = ? AND planned_date = ? AND planned_end_date IS ?`
+  ).bind(...setBinds, plan.id, plan.status, plan.planned_date, plan.planned_end_date ?? null);
+}
+
 export const addDays = (dateStr, n) => {
   const d = new Date(dateStr + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
@@ -157,6 +202,8 @@ export function buildCloneColumns(plan, userEmail, now, newStart, newEnd, overri
   if (plan.form_values_json != null) { cols.push('form_values_json'); vals.push(plan.form_values_json); }
   if (plan.source_plan_id != null) { cols.push('source_plan_id'); vals.push(plan.source_plan_id); }
   if (plan.on_calendar) { cols.push('on_calendar'); vals.push(plan.on_calendar); }
+  // 工事連絡書の印刷日も引き継ぐ（分割で後半が「未印刷」になり、未印刷リマインドが誤って出ないように）
+  if (plan.printed_at) { cols.push('printed_at', 'printed_by'); vals.push(plan.printed_at, plan.printed_by ?? null); }
   cols.push('created_by', 'created_at', 'updated_by', 'updated_at');
   vals.push(userEmail, now, userEmail, now);
   return { cols, vals };

@@ -55,50 +55,55 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
     return jsonError(400, 'related_id は整数で指定してください。');
   }
 
-  const oldQty = part.quantity; // 通知の「しきい値またぎ」判定に使う（多少の前後は許容）
+  // 在庫の更新と入出庫履歴の登録は1トランザクション（D1 batch）で行う。別々に実行していると、
+  // 履歴の登録に失敗したとき在庫だけ変わって履歴が残らない（履歴の合計と在庫が合わなくなる）。
+  let oldQty;
   let newQty;
   let delta;
   const now = nowIso();
+  const historyCols = 'part_id, type, quantity, note, related_table, related_id, created_by, created_at';
 
   if (type === 'adjust') {
-    // adjust: body.quantity は新しい絶対値（棚卸）
-    delta = bodyQty - oldQty;
+    // adjust: body.quantity は新しい絶対値（棚卸）。増減（delta）は「書き込む瞬間の在庫」から
+    // 同じトランザクション内で計算する。事前に読んだ在庫から計算すると、その間の他の人の
+    // 出庫が履歴の delta に反映されず、履歴の合計と在庫が合わなくなる。
+    const [before] = await DB.batch([
+      DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
+      DB.prepare(
+        `INSERT INTO parts_transaction (${historyCols})
+         SELECT ?1, 'adjust', ?2 - quantity, ?3, ?4, ?5, ?6, ?7 FROM parts_inventory WHERE id = ?1`
+      ).bind(id, bodyQty, note ?? null, relatedTable, relatedId, userEmail, now),
+      DB.prepare(
+        `UPDATE parts_inventory SET quantity = ?1, updated_by = ?2, updated_at = ?3 WHERE id = ?4`
+      ).bind(bodyQty, userEmail, now, id),
+    ]);
+    oldQty = before.results?.[0]?.quantity ?? part.quantity;
     newQty = bodyQty;
-    await DB.prepare(
-      `UPDATE parts_inventory
-          SET quantity = ?1, updated_by = ?2, updated_at = ?3
-        WHERE id = ?4`
-    )
-      .bind(newQty, userEmail, now, id)
-      .run();
+    delta = newQty - oldQty;
   } else {
     // 入庫・出庫は相対更新（quantity = quantity + Δ）で行う。
     // 「読み取り→計算→絶対値で書き込み」だと、2人が同時に±したとき片方の更新が消える。
     // 出庫の在庫不足ガードも同じUPDATEの条件で行い、同時出庫でもマイナス在庫にならない。
+    // 履歴は「直前の UPDATE が1行更新したときだけ」登録する（changes() = 1。在庫不足なら履歴も作らない）。
     delta = type === 'in' ? bodyQty : -bodyQty;
-    const res = await DB.prepare(
-      `UPDATE parts_inventory
-          SET quantity = quantity + ?1, updated_by = ?2, updated_at = ?3
-        WHERE id = ?4 AND quantity + ?1 >= 0`
-    )
-      .bind(delta, userEmail, now, id)
-      .run();
-    if ((res.meta?.changes ?? 0) === 0) {
+    const [upd, , after] = await DB.batch([
+      DB.prepare(
+        `UPDATE parts_inventory
+            SET quantity = quantity + ?1, updated_by = ?2, updated_at = ?3
+          WHERE id = ?4 AND quantity + ?1 >= 0`
+      ).bind(delta, userEmail, now, id),
+      DB.prepare(
+        `INSERT INTO parts_transaction (${historyCols})
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 WHERE changes() = 1`
+      ).bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now),
+      DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
+    ]);
+    if ((upd.meta?.changes ?? 0) === 0) {
       return jsonError(400, '在庫不足です。');
     }
-    const after = await DB.prepare(
-      'SELECT quantity FROM parts_inventory WHERE id = ?1'
-    ).bind(id).first();
-    newQty = after?.quantity ?? oldQty + delta;
+    newQty = after.results?.[0]?.quantity ?? part.quantity + delta;
+    oldQty = newQty - delta;
   }
-
-  // 入出庫履歴を登録（adjust のとき delta は負になることもある）
-  await DB.prepare(
-    `INSERT INTO parts_transaction (part_id, type, quantity, note, related_table, related_id, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
-  )
-    .bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now)
-    .run();
 
   // 入庫したら「発注中」バッジを自動解除する（発注→入庫の完了）。
   // ordered_at 列が無い旧DBではエラーになるが、バッジ機能が無いだけなので握りつぶす。
