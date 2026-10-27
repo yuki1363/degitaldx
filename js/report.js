@@ -237,6 +237,9 @@ async function renderForm(existing) {
     const reporter_name = f.reporter.value.trim() || null;
     const category_id   = f.category.value ? Number(f.category.value) : null;
     if (!report_date) { alert('日付は必須です。'); return; }
+    // 保存中はボタンを無効化（遅い回線で2回タップすると日報が2件できるため）
+    if (saveBtn.disabled) return;
+    saveBtn.disabled = true;
 
     try {
       if (existing) {
@@ -262,8 +265,11 @@ async function renderForm(existing) {
         } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
       }
       alert(saveErrorMessage(err));
+    } finally {
+      saveBtn.disabled = false;
     }
   };
+  const saveBtn = el('button', { class: 'btn btn-primary', onclick: save }, '保存');
 
   // カテゴリが未登録のときは入力欄の下に案内を出す（管理者は管理画面へのリンク付き）
   const categoryField = el('div', { class: 'field' }, [
@@ -286,7 +292,7 @@ async function renderForm(existing) {
       categoryField,
       field('内容', f.body, '今日の作業・引き継ぎ・気づき等を記録してください（任意）。'),
       el('div', { class: 'action-row' }, [
-        el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
+        saveBtn,
         el('button', { class: 'btn', onclick: () => { guard.clear(); existing ? go(`?id=${existing.id}`) : go(''); } }, 'キャンセル'),
       ]),
     ]),

@@ -294,11 +294,17 @@ async function renderList() {
         for (const d of diffs) {
           try {
             await api.post(`/api/parts/${d.part.id}/transaction`, { type: 'adjust', quantity: d.actual, note: '棚卸' });
+            stocktakeInputs.delete(d.part.id); // 確定できた行の入力は役目を終えた（再読込後は新しい帳簿数で作り直す）
             ok++;
           } catch { ng++; }
         }
-        alert(`棚卸を確定しました: ${ok}件更新${ng ? ` ／ ${ng}件失敗（通信環境を確認して再実行してください）` : ''}`);
-        setStocktake(false);
+        if (ng === 0) {
+          alert(`棚卸を確定しました: ${ok}件更新`);
+          setStocktake(false);
+        } else {
+          // 失敗した行は実数の入力を残したまま棚卸モードを続ける（数え直さずに再実行できるように）
+          alert(`棚卸を確定しました: ${ok}件更新 ／ ${ng}件失敗\n失敗した行は入力した実数を残しています。通信環境を確認して、もう一度「一括確定」を押してください。`);
+        }
         await load();
       },
     }, `差異 ${diffs.length}件を一括確定`);
@@ -556,11 +562,16 @@ async function renderDetail(id) {
     const quantity = parseInt(txQtyEl.value, 10);
     const note = txNoteEl.value.trim() || null;
     if (!quantity || quantity < 1) { alert('数量は1以上を入力してください。'); return; }
+    // 更新中はボタンを無効化（2回タップで出庫が2回反映され在庫数がずれるため）
+    if (txBtn.disabled) return;
+    txBtn.disabled = true;
     try {
       await api.post(`/api/parts/${id}/transaction`, { type, quantity, note });
       go(`?id=${id}`);
     } catch (err) { alert(err.message); }
+    finally { txBtn.disabled = false; }
   };
+  const txBtn = el('button', { class: 'btn btn-primary', onclick: doTransaction }, '更新');
 
   const TYPE_LABELS = { in: '入庫', out: '出庫', adjust: '調整' };
 
@@ -626,7 +637,7 @@ async function renderDetail(id) {
             el('div', { class: 'field' }, [el('label', {}, '数量'), txQtyEl]),
           ]),
           el('div', { class: 'field' }, [el('label', {}, 'メモ'), txNoteEl]),
-          el('button', { class: 'btn btn-primary', onclick: doTransaction }, '更新'),
+          txBtn,
         ])
       : null,
     canEdit

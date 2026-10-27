@@ -496,6 +496,8 @@ async function renderForm(existing, prefill = null) {
 
   // 写真・動画・PDF（保存時にまとめてアップロードして紐づける）
   const pendingFiles = [];
+  // 送信済みファイルのID（保存が409等で失敗して押し直したとき、同じ写真を再アップロードしないため）
+  const uploadedIdOf = new WeakMap();
   const fileListBox = el('div', { class: 'row-list' }, []);
   const renderPending = () => {
     render(fileListBox, pendingFiles.map((file, idx) =>
@@ -632,9 +634,12 @@ async function renderForm(existing, prefill = null) {
       // 添付（画像はリサイズしてEXIF除去、動画はそのまま）を先に送って file_ids を集める
       for (const file of pendingFiles) {
         saveBtn.textContent = `写真を送信中… (${fileIds.length + 1}/${pendingFiles.length})`;
-        const prepared = await resizeImageFile(file);
-        const meta = await uploadFile(prepared, {});
-        fileIds.push(meta.id);
+        if (!uploadedIdOf.has(file)) {
+          const prepared = await resizeImageFile(file);
+          const meta = await uploadFile(prepared, {});
+          uploadedIdOf.set(file, meta.id);
+        }
+        fileIds.push(uploadedIdOf.get(file));
       }
       saveBtn.textContent = '保存中…';
       body.file_ids = fileIds;

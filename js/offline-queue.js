@@ -126,31 +126,46 @@ export async function flushOutbox() {
   if (flushing) return;
   if (navigator.onLine === false) { updateBar(); return; }
   flushing = true;
-  const sent = [];
-  let stillFailed = 0;
   try {
-    const items = await getAll();
-    for (const item of items) {
-      // failed（検証エラー等）は自動再送しない。「今すぐ送信」ボタンが pending に
-      // 戻したときだけ再試行する（毎回の復帰・起動で失敗し続けるのを防ぐ）
-      if (item.status === 'failed') continue;
-      try {
-        await sendOne(item);
-        await removeItem(item.id);
-        sent.push(item);
-      } catch (err) {
-        if (err?.offline === true || navigator.onLine === false) {
-          break; // まだオフライン。残りは次の復帰時に
-        }
-        // オフライン以外の失敗（検証エラー等）は failed として残す（自動では再送し続けない）
-        item.status = 'failed';
-        item.error = err?.message || String(err);
-        await updateItem(item);
-        stillFailed++;
-      }
+    // flushing はタブごとの変数のため、PWA の窓とブラウザのタブなど複数開いた状態で復帰すると
+    // 両方が同じ項目を POST して二重登録になる。Web Locks で端末内の送信を1つに絞り、
+    // 送信中の別タブは何もしない（その項目は送信側のタブが片付ける）。
+    // Web Locks 非対応の古いブラウザは従来どおりタブ内の排他のみ。
+    if (navigator.locks?.request) {
+      await navigator.locks.request('mainte-outbox-flush', { ifAvailable: true }, async (lock) => {
+        if (lock) await sendQueued();
+      });
+    } else {
+      await sendQueued();
     }
   } finally {
     flushing = false;
+  }
+  updateBar();
+}
+
+async function sendQueued() {
+  const sent = [];
+  let stillFailed = 0;
+  const items = await getAll();
+  for (const item of items) {
+    // failed（検証エラー等）は自動再送しない。「今すぐ送信」ボタンが pending に
+    // 戻したときだけ再試行する（毎回の復帰・起動で失敗し続けるのを防ぐ）
+    if (item.status === 'failed') continue;
+    try {
+      await sendOne(item);
+      await removeItem(item.id);
+      sent.push(item);
+    } catch (err) {
+      if (err?.offline === true || navigator.onLine === false) {
+        break; // まだオフライン。残りは次の復帰時に
+      }
+      // オフライン以外の失敗（検証エラー等）は failed として残す（自動では再送し続けない）
+      item.status = 'failed';
+      item.error = err?.message || String(err);
+      await updateItem(item);
+      stillFailed++;
+    }
   }
   if (sent.length > 0) {
     const counts = {};
@@ -161,7 +176,6 @@ export async function flushOutbox() {
   if (stillFailed > 0) {
     showToast('⚠ 送信できなかった記録があります（送信待ちバーから再試行できます）', 8000);
   }
-  updateBar();
 }
 
 // ---------------- 画面表示（送信待ちバー・トースト） ----------------

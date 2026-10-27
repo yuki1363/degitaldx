@@ -347,7 +347,8 @@ async function renderForm(existing, existingFiles = []) {
       // 1日1件ガード（409）は既存記録の編集へ誘導する
       const existingId = err?.detail?.existing_id;
       if (err?.status === 409 && existingId) {
-        if (window.confirm(`${err.message}\n\n既存の記録を開きますか？`)) {
+        // OK で移動すると、この画面の入力（31項目）は破棄される。黙って消えないよう確認文に明記する
+        if (window.confirm(`${err.message}\n\n既存の記録の編集画面を開きますか？\n・OK：この画面の入力内容は破棄して移動します\n・キャンセル：この画面に残ります（入力内容はそのまま）`)) {
           draft.clear();
           guard.clear();
           go(`?edit=${existingId}`);
