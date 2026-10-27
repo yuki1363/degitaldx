@@ -203,6 +203,7 @@
 - **保存（D1同期ハイブリッド）**: 元アプリは localStorage 保存だが、**記録・設定は D1 に置換**してチーム共有・監査・端末紛失対応にした。`main` 版はレコード読み取り箇所が多いため、**localStorage を作業ストアにしたまま、起動時に D1→localStorage へ充填（D1が真実）し、書き込み点だけ D1 にも反映（write-through）** する方式（多数の読み取り/描画コードは無改修）。詳細は `electrical/index.html` の「サーバー同期」節（`loadServerData`／`pushRecordToServer`／`deleteRecordFromServer`／`pushConfigToServer`／`pushDefaultToServer`）。
 - **既定の点検設定は実運用データ（`点検設定_20260903.json`）に合わせてある**（`DEFAULT_CONFIG`/`_BATTERY`/`_GENERATOR`。乗数・未満以上を含む）。空D1時は `getConfig` がこれをフォールバック使用。
 - **下書き（autosave）・基本情報の記憶は端末ローカル(localStorage)のまま**（一時データ／この端末の入力補助）。**書き込みキューは未実装（online書き込み前提。オフライン時は充填済みlocalStorageで閲覧のみ可）**。
+- **保存・削除は D1 が先**: `saveRecord`／`deleteRecord`／`deleteRecordById` は D1 への送信が成功してから localStorage を更新する。逆順だと送信失敗時に「端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の `loadServerData`（D1→localStorage 充填）で黙って消えた（削除なら復活した）。失敗時は端末側・編集状態（`editingRecordId`）・下書きを変えず、そのまま押し直せる
 - **JSON インポート/エクスポートは廃止**（記録・設定は D1 で自動共有されるため端末間移行が不要。UI・関数とも削除済み）。
 - **前回値コピー**: 新規入力時に前回記録の値を各欄へコピーできる。多相（電圧/電流の3相等）のコピーは `onclick` 内の JSON を `&quot;` エスケープして属性破壊を防いでいる（未エスケープだと `JSON.stringify` の `"` が二重引用符 `onclick` 属性を閉じてボタンが無効化する）。
 - **権限**: 記録の保存/削除=editor、**設定編集=admin**（非adminは設定タブ非表示）、閲覧=全員。点検者名は `/api/me` の氏名を既定。

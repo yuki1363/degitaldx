@@ -851,8 +851,6 @@ async function saveRecord() {
   if (editingRecordId && recs[editingRecordId]) {
     savedId = editingRecordId;
     recs[savedId] = { ...recs[savedId], ...data, savedAt: new Date().toISOString() };
-    editingRecordId = null;
-    document.getElementById('edit-banner').style.display = 'none';
   } else {
     const existing = Object.values(recs).find(r => r.date === data.date && r.equipmentType === activeEquipment);
     if (existing) {
@@ -864,17 +862,23 @@ async function saveRecord() {
       recs[savedId] = { id: savedId, equipmentType: activeEquipment, ...data, savedAt: new Date().toISOString() };
     }
   }
-  try {
-    localStorage.setItem(recKey(), JSON.stringify(recs));
-  } catch(e) {
-    alert('保存できませんでした（プライベートモードでは使用できません）');
-    return;
-  }
+  // D1 を先に保存し、成功したときだけ localStorage へ反映する。
+  // 逆順だと、送信失敗時に「この端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の
+  // D1→localStorage 充填（loadServerData）で黙って消える。失敗時は端末側も編集状態も変えず、
+  // 入力内容（下書き）を残したまま押し直せるようにする。
   try {
     await pushRecordToServer(recs[savedId]);   // D1 へ write-through
   } catch(e) {
-    alert('サーバーへ保存できませんでした（通信環境を確認してください）：' + e.message);
+    alert('サーバーへ保存できませんでした。記録はまだ保存されていません。\n通信環境を確認して、もう一度「保存する」を押してください。\n（入力内容はこの画面に残っています）\n' + e.message);
     return;
+  }
+  editingRecordId = null;
+  document.getElementById('edit-banner').style.display = 'none';
+  try {
+    localStorage.setItem(recKey(), JSON.stringify(recs));
+  } catch(e) {
+    // サーバーには保存済み。端末の表示用キャッシュだけ更新できなかった（次回起動時に D1 から充填される）
+    alert('サーバーには保存しましたが、この端末の一覧表示を更新できませんでした（プライベートモード等）。');
   }
   clearDraft();
   saveBasicInfo();  // 点検者名・設備名称・天候を次回のデフォルトとして保持
@@ -1364,8 +1368,9 @@ async function deleteRecord() {
   const found = findRecord(id);
   if (!found) return;
   delete found.recs[id];
+  // D1 を先に削除し、成功したときだけ端末側からも消す（逆順だと失敗時に一覧から消えたように見え、次回起動時に復活する）
+  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); return; }
   try { localStorage.setItem(found.key, JSON.stringify(found.recs)); } catch(e) {}
-  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); }
   closeModal(); renderHistory();
 }
 
@@ -1374,8 +1379,9 @@ async function deleteRecordById(id) {
   const found = findRecord(id);
   if (!found) return;
   delete found.recs[id];
+  // D1 を先に削除し、成功したときだけ端末側からも消す（逆順だと失敗時に一覧から消えたように見え、次回起動時に復活する）
+  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); return; }
   try { localStorage.setItem(found.key, JSON.stringify(found.recs)); } catch(e) {}
-  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); }
   if (currentRecordId === id) closeModal();
   renderHistory();
 }

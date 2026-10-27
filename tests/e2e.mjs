@@ -1007,6 +1007,33 @@ check('電気点検: 記録の HTML が実行されない（一覧・詳細・�
 check('電気点検: 点検者名は文字としてそのまま表示される', xssModalText.includes('<img src=x'));
 await api(`/api/electrical-inspections/${encodeURIComponent(xssId)}`, { method: 'DELETE' });
 
+// 保存は D1 が先: サーバー送信に失敗したら端末側（localStorage）にも保存しない
+// （逆順だと「端末でだけ保存済み」に見え、次回オンライン起動時の D1→localStorage 充填で黙って消える）
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+const elFailDate = '2026-01-15';
+const elFillForm = () => page.evaluate((d) => {
+  showTab('entry');
+  document.getElementById('date').value = d;
+  document.getElementById('inspector').value = 'E2E送信失敗テスト';
+}, elFailDate);
+const elLocalHas = () => page.evaluate((d) => Object.values(getRecords()).some((r) => r.date === d), elFailDate);
+await page.route('**/api/electrical-inspections', (route) =>
+  route.request().method() === 'POST' ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"message":"E2E"}}' }) : route.continue());
+await elFillForm();
+const elDlgBefore = dialogs.length;
+await page.evaluate(() => saveRecord());
+check('電気点検: 送信失敗時は「まだ保存されていません」と知らせる',
+  dialogs.slice(elDlgBefore).some((m) => m.includes('まだ保存されていません')), dialogs.slice(elDlgBefore).join(' / '));
+check('電気点検: 送信失敗時は端末側にも保存しない', !(await elLocalHas()));
+check('電気点検: 送信失敗時も入力内容が残る',
+  await page.evaluate(() => document.getElementById('inspector').value === 'E2E送信失敗テスト'));
+await page.unroute('**/api/electrical-inspections');
+await page.evaluate(() => saveRecord());
+const elRetry = await api('/api/electrical-inspections?equipment_type=main');
+const elRetryRec = Object.values(elRetry.json?.records || {}).find((r) => r.date === elFailDate && r.inspector === 'E2E送信失敗テスト');
+check('電気点検: 押し直すとサーバーと端末の両方に保存される', !!elRetryRec && await elLocalHas());
+if (elRetryRec) await api(`/api/electrical-inspections/${encodeURIComponent(elRetryRec.id)}`, { method: 'DELETE' });
+
 // ---------- 9.7 ユーティリティ日報（13） ----------
 section('9.7 ユーティリティ日報（項目マスタ・1日1件ガード・異常判定）');
 const utItems = await api('/api/utility-reports/items');
