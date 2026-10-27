@@ -1741,6 +1741,52 @@ const eqAudit = await api('/api/equipment', { method: 'POST', body: { code: 'E2E
 const eqAuditGot = (await api(`/api/equipment/${eqAudit.json?.id}`)).json?.equipment;
 check('監査列: 設備の新規登録で updated_by / updated_at が入る', !!eqAuditGot?.updated_by && !!eqAuditGot?.updated_at, JSON.stringify({ by: eqAuditGot?.updated_by, at: eqAuditGot?.updated_at }));
 
+
+// ---------- 9.14 低優先度の修正（AIの権限・件数上限・検索ハイライト・電気設定の再送） ----------
+section('9.14 AIの権限・件数上限・検索ハイライト・電気設定の再送');
+// AI: 閲覧のみ（viewer）は無料枠を消費する AI API を呼べない。画像AIは AI_VISION_ENABLED=1 のときだけ
+const viewerEmail = 'e2e-viewer@example.com';
+await api('/api/admin/users', { method: 'POST', body: { email: viewerEmail, name: 'E2E閲覧者', role: 'viewer' } });
+for (const ep of ['chat', 'analyze-trouble', 'parse-trouble-pdf', 'parse-search', 'suggest-trouble']) {
+  const r = await apiAs(viewerEmail, `/api/ai/${ep}`, { method: 'POST', body: { message: 'x', phenomenon: 'x', text: 'x', query: 'x' } });
+  check(`AI: 閲覧のみは /api/ai/${ep} を呼べない（403）`, r.status === 403, `status=${r.status}`);
+}
+const visionRes = await api('/api/ai/read-meter', { method: 'POST', body: { file_id: 1 } });
+check('AI: 画像の読み取りは AI_VISION_ENABLED 未設定なら403（管理者でも）', visionRes.status === 403, `status=${visionRes.status}`);
+
+// 点検一覧の件数上限: 既定200・limit で増減できる。CSV出力は上限超過を truncated で知らせる
+const inspLim = await api('/api/inspections?limit=1');
+check('点検一覧: limit で件数を指定できる', (inspLim.json?.inspections || []).length === 1, `n=${(inspLim.json?.inspections || []).length}`);
+const inspExp = await api('/api/inspections/export');
+check('点検CSV: 上限情報（truncated / limit）を返す', inspExp.json?.truncated === false && inspExp.json?.limit === 1000, JSON.stringify({ t: inspExp.json?.truncated, l: inspExp.json?.limit }));
+
+// 検索ハイライト: 語が「mark」「amp」等でも表示が崩れず、元の文字列のまま一致部分だけ <mark> になる
+await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2Eハイライト mark & amp <b>' } });
+await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('E2Eハイライト mark amp')}&type=trouble`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => !!document.querySelector('.search-result-title'), { timeout: 8000 }).catch(() => {});
+const hl = await page.evaluate(() => {
+  const t = [...document.querySelectorAll('.search-result-title')].find((x) => x.textContent.includes('E2Eハイライト'));
+  return t ? { text: t.textContent, marks: [...t.querySelectorAll('mark')].map((m) => m.textContent), html: t.innerHTML.includes('&lt;b&gt;') } : null;
+});
+check('検索ハイライト: 元の文字列のまま一致部分だけ強調される',
+  hl?.text === 'E2Eハイライト mark & amp <b>' && hl.marks.join(',') === 'E2Eハイライト,mark,amp' && hl.html, JSON.stringify(hl));
+
+// 電気設備点検の設定: サーバー保存に失敗した設定は端末に残り、次回起動時に再送される（上書きで消えない）
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+const elCfgRetry = [{ id: 'rt', title: 'E2E再送設定', checks: [], measurements: [] }];
+await page.route('**/api/electrical-config', (route) => (route.request().method() === 'PUT'
+  ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"message":"E2E"}}' }) : route.continue()));
+await page.evaluate((cfg) => pushConfigToServer('generator', cfg), elCfgRetry);
+const elUnsynced = await page.evaluate(() => !!localStorage.getItem('elec_unsynced_config_generator'));
+check('電気設定: 送信に失敗した設定は「未送信」として端末に残る', elUnsynced);
+await page.unroute('**/api/electrical-config');
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(800);
+const elCfgAfter = (await api('/api/electrical-config')).json?.generator;
+const elUnsyncedAfter = await page.evaluate(() => !!localStorage.getItem('elec_unsynced_config_generator'));
+check('電気設定: 次回起動時に再送され、サーバーに保存される', elCfgAfter?.[0]?.title === 'E2E再送設定' && !elUnsyncedAfter,
+  JSON.stringify({ title: elCfgAfter?.[0]?.title, left: elUnsyncedAfter }));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

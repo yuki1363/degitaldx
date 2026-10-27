@@ -1,3 +1,4 @@
+import { requireRole } from '../_lib/auth.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { visionModel } from '../_lib/ai-models.js';
 
@@ -9,6 +10,13 @@ import { visionModel } from '../_lib/ai-models.js';
 
 export async function onRequestPost({ request, env, data }) {
   if (!data.user) return jsonError(401, '認証が必要です');
+  // 画面のボタンは AI_VISION_ENABLED=1 のときだけ出す（モデルのライセンス同意が必要なため既定で非表示）。
+  // サーバー側でも同じ条件と権限（editor 以上）を確認し、直接呼ばれても動かないようにする
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
+  if (env.AI_VISION_ENABLED !== '1') {
+    return jsonError(403, '画像の自動読み取りは無効になっています（管理者が AI_VISION_ENABLED=1 を設定すると使えます）。');
+  }
 
   const ai = env.AI;
   if (!ai) {

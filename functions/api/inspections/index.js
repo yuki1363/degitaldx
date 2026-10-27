@@ -147,6 +147,9 @@ export async function onRequestGet({ request, env }) {
     binds.push(equipmentId);
     conditions.push(`r.equipment_id = ?${binds.length}`);
   }
+  // 件数の上限は既定200（一覧画面）。年間計画表の実績集計のように期間を指定して1年分を数える呼び出しは
+  // limit で増やせる（最大5000）。固定200だと年200件を超えたとき古い月の実績が黙って欠けていた。
+  const limit = Math.min(Math.max(1, Math.trunc(Number(url.searchParams.get('limit'))) || 200), 5000);
   const from = url.searchParams.get('from');
   if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
     binds.push(jstDayStartUtc(from)); // JST の日付境界（_lib/util.js）
@@ -166,9 +169,9 @@ export async function onRequestGet({ request, env }) {
        JOIN equipment_ledger e ON e.id = r.equipment_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY r.inspected_at DESC, r.id DESC
-      LIMIT 200`
+      LIMIT ?${binds.length + 1}`
   )
-    .bind(...binds)
+    .bind(...binds, limit)
     .all();
 
   return json({ inspections: results });

@@ -44,8 +44,12 @@ async function loadData(filters) {
   if (filters.equipment_id) p.set('equipment_id', filters.equipment_id);
   if (filters.abnormal_only) p.set('abnormal_only', '1');
 
-  const { inspections: rows } = await api.get(`/api/inspections/export?${p}`);
+  const { inspections: rows, truncated, limit } = await api.get(`/api/inspections/export?${p}`);
   inspections = rows || [];
+  // 上限を超えた分は含まれない。黙って欠けないよう、期間を絞るよう案内する
+  if (truncated) {
+    alert(`対象が多いため、古い順に${limit}件までを表示しています（それより新しい記録は含まれていません）。\n期間や設備を絞って出力してください。`);
+  }
 
   // 出現する項目名を出現順で集約（列・行の選択肢になる）
   const seen = new Set();

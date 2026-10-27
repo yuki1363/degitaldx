@@ -97,21 +97,16 @@ async function doSearch(params, resultsBox) {
       return;
     }
 
-    // テキストをエスケープしてからキーワードをハイライトする
-    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-    );
+    // キーワードをハイライトした要素を組み立てる（innerHTML は使わない）。
+    // 元のテキストを全キーワードの正規表現で1回だけ分割し、一致部分を <mark> 要素にする。
+    // エスケープ後の文字列を語ごとに置換すると、語が「mark」「amp」等のとき挿入済みのタグや
+    // 実体参照の中まで置換されて表示が崩れていた。
     const highlight = (text, kws) => {
-      const escaped = escapeHtml(text);
-      if (!kws.length) return escaped;
-      let result = escaped;
-      for (const kw of kws) {
-        result = result.replace(
-          new RegExp(escapeHtml(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-          (m) => `<mark>${m}</mark>`
-        );
-      }
-      return result;
+      const str = String(text ?? '');
+      const words = [...new Set(kws.filter(Boolean))].sort((a, b) => b.length - a.length); // 長い語を優先
+      if (!words.length || !str) return [str];
+      const re = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+      return str.split(re).map((part, i) => (i % 2 === 1 ? el('mark', {}, part) : part));
     };
 
     render(resultsBox, [
@@ -128,10 +123,8 @@ async function doSearch(params, resultsBox) {
       el('div', { class: 'search-results' },
         results.map((r) => {
           const cfg = TYPE_CONFIG[r.type] || {};
-          const titleEl = el('span', {});
-          titleEl.innerHTML = highlight(r.title, keywords);
-          const snippetEl = r.snippet ? el('div', { class: 'search-snippet' }) : null;
-          if (snippetEl) snippetEl.innerHTML = highlight(r.snippet, keywords);
+          const titleEl = el('span', {}, highlight(r.title, keywords));
+          const snippetEl = r.snippet ? el('div', { class: 'search-snippet' }, highlight(r.snippet, keywords)) : null;
 
           return el('a', { class: 'search-result-item', href: r.url }, [
             el('div', { class: 'search-result-meta' }, [

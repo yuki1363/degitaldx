@@ -633,7 +633,7 @@ async function renderYear() {
   const [{ plans }, equipData, inspData] = await Promise.all([
     api.get('/api/plans?annual_only=1'),
     api.get('/api/equipment').catch(() => ({ equipment: [] })),
-    api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31`).catch(() => ({ inspections: [] })),
+    api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31&limit=5000`) // 既定200件だと古い月の実績が欠ける.catch(() => ({ inspections: [] })),
   ]);
   plansCache = plans || [];
 

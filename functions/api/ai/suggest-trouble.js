@@ -17,6 +17,7 @@ export async function onRequestPost({ request, env, data }) {
   const body = await readJson(request);
   const phenomenon = typeof body?.phenomenon === 'string' ? body.phenomenon.trim() : '';
   if (!phenomenon) return jsonError(400, '現象を入力してください');
+  if (phenomenon.length > 1000) return jsonError(400, '現象は1000文字以内で入力してください'); // プロンプト長の上限（無料枠の浪費防止）
 
   // 過去の類似トラブルを最大5件取得（横断検索と同じあいまい検索を再利用）。
   // DB失敗時は空配列でAIのみの提案にフォールバックする（現象からの一般知識で回答）。
