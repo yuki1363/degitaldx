@@ -1,11 +1,11 @@
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { getAnnualFyState } from './index.js';
 
 // 年間計画 年度末リセット
 //   POST /api/plans/annual-reset
-//     { fiscal_year: 2025, csv_snapshot: "..." }
+//     { fiscal_year: 2025（省略可・締める年度の確認用）, csv_snapshot: "..." }
 //   → annual_only=1 の全予定を status='pending' にリセットし、
 //     plan_reset_log に CSV スナップショットを保存する。
 //   GET /api/plans/annual-reset
@@ -49,80 +49,59 @@ export async function onRequestGet({ request, env }) {
 }
 
 // 全タスクの完了状態をまとめて消す操作のため管理者のみ（画面のボタンも admin にだけ出す）
+//   締める年度はサーバーが決める（getAnnualFyState の resetTarget＝通常は最後にリセットした年度＋1）。
+//   画面の時計で年度を決めると、10月に実行したとき始まったばかりの年度を締めた記録になっていた。
+//   fiscal_year を送ってきた場合は、それが締める年度と一致しなければ 409（古い画面・二重実行）。
+//   締める年度の最終月（9月）より前は締められない（10月にリセットした直後の2回目で、始まったばかりの
+//   年度まで締めてしまうのを防ぐ）。
+//   監査（戻す予定と変更前の状態）→ 予定を未実施へ → 履歴の登録 を1つの batch（トランザクション）で行う。
+//   同じ年度の二重実行は plan_reset_log の UNIQUE(fiscal_year) で後の方が丸ごと失敗する。
 export async function onRequestPost({ request, env, data }) {
   const denied = requireRole(data.user, 'admin');
   if (denied) return denied;
 
   const db = env.DB;
   const body = await readJson(request);
-  const fiscalYear = Number(body.fiscal_year);
-  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) {
-    return jsonError(400, 'fiscal_year が不正です（例: 2025）。');
+  const { resetTarget: fiscalYear, resetAvailable } = await getAnnualFyState(db);
+  if (body.fiscal_year != null && Number(body.fiscal_year) !== fiscalYear) {
+    return jsonError(409, `年度リセットの対象は FY${fiscalYear} です（画面が古い可能性があります。再読み込みしてください）。`);
   }
-
-  // 既にリセット済みかチェック
-  let existing;
-  try {
-    existing = await db.prepare('SELECT id FROM plan_reset_log WHERE fiscal_year = ?').bind(fiscalYear).first();
-  } catch {
-    existing = null;
-  }
-  if (existing && !body.force) {
-    return jsonError(409, `FY${fiscalYear} はリセット済みです。再実行するには force:true を指定してください。`);
+  if (!resetAvailable) {
+    return jsonError(409, `FY${fiscalYear} の年度リセットは ${fiscalYear + 1}年9月から実行できます（FY${fiscalYear - 1} はリセット済みです）。`);
   }
 
   const userEmail = data.user.email;
   const now = nowIso();
+  // CSV スナップショット（リセット前の完了状態。画面から送られた場合のみ）
+  const csvSnapshot = typeof body.csv_snapshot === 'string' ? body.csv_snapshot : null;
+  const TARGET = `annual_only = 1 AND deleted_at IS NULL AND status != 'pending'`;
 
-  // annual_only=1 の全予定を pending にリセット。
-  // 監査用に、戻す対象のIDと変更前の状態を先に控える（件数だけだと誰が何を戻したか追えない）
-  let resetCount = 0;
-  let targets = [];
+  let results;
   try {
-    const { results } = await db.prepare(
-      `SELECT id, status FROM maintenance_plan
-        WHERE annual_only = 1 AND deleted_at IS NULL AND status != 'pending'`
-    ).all();
-    targets = results ?? [];
-    const result = await db.prepare(
-      `UPDATE maintenance_plan SET status = 'pending', updated_by = ?, updated_at = ?
-       WHERE annual_only = 1 AND deleted_at IS NULL AND status != 'pending'`
-    ).bind(userEmail, now).run();
-    resetCount = result.meta?.changes ?? 0;
+    results = await db.batch([
+      // 監査: 戻す予定のIDと変更前の状態（D1 の Time Travel を使わずに、誤操作時の確認・手動復旧ができるように）
+      db.prepare(
+        `INSERT INTO audit_log (table_name, record_id, action, changed_by, diff_json)
+         SELECT 'maintenance_plan', 'annual_reset', 'update', ?1,
+                json_object('fiscal_year', ?2, 'reset_count', COUNT(*),
+                            'reset_plans', json_group_array(json_object('id', id, 'from', status)))
+           FROM maintenance_plan WHERE ${TARGET}`
+      ).bind(userEmail, fiscalYear),
+      db.prepare(
+        `UPDATE maintenance_plan SET status = 'pending', updated_by = ?1, updated_at = ?2 WHERE ${TARGET}`
+      ).bind(userEmail, now),
+      // changes() は直前の UPDATE で戻した件数
+      db.prepare(
+        `INSERT INTO plan_reset_log (fiscal_year, reset_at, reset_by, plan_count, csv_snapshot)
+         VALUES (?1, ?2, ?3, changes(), ?4)`
+      ).bind(fiscalYear, now, userEmail, csvSnapshot),
+    ]);
   } catch (err) {
+    if (/UNIQUE/i.test(String(err?.message))) {
+      return jsonError(409, `FY${fiscalYear} はリセット済みです。`);
+    }
     return jsonError(500, `リセットに失敗しました: ${err.message}`);
   }
-
-  // CSV スナップショットを保存（クライアントから送ってくれた場合）
-  const csvSnapshot = typeof body.csv_snapshot === 'string' ? body.csv_snapshot : null;
-
-  try {
-    if (existing) {
-      await db.prepare(
-        `UPDATE plan_reset_log SET reset_at = ?, reset_by = ?, plan_count = ?, csv_snapshot = ? WHERE fiscal_year = ?`
-      ).bind(now, userEmail, resetCount, csvSnapshot, fiscalYear).run();
-    } else {
-      await db.prepare(
-        `INSERT INTO plan_reset_log (fiscal_year, reset_at, reset_by, plan_count, csv_snapshot)
-         VALUES (?, ?, ?, ?, ?)`
-      ).bind(fiscalYear, now, userEmail, resetCount, csvSnapshot).run();
-    }
-  } catch {
-    // ログ保存失敗はリセット自体は完了しているため警告に留める
-  }
-
-  await writeAuditLog(db, {
-    tableName: 'maintenance_plan',
-    recordId: 'annual_reset',
-    action: 'update',
-    changedBy: userEmail,
-    diff: {
-      fiscal_year: fiscalYear,
-      reset_count: resetCount,
-      // 戻した予定と変更前の状態（D1 の Time Travel を使わずに、誤操作時の確認・手動復旧ができるように）
-      reset_plans: targets.map((t) => ({ id: t.id, from: t.status })),
-    },
-  });
-
-  return json({ ok: true, fiscal_year: fiscalYear, reset_count: resetCount });
+  const resetCount = results[1]?.meta?.changes ?? 0;
+  return json({ ok: true, fiscal_year: fiscalYear, reset_count: resetCount, current_fiscal_year: fiscalYear + 1 });
 }

@@ -11,7 +11,7 @@
 //   （例: 業務依頼を再受付して再び期限を過ぎた場合）。
 
 import { notifyTeam } from './notify.js';
-import { deriveOverdue, annualMonthInCurrentFy } from '../plans/index.js';
+import { deriveOverdue, annualMonthInFy, getAnnualFyState } from '../plans/index.js';
 import { ensureRepairSchema, isOverdueRepair } from '../repairs/index.js';
 import { ensureColumns } from './db-compat.js';
 
@@ -61,15 +61,16 @@ async function notifyOverduePlans(env) {
           AND (recurrence_rule IS NULL OR recurrence_rule = '')`
     )
     .all();
+  // 年間計画は「最後に年度リセットした年度＋1」の年度に当てはめて判定する（plans/index.js の getAnnualFyState）
+  const { current: fy } = await getAnnualFyState(db);
   for (const p of results ?? []) {
-    const derived = deriveOverdue(p); // annual_only は自動で月単位判定（deriveOverdueの既定動作）
+    const derived = deriveOverdue(p, { fy }); // annual_only は自動で月単位判定（deriveOverdueの既定動作）
     if (derived.status !== 'overdue') continue;
     const limit = (p.planned_end_date || p.planned_date || '').slice(0, 10);
     // 年間計画（毎年共通のテンプレート）は登録年の日付ではなく、今の年度に当てはめた予定月で書く
     // （年度が変わると本文が変わる＝翌年度の超過は新しい通知になる）
-    const nowJstYm = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
     const body = p.annual_only
-      ? `予定月（${annualMonthInCurrentFy(limit, nowJstYm)}）を過ぎても未実施です`
+      ? `予定月（${annualMonthInFy(limit, fy)}）を過ぎても未実施です`
       : `予定日（${limit}）を過ぎても未実施です`;
     if (await hasNotificationFor(db, 'maintenance_plan', p.id, 'plan_overdue', body)) continue;
     // waitUntil は渡さない（この関数自体が既に notifications GET の waitUntil 配下で動く

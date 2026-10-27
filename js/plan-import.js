@@ -58,7 +58,9 @@ function parseCSV(text) {
   });
 }
 
+// year: 予定日の年。数値か、月（1〜12）→年 の関数（年間計画表は会計年度表示のため10〜12月と1〜9月で年が違う）
 export function renderPlanImport(year, onDone) {
+  const yearOf = typeof year === 'function' ? year : () => year;
   let csvHeaders = [];
   let csvRows = [];
   const mapping = {};      // fieldKey -> 列インデックス(文字列) または ''
@@ -129,12 +131,12 @@ export function renderPlanImport(year, onDone) {
         const idx = monthCols[m];
         if (idx === undefined) continue;
         if (String(row[idx] || '').trim()) {
-          items.push({ ...common, planned_date: `${year}-${mm(m)}-01` });
+          items.push({ ...common, planned_date: `${yearOf(m)}-${mm(m)}-01` });
           added++;
         }
       }
       if (unschedCol >= 0 && String(row[unschedCol] || '').trim()) {
-        items.push({ ...common, planned_date: `${year}-01-01`, unscheduled: 1 });
+        items.push({ ...common, planned_date: `${yearOf(1)}-01-01`, unscheduled: 1 });
         added++;
       }
       if (added === 0) noMonthRows.push(ri + 2); // ヘッダー行ぶん +1、1始まり +1

@@ -823,17 +823,30 @@ if (annPrev) {
 const editorEmail = 'e2e-editor@example.com';
 const mkEditor = await api('/api/admin/users', { method: 'POST', body: { email: editorEmail, name: 'E2E入力者', role: 'editor' } });
 check('権限: 入力可ユーザーを作成（201/409）', mkEditor.status === 201 || mkEditor.status === 409, `status=${mkEditor.status}`);
-const resetByEditor = await apiAs(editorEmail, '/api/plans/annual-reset', { method: 'POST', body: { fiscal_year: 2099 } });
+const resetByEditor = await apiAs(editorEmail, '/api/plans/annual-reset', { method: 'POST', body: {} });
 check('権限: 年度リセットは入力可では403', resetByEditor.status === 403, `status=${resetByEditor.status}`);
 const replaceByEditor = await apiAs(editorEmail, '/api/parts/import', { method: 'POST', body: { mode: 'replace', rows: [{ name: 'E2E置換テスト' }] } });
 check('権限: 部品CSVの全置き換えは入力可では403', replaceByEditor.status === 403, `status=${replaceByEditor.status}`);
 const mergeByEditor = await apiAs(editorEmail, '/api/parts/import', { method: 'POST', body: { mode: 'merge', rows: [{ name: 'E2E入力者マージ部品' }] } });
 check('権限: 部品CSVの差分マージは入力可でも実行できる', mergeByEditor.status === 200, `status=${mergeByEditor.status}`);
 
-// 年度リセット（admin）: 監査ログに戻した予定のIDと変更前の状態が残る
+// 年度リセット（admin）: 締める年度はサーバーが決める（最後にリセットした年度＋1。履歴なしの10〜12月は前年度）。
+// 締める年度の9月より前は409（実行できる時期は日付しだいのため、API の reset_available に合わせて確認する。
+// 時計を動かした網羅的な確認は tests/unit-overdue.mjs）
+const annMeta = (await api('/api/plans?annual_only=1')).json || {};
+check('年間計画API: 今年度・締める年度を返す',
+  Number.isInteger(annMeta.fiscal_year) && Number.isInteger(annMeta.reset_target_fy) && typeof annMeta.reset_available === 'boolean',
+  JSON.stringify({ fy: annMeta.fiscal_year, target: annMeta.reset_target_fy, avail: annMeta.reset_available }));
+const resetStale = await api('/api/plans/annual-reset', { method: 'POST', body: { fiscal_year: annMeta.reset_target_fy + 1 } });
+check('年度リセット: 締める年度と違う年度を指定すると409', resetStale.status === 409, `status=${resetStale.status}`);
 if (annCur.json?.id) await api(`/api/plans/${annCur.json.id}`, { method: 'PUT', body: { status: 'done' } });
-const resetRes = await api('/api/plans/annual-reset', { method: 'POST', body: { fiscal_year: 2098, force: true } });
-check('年度リセット: 管理者は実行できる（200）', resetRes.status === 200, `status=${resetRes.status} ${JSON.stringify(resetRes.json)}`);
+const resetRes = await api('/api/plans/annual-reset', { method: 'POST', body: { fiscal_year: annMeta.reset_target_fy } });
+if (!annMeta.reset_available) {
+  check('年度リセット: 締める年度の9月より前は409', resetRes.status === 409, `status=${resetRes.status}`);
+} else {
+check('年度リセット: 管理者は実行できる（200）', resetRes.status === 200 && resetRes.json?.fiscal_year === annMeta.reset_target_fy, `status=${resetRes.status} ${JSON.stringify(resetRes.json)}`);
+const resetAgain = await api('/api/plans/annual-reset', { method: 'POST', body: {} });
+check('年度リセット: 直後のもう一度は409（始まったばかりの年度を締めない）', resetAgain.status === 409, `status=${resetAgain.status}`);
 const resetAudit = await api('/api/admin/audit?table=maintenance_plan&limit=50');
 const resetEntry = (resetAudit.json?.logs || resetAudit.json?.entries || []).find((l) => String(l.record_id) === 'annual_reset');
 const resetDiff = (() => { try { return typeof resetEntry?.diff_json === 'string' ? JSON.parse(resetEntry.diff_json) : (resetEntry?.diff_json || resetEntry?.diff); } catch { return null; } })();
@@ -843,6 +856,7 @@ check('年度リセット: 監査ログに戻した予定と変更前の状態�
 const annAfter = ((await api('/api/plans?annual_only=1')).json?.plans || []);
 check('年度リセット: リセット直後に過去年の今月分が期限超過にならない',
   annAfter.find((p) => p.id === annCur.json?.id)?.status === 'pending');
+}
 for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 
 // ---------- 8. カスタムグラフ ----------
@@ -1814,6 +1828,41 @@ check('年間計画表: 点検実績の取得に失敗しても表は表示さ�
   await page.evaluate(() => document.querySelector('#app')?.innerText.slice(0, 200)));
 await page.evaluate(() => sessionStorage.removeItem('e2eFailInspections'));
 check('年間計画表: pageerror が出ない', pageErrors.length === annErrBefore, pageErrors.slice(annErrBefore).join(' / '));
+
+// 年間計画表は会計年度（10月〜翌9月）で表示し、既定は API の今年度（最後にリセットした年度＋1）
+const annFy = (await api('/api/plans?annual_only=1')).json?.fiscal_year;
+const annDoneP = await api('/api/plans', { method: 'POST', body: { title: 'E2E年度表示', plan_type: 'other', planned_date: '2020-11-01', annual_only: 1 } });
+await api(`/api/plans/${annDoneP.json?.id}`, { method: 'PUT', body: { status: 'done' } });
+await page.goto(`${BASE}/pages/plan-annual`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(500);
+await page.click('.annual-view-toggle button:has-text("全月")');
+await page.waitForTimeout(300);
+const fyView = await page.evaluate(() => ({
+  label: document.querySelector('.annual-fy-label')?.textContent || '',
+  heads: [...document.querySelectorAll('.annual-grid thead th')].slice(2).map((th) => th.textContent),
+  bulk: !!document.querySelector('.annual-month-grid'),
+}));
+check('年間計画表: 今年度を会計年度で表示（FY◯◯◯◯（YYYY/10〜YYYY/09）（今年度））',
+  fyView.label === `FY${annFy}（${annFy}/10〜${annFy + 1}/09）（今年度）`, fyView.label);
+check('年間計画表: 列は10月〜翌9月', fyView.heads.length === 12 && fyView.heads[0] === `${annFy}年10月` && fyView.heads[3] === `${annFy + 1}年1月` && fyView.heads[11] === '9月',
+  fyView.heads.join(','));
+const doneMarkCur = await page.evaluate(() => [...document.querySelectorAll('.annual-grid tbody tr')]
+  .find((tr) => tr.textContent.includes('E2E年度表示'))?.querySelector('.annual-mark.is-done') != null);
+check('年間計画表: 今年度は完了状態（✓）を表示', doneMarkCur);
+// 前の年度: 完了状態を出さず、編集もできない（今年度の完了状態を別の年度に見せない）
+await page.click('.cal-nav button[title="前の年度"]');
+await page.waitForTimeout(600);
+const prevView = await page.evaluate(() => ({
+  label: document.querySelector('.annual-fy-label')?.textContent || '',
+  notice: document.querySelector('.annual-fy-notice')?.textContent || '',
+  done: [...document.querySelectorAll('.annual-grid tbody tr')].find((tr) => tr.textContent.includes('E2E年度表示'))?.querySelector('.annual-mark.is-done') != null,
+  bulk: !!document.querySelector('.annual-month-grid'),
+  addBtn: !!document.querySelector('.annual-add'),
+}));
+check('年間計画表: 前の年度は「過去の年度」の案内を出し、完了状態・編集を出さない',
+  prevView.label.startsWith(`FY${annFy - 1}（`) && prevView.notice.includes('過去の年度') && !prevView.done && !prevView.bulk && !prevView.addBtn,
+  JSON.stringify(prevView));
+await api(`/api/plans/${annDoneP.json?.id}`, { method: 'DELETE' });
 
 // 電気設備点検: 保存を連打しても同じ日の記録は1件（サーバー先行の保存のため、送信中の2回目で2件できていた）
 await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
