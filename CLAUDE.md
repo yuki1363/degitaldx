@@ -179,7 +179,7 @@
 - **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
 - **既読数・👍・📌はライブ更新**: `GET /api/chat` が直近20件の meta（既読数・リアクション）と pinned 一覧を返し、5秒ポーリングでリロードなしに反映される
 - **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）
-- **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?body=`）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
+- **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?new=1&body=`。日報は `new=1` が無いと一覧が開き本文が引き継がれない）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
 - **申し送りテンプレート**: 定型文（【引き継ぎ】【対応中】【要確認】【完了報告】【部品発注】）をタップで入力欄へ挿入（現場スマホの入力を軽く・書き方を統一。`js/chat.js` の `HANDOFF_TEMPLATES`）
 - **個人情報の入力防止**:
   - 入力欄に注意書きを常設（「氏名・電話番号・住所等の個人情報は入力しないでください」）

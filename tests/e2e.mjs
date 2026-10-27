@@ -772,6 +772,17 @@ const tplValue = await page.evaluate(() => {
   return document.querySelector('#chat-form textarea')?.value ?? null;
 });
 check('チャット: 申し送りテンプレートが入力欄に挿入される', !!tplValue && tplValue.includes('【'), `value=${tplValue}`);
+// 日報への記録化: new=1 が無いと日報ページは一覧を開き、本文が引き継がれない（回帰防止）
+const reportHref = await page.evaluate(() =>
+  [...document.querySelectorAll('.chat-record-actions a')]
+    .map((x) => x.getAttribute('href')).find((h) => h && h.startsWith('/pages/report?')) || null);
+check('チャット: 日報への記録化リンクに new=1 が付く', !!reportHref && new URLSearchParams(reportHref.split('?')[1]).get('new') === '1', `href=${reportHref}`);
+if (reportHref) {
+  await page.goto(`${BASE}${reportHref}`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some((t) => t.value.includes('E2Eチャットテスト')), { timeout: 8000 }).catch(() => {});
+  check('チャット: 日報の作成画面に本文が引き継がれる',
+    await page.evaluate(() => [...document.querySelectorAll('textarea')].some((t) => t.value.includes('E2Eチャットテスト'))));
+}
 
 // 👍確認リアクション（トグル）と meta 反映
 const chatMsgId = chatPost.json?.id;
