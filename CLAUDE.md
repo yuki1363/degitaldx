@@ -327,7 +327,7 @@
 - **一覧APIの `limit` は下限1・上限ありで丸める**（`Math.min(Math.max(1, Math.trunc(Number(v)) || 既定), 上限)`。`limit=-1` が `LIMIT -1`＝無制限になり、全件読み取りで D1 の読み取り枠を消費されるのを防ぐ）
 - **権限チェックはサーバー側（Functions）で必ず実施**。フロントの出し分けはUX目的のみ
 - **複数の書き込みを伴う処理は D1 の batch（1トランザクション）で行う**（途中で失敗しても一部だけ残らない）。監査ログも同じ batch に入れる（`functions/api/_lib/audit.js` の `auditStatement`。INSERT 直後の監査は `recordId: LAST_INSERT_ID`＝`last_insert_rowid()`）。対象: 予定の一括登録（`plans/batch.js`）・1日削除/1日完了（`plans/[id]/delete-day.js`・`complete-day.js`。未マイグレーション列は `runPlanBatch` が外して batch ごと再試行）・点検まとめ入力（`inspections/batch.js`）・設備番号の振り直し（`equipment/renumber.js`）・部品の入出庫と履歴（`parts/[id]/transaction.js`。在庫不足時は `WHERE changes() = 1` で履歴も作らない。棚卸調整の増減は書き込む瞬間の在庫から計算）
-- **期間予定の分割（1日削除・1日完了）は同時操作を 409 で止める**（`claimPlanForSplit`＝読んだ時点の updated_at が変わっていなければ確保。2回押しで完了済みの単日レコードが2件できるのを防ぐ）。分割した予定には工事連絡書の印刷日（`printed_at`/`printed_by`）も引き継ぐ
+- **期間予定の分割（1日削除・1日完了）は同時操作を 409 で止める**（batch の先頭を `guardedPlanUpdate`＝読んだ時点の日程・状態のままのときだけ元の予定を書き換える条件付き UPDATE にし、後続の INSERT・監査は `ifPrevChanged`（`WHERE changes() = 1`）で連鎖させる。競合した側は何も作らない。2回押しで完了済みの単日レコードが2件できるのを防ぐ。updated_at は秒精度で同じ秒の2回押しを区別できないため使わない）。分割した予定には工事連絡書の印刷日（`printed_at`/`printed_by`）も引き継ぐ
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
 ### AI機能（Workers AI）の出し分け
 - テキスト系AI（トラブルの原因・対策提案など）は `env.AI` 未構成なら `/api/me` の `ai_enabled:false` でボタンを出さない
