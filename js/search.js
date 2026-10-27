@@ -75,15 +75,25 @@ async function doSearch(params, resultsBox) {
     if (params.equipment_id) sp.set('equipment_id', params.equipment_id);
     if (params.category_id)  sp.set('category_id', params.category_id);
 
-    const { results, count, keywords, version } = await api.get(`/api/search?${sp}`);
+    const { results, count, keywords, version, ignored_keywords, partial_failure } = await api.get(`/api/search?${sp}`);
     currentResults = results || [];
     const verText = version ? `　［${version}］` : '';
+    // キーワードが多すぎて一部の種別で使えなかった語・検索に失敗した種別を知らせる（黙って結果が減らないように）
+    const notices = [];
+    if (ignored_keywords?.length) {
+      notices.push(`キーワードが多いため、一部の種別では「${ignored_keywords.join('」「')}」を条件から外して検索しました。語を減らすと正確に絞り込めます。`);
+    }
+    if (partial_failure) notices.push('⚠ 一部の種別の検索に失敗したため、結果が欠けている可能性があります。時間をおいて再度お試しください。');
+    const noticeEls = notices.map((t) => el('p', { class: 'search-notice', style: 'font-size:13px;color:#b45309;margin:0 0 8px' }, t));
 
     if (count === 0) {
-      render(resultsBox, el('p', { class: 'empty' }, (params.q
-        ? `「${params.q}」に一致するデータは見つかりませんでした。`
-        : '条件に一致するデータがありません。') + verText
-      ));
+      render(resultsBox, [
+        ...noticeEls,
+        el('p', { class: 'empty' }, (params.q
+          ? `「${params.q}」に一致するデータは見つかりませんでした。`
+          : '条件に一致するデータがありません。') + verText
+        ),
+      ]);
       return;
     }
 
@@ -105,6 +115,7 @@ async function doSearch(params, resultsBox) {
     };
 
     render(resultsBox, [
+      ...noticeEls,
       el('div', { class: 'search-result-header', style: 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:4px 0 12px' }, [
         el('p', { style: 'font-size:13px;color:#64748b;margin:0' },
           `${count}件ヒット${keywords.length ? '（キーワード: ' + keywords.join('、') + '）' : ''}${verText}`

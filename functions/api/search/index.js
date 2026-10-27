@@ -9,24 +9,45 @@ import { json } from '../_lib/http.js';
 import { APP_VERSION } from '../me.js';
 // あいまい検索（表記ゆれ吸収）のロジックは _lib/fuzzy.js に集約し、
 // トラブル類似検索・部品検索と共有する。ここでは複数キーワードのAND検索として使う。
-import { buildKeywordClauses } from '../_lib/fuzzy.js';
+import { buildKeywordClauses, fitKeywords } from '../_lib/fuzzy.js';
 
 
 // 拡張列（後付けのALTER列を含む）で検索し、列が無い旧DBでは基本列のみで再試行する。
 //   run(cols) は rows 配列を返す関数。検索全体を止めないための保険。
-//   拡張列で失敗したら基本列で再試行する。基本列は常に存在する列なので、それでも失敗する
-//   なら本物の障害としてそのまま投げる（＝onRequestGet が500にする）。base が成功すれば
-//   結果が返るので、未マイグレーション環境でも検索が丸ごと落ちない。
+//   拡張列で失敗したら基本列で再試行する。基本列は常に存在する列のため、エラー種別で絞らず
+//   必ず再試行する方が堅牢。
 //   ※ D1 のエラーは詳細が err.cause 側に入ることがあり、err.message だけを「no such column」で
 //     判定すると本番でフォールバックが効かず検索全体が失敗した（設備名でヒットしない不具合）。
-//     基本列は安全に実行できるため、エラー種別で絞らず必ず再試行する方が堅牢。
-async function searchWithFallback(run, extendedCols, baseCols) {
-  try {
-    return await run(extendedCols);
-  } catch (err) {
-    console.warn('search: 拡張列で失敗したため基本列で再試行します:', String((err && err.message) || err));
-    return await run(baseCols);
+//   基本列でも失敗したら、その種別だけ空にして ctx.failed を数える（1種別の障害で横断検索
+//   全体を500にしない。画面には「一部の種別の検索に失敗」と出す）。
+//   bind上限のため拡張列ではキーワードを削る必要があり、基本列なら削らずに済む場合は
+//   基本列を優先する（利用者が入力した語を捨てるより、検索列を減らす方が結果のずれが小さい）。
+async function searchWithFallback(ctx, run, extendedCols, baseCols) {
+  const { keywords } = ctx;
+  const useBaseFirst = fitKeywords(keywords, extendedCols.length).length < fitKeywords(keywords, baseCols.length).length;
+  const attempts = useBaseFirst ? [baseCols] : [extendedCols, baseCols];
+  for (const cols of attempts) {
+    try {
+      const rows = await run(cols);
+      markIgnored(ctx, cols.length);
+      return rows;
+    } catch (err) {
+      const msg = String((err && err.message) || err);
+      if (cols === baseCols) {
+        console.error('search: 基本列でも失敗したためこの種別をスキップします:', msg);
+        ctx.failed++;
+        return [];
+      }
+      console.warn('search: 拡張列で失敗したため基本列で再試行します:', msg);
+    }
   }
+  return [];
+}
+
+// bind上限で検索に使えなかったキーワードを記録する（画面に「無視したキーワード」として出す）
+function markIgnored(ctx, colCount) {
+  const kept = fitKeywords(ctx.keywords, colCount);
+  for (const kw of ctx.keywords) if (!kept.includes(kw)) ctx.ignored.add(kw);
 }
 
 // 設備名の表示用SQL式: line_name（設備名）+ equipment_name（機器名）を優先し、
@@ -55,12 +76,14 @@ export async function onRequestGet({ request, env }) {
   const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan', 'utility'];
 
   const results = [];
+  // ignored: bind上限のため一部の種別で使えなかったキーワード／failed: 検索に失敗した種別の数
+  const ctx = { keywords, ignored: new Set(), failed: 0 };
 
   // ---------- トラブル記録 ----------
   if (types.includes('trouble')) {
     // 拡張列: 記録者名・帳票入力（処置・トラブル名等のJSON）・カスタム項目値も検索対象にする
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       let sql = `
         SELECT
           t.id, t.occurred_at AS date_val, t.phenomenon AS title,
@@ -81,7 +104,7 @@ export async function onRequestGet({ request, env }) {
       sql += ` ORDER BY t.occurred_at DESC LIMIT ${limit}`;
       return (await db.prepare(sql).bind(...binds).all()).results;
     };
-    const rows = await searchWithFallback(
+    const rows = await searchWithFallback(ctx,
       run,
       ['t.phenomenon', 't.cause', 't.countermeasure', 't.reporter_name', 't.form_values_json', 't.custom_fields_json', 'e.name', 'e.code', 'e.line_name', 'e.equipment_name'],
       ['t.phenomenon', 't.cause', 't.countermeasure', 'e.name', 'e.code', 'e.line_name', 'e.equipment_name']
@@ -104,7 +127,7 @@ export async function onRequestGet({ request, env }) {
   if (types.includes('repair')) {
     // 拡張列: 担当者名も検索対象にする
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       let sql = `
         SELECT
           r.id, r.created_at AS date_val, r.title, r.status,
@@ -121,7 +144,7 @@ export async function onRequestGet({ request, env }) {
       sql += ` ORDER BY r.created_at DESC LIMIT ${limit}`;
       return (await db.prepare(sql).bind(...binds).all()).results;
     };
-    const rows = await searchWithFallback(run,
+    const rows = await searchWithFallback(ctx, run,
       ['r.title', 'r.description', 'r.assignee_name', 'e.name', 'e.code', 'e.line_name', 'e.equipment_name'],
       ['r.title', 'r.description', 'e.name', 'e.code', 'e.line_name', 'e.equipment_name']);
     const STATUS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
@@ -143,7 +166,7 @@ export async function onRequestGet({ request, env }) {
   if (types.includes('report')) {
     // 拡張列: 入力者名（自由入力）も検索対象にする
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       let sql = `
         SELECT
           dr.id, dr.report_date AS date_val, dr.body,
@@ -163,7 +186,7 @@ export async function onRequestGet({ request, env }) {
       sql += ` ORDER BY dr.report_date DESC LIMIT ${limit}`;
       return (await db.prepare(sql).bind(...binds).all()).results;
     };
-    const rows = await searchWithFallback(run, ['dr.body', 'dr.reporter_name'], ['dr.body']);
+    const rows = await searchWithFallback(ctx, run, ['dr.body', 'dr.reporter_name'], ['dr.body']);
     for (const r of rows ?? []) {
       results.push({
         type:           'report',
@@ -182,7 +205,7 @@ export async function onRequestGet({ request, env }) {
   if (types.includes('inspection')) {
     // 拡張列: 点検項目の値（items_json・自由記述など）と担当者名も検索対象にする
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       let sql = `
         SELECT
           ir.id, ir.inspected_at AS date_val, ir.has_abnormal,
@@ -204,7 +227,7 @@ export async function onRequestGet({ request, env }) {
     if (!keywords.length && !from && !to && !equipId) {
       // no-op: skip
     } else {
-      const rows = await searchWithFallback(run,
+      const rows = await searchWithFallback(ctx, run,
         ['ir.note', 'ir.items_json', 'ir.assignee_name', 'e.name', 'e.code', 'e.line_name', 'e.equipment_name'],
         ['ir.note', 'e.name', 'e.code', 'e.line_name', 'e.equipment_name']);
       for (const r of rows ?? []) {
@@ -227,7 +250,7 @@ export async function onRequestGet({ request, env }) {
     // 設備名は name のほか line_name（設備名）/ equipment_name（機器名）に分かれて
     // 入っていることがある（機器名が name に無い設備がある）。それらも検索・表示に使う。
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       const extra = cols.includes('line_name') ? ', line_name, equipment_name' : '';
       let sql = `SELECT id, code, name, location, manufacturer, model, status${extra}
         FROM equipment_ledger WHERE deleted_at IS NULL`;
@@ -239,7 +262,7 @@ export async function onRequestGet({ request, env }) {
     };
     // キーワードなし・設備IDなしは全件になるのでスキップ
     if (keywords.length || equipId) {
-      const rows = await searchWithFallback(run,
+      const rows = await searchWithFallback(ctx, run,
         ['name', 'code', 'manufacturer', 'model', 'note', 'line_name', 'equipment_name'],
         ['name', 'code', 'manufacturer', 'model', 'note']);
       const STATUS = { active: '稼働中', stopped: '停止中', retired: '廃棄' };
@@ -262,7 +285,7 @@ export async function onRequestGet({ request, env }) {
   // ---------- 部品在庫 ----------
   if (types.includes('parts')) {
     const cols = ['name', 'model_no', 'line_name', 'equipment_name', 'location', 'supplier', 'note'];
-    const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+    const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
     // 全件は多すぎるため、キーワードがあるときだけ検索する
     if (keywords.length) {
       let sql = `
@@ -273,8 +296,15 @@ export async function onRequestGet({ request, env }) {
       const binds = [...kwBinds];
       if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
       sql += ` ORDER BY name LIMIT ${limit}`;
-      const { results: rows } = await db.prepare(sql).bind(...binds).all();
-      for (const r of rows ?? []) {
+      let rows = [];
+      try {
+        rows = (await db.prepare(sql).bind(...binds).all()).results ?? [];
+        markIgnored(ctx, cols.length);
+      } catch (err) {
+        console.error('search: 部品在庫の検索をスキップしました:', String((err && err.message) || err));
+        ctx.failed++;
+      }
+      for (const r of rows) {
         const equip = [r.line_name, r.equipment_name].filter(Boolean).join(' / ');
         results.push({
           type:           'parts',
@@ -295,7 +325,7 @@ export async function onRequestGet({ request, env }) {
     const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
     // 拡張列: 担当者・点検者も検索対象にする
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       let sql = `
         SELECT id, title, plan_type, planned_date, line_name, equipment_name, note, status
         FROM maintenance_plan
@@ -310,7 +340,7 @@ export async function onRequestGet({ request, env }) {
     };
     // キーワードも期間もなければ全件になるのでスキップ
     if (keywords.length || from || to) {
-      const rows = await searchWithFallback(run,
+      const rows = await searchWithFallback(ctx, run,
         ['title', 'note', 'line_name', 'equipment_name', 'assignee_name', 'inspector_name'],
         ['title', 'note', 'line_name', 'equipment_name']);
       for (const r of rows ?? []) {
@@ -334,7 +364,7 @@ export async function onRequestGet({ request, env }) {
     // 拡張列: 点検値のスナップショット（values_json）・入力者名も検索対象にする。
     // 設備・ジャンルの絞り込みは持たない記録のため適用しない（日報と同じ扱い）。
     const run = async (cols) => {
-      const { clauses, binds: kwBinds } = buildKeywordClauses(keywords, cols);
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
       let sql = `
         SELECT id, report_date, reporter_name, has_abnormal, note, values_json
         FROM utility_report
@@ -350,7 +380,7 @@ export async function onRequestGet({ request, env }) {
     // テーブルが無い（未マイグレーションの）環境でも検索全体を止めない
     let rows = [];
     try {
-      rows = await searchWithFallback(run, ['values_json', 'note', 'reporter_name'], ['note']) ?? [];
+      rows = await searchWithFallback(ctx, run, ['values_json', 'note', 'reporter_name'], ['note']) ?? [];
     } catch (err) {
       console.warn('search: ユーティリティ日報の検索をスキップしました:', String((err && err.message) || err));
     }
@@ -401,5 +431,9 @@ export async function onRequestGet({ request, env }) {
         WHERE ir.deleted_at IS NULL ORDER BY ir.id DESC LIMIT 10`).all());
     debug = { keyword: kw, byType, equipment_with_keyword: eqHits, recent_inspections: inspSample };
   }
-  return json({ results, count: results.length, keywords, version: APP_VERSION, debug });
+  return json({
+    results, count: results.length, keywords, version: APP_VERSION, debug,
+    ignored_keywords: [...ctx.ignored],
+    partial_failure:  ctx.failed > 0,
+  });
 }

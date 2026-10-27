@@ -163,6 +163,23 @@ check('正規化: 保存時に半角カナ→全角カナ', eqNormGet.json?.equi
 // 一括正規化API（admin）が動く
 const normRes = await api('/api/admin/normalize', { method: 'POST', body: {} });
 check('一括正規化API（200・ok）', normRes.status === 200 && normRes.json?.ok === true, `status=${normRes.status}`);
+// D1 の bind 上限（100）対策: 長音付きカタカナを多く入れても検索全体が失敗せず、
+// 上限に収まらない語はその種別でだけ条件から外して ignored_keywords で知らせる
+// （ローカルの SQLite は上限が大きく失敗は再現しないため、語が外れて先頭語でヒットすることで確認する）
+// 全語を含むトラブルを用意し、語を外しても（残った語の AND で）ヒットすることを確認する
+await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: 'E2E多語 コンプレッサー モーター フィルター ポンプ' } });
+const manyKw = 'E2E多語 コンプレッサー モーター フィルター ポンプ';
+const sMany = await api(`/api/search?q=${encodeURIComponent(manyKw)}`);
+check('横断検索: 長音カタカナ多語でも200', sMany.status === 200, `status=${sMany.status}`);
+check('横断検索: 上限に入らない語を外してもトラブルがヒット', (sMany.json?.results || []).some((r) => r.type === 'trouble'));
+const manyIgnored = sMany.json?.ignored_keywords || [];
+check('横断検索: 外した語を ignored_keywords で返す', manyIgnored.length > 0 && manyIgnored.every((k) => manyKw.split(' ').includes(k)),
+  JSON.stringify(manyIgnored));
+check('横断検索: 少語では ignored_keywords が空', (s1.json?.ignored_keywords || []).length === 0);
+await page.goto(`${BASE}/pages/search?q=${encodeURIComponent(manyKw)}`, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => !!document.querySelector('.search-notice'), { timeout: 10000 }).catch(() => {});
+check('横断検索: 外した語の注意書きが画面に出る',
+  await page.evaluate((kw) => !!kw && (document.querySelector('.search-notice')?.textContent || '').includes(kw), manyIgnored[0]));
 // 検索結果画面にCSV出力ボタンが出る（ダッシュボードの抽出レポートから集約した機能）
 await page.goto(`${BASE}/pages/search?q=${encodeURIComponent('フィルム機')}`, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!document.querySelector('.search-result-header button'), { timeout: 10000 }).catch(() => {});

@@ -55,6 +55,27 @@ export function keywordVariants(kw) {
   return [...set].filter(Boolean).slice(0, 8); // バリアント数の上限（bind数の暴発防止。単一KWで8×最大10列=80 < D1上限100）
 }
 
+// D1 の1クエリあたりの bind 上限
+export const D1_MAX_BINDS = 100;
+
+// bind数（列数 × 各キーワードのバリアント数の合計）が D1 の上限に収まるキーワードだけを残す。
+//   長音付きカタカナは1語で最大6バリアントに増えるため、列の多い検索に何語も入れると上限を超えて
+//   クエリ自体が失敗する（例: 10列 ×「コンプレッサー モーター フィルター」= 180）。
+//   reserve は期間・設備・ジャンル等、キーワード以外の bind 用の余白。
+//   入らない語は飛ばし、後ろの短い語は入るなら残す。先頭語は必ず残す（8バリアント×10列=80で必ず収まる）。
+export function fitKeywords(keywords, colCount, reserve = 4) {
+  const budget = D1_MAX_BINDS - reserve;
+  const kept = [];
+  let used = 0;
+  for (const kw of keywords) {
+    const n = keywordVariants(kw).length * colCount;
+    if (kept.length && used + n > budget) continue;
+    kept.push(kw);
+    used += n;
+  }
+  return kept;
+}
+
 // 1キーワードぶんの LIKE 条件（全列 × 全バリアントの OR）
 export function likeOr(cols, variantCount) {
   const parts = [];
