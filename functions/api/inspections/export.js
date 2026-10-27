@@ -7,6 +7,8 @@
 import { json } from '../_lib/http.js';
 import { jstDayStartUtc, jstNextDayStartUtc } from '../_lib/util.js';
 
+const EXPORT_LIMIT = 1000; // 1回の出力件数の上限（D1 の応答サイズ・処理時間を抑える）
+
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const conditions = ['r.deleted_at IS NULL'];
@@ -38,17 +40,19 @@ export async function onRequestGet({ request, env }) {
        JOIN equipment_ledger e ON e.id = r.equipment_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY r.inspected_at ASC, r.id ASC
-      LIMIT 1000`
+      LIMIT ${EXPORT_LIMIT + 1}`
   )
     .bind(...binds)
     .all();
 
-  const inspections = (results ?? []).map((r) => {
+  // 上限を超えた分は返さないが、黙って欠けないよう truncated で知らせる（画面が期間を絞るよう案内する）
+  const truncated = (results ?? []).length > EXPORT_LIMIT;
+  const inspections = (results ?? []).slice(0, EXPORT_LIMIT).map((r) => {
     let items = [];
     try { items = JSON.parse(r.items_json) || []; } catch { items = []; }
     const { items_json, ...rest } = r;
     return { ...rest, items };
   });
 
-  return json({ inspections });
+  return json({ inspections, truncated, limit: EXPORT_LIMIT });
 }

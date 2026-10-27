@@ -1,3 +1,4 @@
+import { requireRole } from '../_lib/auth.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { textModel, aiResponseText } from '../_lib/ai-models.js';
 import { buildPageContext } from '../_lib/ai-context.js';
@@ -20,6 +21,10 @@ const SYSTEM_PROMPT = `あなたは工場の設備保全業務を支援するア
 
 export async function onRequestPost({ request, env, data }) {
   if (!data.user) return jsonError(401, '認証が必要です');
+  // Workers AI の無料枠（ニューロン）を消費するため、ほかの AI 機能（suggest-trouble）と同じく
+  // 入力可（editor）以上に限る。閲覧のみのユーザーが直接呼んで枠を使い切れないように（CLAUDE.md）
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
 
   const ai = env.AI;
   if (!ai) {
@@ -51,7 +56,8 @@ ${pageContext}
   const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...history.map((h) => ({ role: h.role === 'ai' ? 'assistant' : 'user', content: String(h.content || '') })),
+    // 履歴の各発言も1000文字で切る（長文の履歴を付けて連続で呼ばれ、無料枠を使い切られないように）
+    ...history.map((h) => ({ role: h.role === 'ai' ? 'assistant' : 'user', content: String(h.content || '').slice(0, 1000) })),
     { role: 'user', content: userMessage },
   ];
 

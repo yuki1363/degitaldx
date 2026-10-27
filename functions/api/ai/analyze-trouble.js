@@ -1,3 +1,4 @@
+import { requireRole } from '../_lib/auth.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { textModel, aiResponseText, extractAiJson } from '../_lib/ai-models.js';
 
@@ -5,14 +6,19 @@ import { textModel, aiResponseText, extractAiJson } from '../_lib/ai-models.js';
 //   出力: 根本原因の推定 / 再発防止策 / 確認ポイント / 類似事例からの教訓
 export async function onRequestPost({ request, env, data }) {
   if (!data.user) return jsonError(401, '認証が必要です');
+  // Workers AI の無料枠（ニューロン）を消費するため、ほかの AI 機能（suggest-trouble）と同じく
+  // 入力可（editor）以上に限る。閲覧のみのユーザーが直接呼んで枠を使い切れないように（CLAUDE.md）
+  const denied = requireRole(data.user, 'editor');
+  if (denied) return denied;
   if (!env.AI) return jsonError(503, 'AI サービスが利用できません');
 
   const body = await readJson(request);
-  const phenomenon = (body?.phenomenon || '').trim();
-  const cause = (body?.cause || '').trim();
-  const countermeasure = (body?.countermeasure || '').trim();
-  const equipmentName = (body?.equipment_name || '').trim();
-  const categoryName = (body?.category_name || '').trim();
+  // 入力はプロンプトに入るため長さを制限する（無料枠の浪費・暴走防止。pdf_text と同じ考え方）
+  const phenomenon = String(body?.phenomenon || '').trim().slice(0, 1000);
+  const cause = String(body?.cause || '').trim().slice(0, 1000);
+  const countermeasure = String(body?.countermeasure || '').trim().slice(0, 1000);
+  const equipmentName = String(body?.equipment_name || '').trim().slice(0, 100);
+  const categoryName = String(body?.category_name || '').trim().slice(0, 100);
   const pdfText = (body?.pdf_text || '').trim().slice(0, 5000);
 
   if (!phenomenon && !pdfText) {

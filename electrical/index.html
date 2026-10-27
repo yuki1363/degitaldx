@@ -335,10 +335,16 @@ async function loadServerData() {
     const buckets = { main:{}, battery:{}, generator:{} };
     for (const id in records) { const r=records[id]; const t=(r&&r.equipmentType)||'main'; if (buckets[t]) buckets[t][id]=r; }
     Object.entries(REC_KEYS_ALL).forEach(([eq,key]) => { try { localStorage.setItem(key, JSON.stringify(buckets[eq])); } catch(e){} });
+    const unsynced = await resendUnsyncedSettings(); // 前回送れなかった設定・既定を先に再送する
     const cfg = await api('/electrical-config');
     ['main','battery','generator'].forEach(eq => { try {
-      if (cfg && cfg[eq]) localStorage.setItem(CFG_KEYS_ALL[eq], JSON.stringify(cfg[eq])); else localStorage.removeItem(CFG_KEYS_ALL[eq]);
-      if (cfg && cfg.defaults && cfg.defaults[eq]) localStorage.setItem(DEF_KEYS_ALL[eq], JSON.stringify(cfg.defaults[eq])); else localStorage.removeItem(DEF_KEYS_ALL[eq]);
+      // 再送したもの（＝この端末の内容が最新）は D1 の内容で上書きしない（再送がまた失敗しても消えないように）
+      if (!unsynced['config_' + eq]) {
+        if (cfg && cfg[eq]) localStorage.setItem(CFG_KEYS_ALL[eq], JSON.stringify(cfg[eq])); else localStorage.removeItem(CFG_KEYS_ALL[eq]);
+      }
+      if (!unsynced['default_' + eq]) {
+        if (cfg && cfg.defaults && cfg.defaults[eq]) localStorage.setItem(DEF_KEYS_ALL[eq], JSON.stringify(cfg.defaults[eq])); else localStorage.removeItem(DEF_KEYS_ALL[eq]);
+      }
     } catch(e){} });
     SERVER.online = true;
   } catch(e) { SERVER.online = false; toast('オフラインのため、この端末に保存済みのデータを表示しています'); }
@@ -414,8 +420,38 @@ async function uploadPendingPhotos() {
   }
 }
 
-function pushConfigToServer(eqType, cfg) { if (!SERVER.canEditConfig) return; api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, config: cfg }) }).catch(e => toast('設定をサーバーに保存できませんでした: '+e.message)); }
-function pushDefaultToServer(eqType, def) { if (!SERVER.canEditConfig) return; api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, default: def }) }).catch(e => toast('既定をサーバーに保存できませんでした: '+e.message)); }
+// 設定・既定は端末（localStorage）を先に更新してからサーバーへ送る（設定画面の多数の操作が同期的に
+// saveConfig を呼ぶため）。送信に失敗した分は「未送信」として端末に残し、次回起動時に D1 の内容で
+// 上書きせず再送する（以前は失敗しても次回起動時の充填で黙って消えていた）。
+const UNSYNCED_PREFIX = 'elec_unsynced_';
+function unsyncedKey(kind, eqType) { return `${UNSYNCED_PREFIX}${kind}_${eqType}`; }
+function pushSettingToServer(kind, eqType, value) {
+  if (!SERVER.canEditConfig) return Promise.resolve();
+  const key = unsyncedKey(kind, eqType);
+  return api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, [kind]: value }) })
+    .then(() => { try { localStorage.removeItem(key); } catch(e){} })
+    .catch(e => {
+      try { localStorage.setItem(key, JSON.stringify({ value })); } catch(_) {}
+      toast((kind === 'config' ? '設定' : '既定') + 'をサーバーに保存できませんでした（この端末に残し、次回起動時に再送します）: ' + e.message);
+    });
+}
+function pushConfigToServer(eqType, cfg) { return pushSettingToServer('config', eqType, cfg); }
+function pushDefaultToServer(eqType, def) { return pushSettingToServer('default', eqType, def); }
+// 起動時: 未送信の設定・既定があれば再送する。戻り値は再送を試みた {kind_eqType: true}（充填で上書きしない対象）
+async function resendUnsyncedSettings() {
+  const pending = {};
+  if (!SERVER.canEditConfig) return pending;
+  for (const kind of ['config', 'default']) {
+    for (const eq of ['main','battery','generator']) {
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(unsyncedKey(kind, eq)) || 'null'); } catch(e){}
+      if (!saved) continue;
+      pending[`${kind}_${eq}`] = true;
+      await pushSettingToServer(kind, eq, saved.value);
+    }
+  }
+  return pending;
+}
 
 function getConfig() {
   try { const c = JSON.parse(localStorage.getItem(cfgKey())); if (c) return c; } catch(e){}
