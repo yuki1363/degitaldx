@@ -1,5 +1,5 @@
 import { requireRole } from '../../_lib/auth.js';
-import { writeAuditLog } from '../../_lib/audit.js';
+import { auditStatement } from '../../_lib/audit.js';
 import { json, jsonError, readJson } from '../../_lib/http.js';
 import { nowIso } from '../../_lib/util.js';
 
@@ -56,22 +56,34 @@ export async function onRequestPost({ request, env, data }) {
   const existing = await db.prepare(`SELECT * FROM ${table} WHERE id = ? AND deleted_at IS NOT NULL`).bind(id).first();
   if (!existing) return jsonError(404, '削除済みレコードが見つかりません');
 
-  // ユーティリティ日報は「1日1件」。同じ日の記録が既にあれば復元すると2件になるため止める
+  // 復元すると重複になるものは止める（確認と復元は同じ UPDATE の条件で行い、同時操作でもすり抜けない）
+  //   ・ユーティリティ日報は「1日1件」。同じ日の記録が既にあれば復元すると2件になる
+  //   ・部品は CSV の全置き換えで同じ部品を作り直しているため、旧部品を復元すると同じ型番・部品名が
+  //     2件になる（差分マージの型番照合も1件にしか当たらなくなる）
+  let dupSql = '';
+  let dupBinds = [];
+  let dupMessage = '';
   if (table === 'utility_report') {
-    const sameDay = await db.prepare(
-      `SELECT id FROM utility_report WHERE report_date = ? AND deleted_at IS NULL AND id != ?`
-    ).bind(existing.report_date, id).first();
-    if (sameDay) {
-      return jsonError(409, `${existing.report_date} のユーティリティ日報が既にあるため復元できません（1日1件）。先にそちらを削除してください。`);
-    }
+    dupSql = `AND NOT EXISTS (SELECT 1 FROM utility_report o WHERE o.report_date = ? AND o.deleted_at IS NULL AND o.id != ?)`;
+    dupBinds = [existing.report_date, id];
+    dupMessage = `${existing.report_date} のユーティリティ日報が既にあるため復元できません（1日1件）。先にそちらを削除してください。`;
+  } else if (table === 'parts_inventory' && existing.model_no) {
+    dupSql = `AND NOT EXISTS (SELECT 1 FROM parts_inventory o WHERE o.model_no = ? AND o.name IS ? AND o.deleted_at IS NULL AND o.id != ?)`;
+    dupBinds = [existing.model_no, existing.name, id];
+    dupMessage = `同じ型番・部品名の部品（${existing.model_no} ${existing.name || ''}）が既にあるため復元できません。CSVの全置き換えで作り直された部品の可能性があります。`;
   }
 
   const now = nowIso();
   const userEmail = data.user.email;
 
-  await db.prepare(`UPDATE ${table} SET deleted_by=NULL, deleted_at=NULL, updated_by=?, updated_at=? WHERE id=?`)
-    .bind(userEmail, now, id).run();
-
-  await writeAuditLog(db, { tableName: table, recordId: id, action: 'restore', changedBy: userEmail, diff: null });
+  // 復元と監査ログを1つの batch で（監査は復元できたときだけ。2回押しの2回目は何もしない）
+  const results = await db.batch([
+    db.prepare(`UPDATE ${table} SET deleted_by=NULL, deleted_at=NULL, updated_by=?, updated_at=? WHERE id=? AND deleted_at IS NOT NULL ${dupSql}`)
+      .bind(userEmail, now, id, ...dupBinds),
+    auditStatement(db, { tableName: table, recordId: id, action: 'restore', changedBy: userEmail, diff: null }, { ifPrevChanged: true }),
+  ]);
+  if ((results[0].meta?.changes ?? 0) === 0) {
+    return jsonError(409, dupMessage || '既に復元されています。');
+  }
   return json({ ok: true });
 }

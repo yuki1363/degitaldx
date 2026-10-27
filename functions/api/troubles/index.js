@@ -1,8 +1,8 @@
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { auditStatement, LAST_INSERT_ID } from '../_lib/audit.js';
 import { notifyTeam } from '../_lib/notify.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso, jstDayStartUtc, jstNextDayStartUtc } from '../_lib/util.js';
+import { nowIso, jstDayStartUtc, jstNextDayStartUtc, normalizeUtcIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 import { ensureColumns } from '../_lib/db-compat.js';
 
@@ -16,15 +16,18 @@ export async function ensureTroubleColumns(db) {
 
 // trouble_record へ INSERT する。form_values_json 等の列が無い旧DBでは、該当列を外して再試行する
 // （未マイグレーション環境でもトラブル登録が壊れないようにする）。
-export async function insertTroubleRecord(db, cols, vals) {
+//   after: 同じ batch（1トランザクション）で INSERT の直後に実行する文（監査ログ等）。INSERT の結果を返す
+export async function insertTroubleRecord(db, cols, vals, after = []) {
   let c = [...cols];
   let v = [...vals];
   for (let attempt = 0; attempt < 4; attempt++) {
     const placeholders = c.map(() => '?').join(', ');
     try {
-      return await db.prepare(
-        `INSERT INTO trouble_record (${c.join(', ')}) VALUES (${placeholders})`
-      ).bind(...v).run();
+      const [inserted] = await db.batch([
+        db.prepare(`INSERT INTO trouble_record (${c.join(', ')}) VALUES (${placeholders})`).bind(...v),
+        ...after,
+      ]);
+      return inserted;
     } catch (err) {
       const m = /(?:has no column named|no such column):?\s*([A-Za-z_]\w*)/i.exec(String(err?.message || ''));
       const idx = m ? c.indexOf(m[1]) : -1;
@@ -91,9 +94,11 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
   await ensureTroubleColumns(db); // form_values_json 列を自動で用意（未マイグレーション対応）
   const body = await readJson(request);
 
-  const { occurred_at, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, form_values_json, file_ids, reporter_name } = body;
+  const { occurred_at: occurredRaw, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, form_values_json, file_ids, reporter_name } = body;
 
-  if (!occurred_at) return jsonError(400, 'occurred_at は必須です');
+  if (!occurredRaw) return jsonError(400, 'occurred_at は必須です');
+  const occurred_at = normalizeUtcIso(occurredRaw);
+  if (!occurred_at) return jsonError(400, 'occurred_at は日時（ISO 8601・タイムゾーン付き。例 2026-10-27T01:30:00Z）で指定してください');
   if (!phenomenon || !phenomenon.trim()) return jsonError(400, 'phenomenon（現象）は必須です');
 
   const now = nowIso();
@@ -118,7 +123,16 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
     userEmail,
     now,
   ];
-  const result = await insertTroubleRecord(db, cols, vals);
+  // 記録と監査ログは同じ batch で（記録だけ残って「誰が登録したか」が無い状態を作らない）
+  const result = await insertTroubleRecord(db, cols, vals, [
+    auditStatement(db, {
+      tableName: 'trouble_record',
+      recordId: LAST_INSERT_ID,
+      action: 'create',
+      changedBy: userEmail,
+      diff: { occurred_at, phenomenon: phenomenon.trim(), equipment_id, category_id, cause, countermeasure },
+    }),
+  ]);
 
   const id = result.meta?.last_row_id;
 
@@ -131,14 +145,6 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
       now,
     });
   }
-
-  await writeAuditLog(db, {
-    tableName: 'trouble_record',
-    recordId: String(id),
-    action: 'create',
-    changedBy: userEmail,
-    diff: { occurred_at, phenomenon: phenomenon.trim(), equipment_id, category_id, cause, countermeasure },
-  });
 
   // トラブル記録の新規登録を通知（設備名があれば見出しに付ける）
   let eqLabel = '';

@@ -82,15 +82,20 @@ export async function onRequestPut({ request, params, env, data }) {
   const now = nowIso();
   const email = data.user.email;
 
-  await db.prepare(
+  // 日付の変更でも1日1件を UPDATE の条件で守る（確認と更新の間に別の端末が同じ日を登録した場合）
+  const upd = await db.prepare(
     `UPDATE utility_report
-        SET report_date = ?, inspected_at = ?, reporter_name = ?, has_abnormal = ?,
-            values_json = ?, note = ?, updated_by = ?, updated_at = ?
-      WHERE id = ?`
+        SET report_date = ?1, inspected_at = ?2, reporter_name = ?3, has_abnormal = ?4,
+            values_json = ?5, note = ?6, updated_by = ?7, updated_at = ?8
+      WHERE id = ?9
+        AND NOT EXISTS (SELECT 1 FROM utility_report o WHERE o.report_date = ?1 AND o.id <> ?9 AND o.deleted_at IS NULL)`
   ).bind(
     reportDate, inspectedAt, reporterName, built.hasAbnormal,
     JSON.stringify(built.values), note, email, now, id
   ).run();
+  if ((upd.meta?.changes ?? 0) === 0) {
+    return jsonError(409, `${reportDate} の日報はすでに登録されています。`);
+  }
 
   // 編集で追加した写真・動画を紐づける（既存の添付はそのまま残る）
   const attached = await attachFiles(env, {

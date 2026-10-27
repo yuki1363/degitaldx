@@ -80,15 +80,25 @@ export async function onRequestPost({ request, env, data }) {
 
   const now = nowIso();
   const email = data.user.email;
+  // 1日1件は INSERT の条件でも守る（上の確認と INSERT の間に、別の端末が同じ日を登録した場合も2件にしない）
   const res = await db.prepare(
     `INSERT INTO utility_report
        (report_date, inspected_at, reporter_name, has_abnormal, values_json, note,
         created_by, created_at, updated_by, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?7, ?8
+      WHERE NOT EXISTS (SELECT 1 FROM utility_report WHERE report_date = ?1 AND deleted_at IS NULL)`
   ).bind(
     reportDate, inspectedAt, reporterName, built.hasAbnormal,
-    JSON.stringify(built.values), note, email, now, email, now
+    JSON.stringify(built.values), note, email, now
   ).run();
+  if ((res.meta?.changes ?? 0) === 0) {
+    const other = await db.prepare(
+      `SELECT id FROM utility_report WHERE report_date = ? AND deleted_at IS NULL`
+    ).bind(reportDate).first();
+    return jsonError(409,
+      `${reportDate} の日報はすでに登録されています。既存の記録を編集してください。`,
+      { existing_id: other?.id });
+  }
 
   const id = res.meta?.last_row_id;
 

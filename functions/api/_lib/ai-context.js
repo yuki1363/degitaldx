@@ -1,3 +1,4 @@
+import { toJstDate } from './util.js';
 // AIアシスタント用「今開いているページの内容」コンテキスト生成
 //   buildPageContext(db, pageUrl) → 表示中レコードを要約した日本語テキスト（無ければ ''）
 //   詳細ページ（?id=N）は該当レコードをD1から取得して整形。一覧・その他は画面名のみ。
@@ -38,10 +39,11 @@ function fmtDateTime(iso) {
   return `${j.getUTCFullYear()}/${p(j.getUTCMonth() + 1)}/${p(j.getUTCDate())} ${p(j.getUTCHours())}:${p(j.getUTCMinutes())}`;
 }
 
-// 'YYYY-MM-DD'（日付のみ）→ 'YYYY/MM/DD'
+// 'YYYY-MM-DD'（日付のみ）→ 'YYYY/MM/DD'。日時（UTC保存の occurred_at 等）は JST の日付にする
+// （先頭10文字を切るだけだと、JST 0:00〜8:59 の記録が前日の日付になっていた）
 function fmtDate(s) {
   if (!s) return '';
-  return String(s).slice(0, 10).replace(/-/g, '/');
+  return String(toJstDate(String(s))).slice(0, 10).replace(/-/g, '/');
 }
 
 export async function buildPageContext(db, pageUrl) {

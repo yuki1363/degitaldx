@@ -15,6 +15,7 @@
 
 import { api } from '/js/api.js';
 import { uploadFile } from '/js/files.js';
+import { completePlanAfterInspection } from '/js/plan-inspection-link.js';
 
 const DB_NAME = 'mainte-offline';
 const STORE = 'outbox';
@@ -57,7 +58,7 @@ async function getAll() {
  * @param {'trouble'|'inspection'} kind
  * @param {object} payload 本体POSTのボディ（file_ids は含めない）
  * @param {File[]} files リサイズ済みの添付（Canvasリサイズはオフラインでも動く）
- * @param {object} [extra] 例: { planId } 点検保存後に完了化する計画ID
+ * @param {object} [extra] 例: { planId, planDay } 点検保存後に完了化する計画ID（planDay があればその日だけ）
  */
 export async function enqueue(kind, payload, files = [], extra = {}) {
   const db = await openDb();
@@ -110,7 +111,7 @@ async function sendOne(item) {
     await api.post('/api/inspections', body);
     // 保全計画から開始した点検なら、その計画を完了にする（失敗しても記録は保存済みなので続行）
     if (item.extra && item.extra.planId) {
-      try { await api.put(`/api/plans/${item.extra.planId}`, { status: 'done' }); } catch { /* ベストエフォート */ }
+      try { await completePlanAfterInspection(item.extra.planId, item.extra.planDay); } catch { /* ベストエフォート */ }
     }
   } else if (item.kind === 'repair') {
     await api.post('/api/repairs', item.payload); // 依頼はファイル添付なし（file_ids 不要）
@@ -132,9 +133,13 @@ export async function flushOutbox() {
     // 送信中の別タブは何もしない（その項目は送信側のタブが片付ける）。
     // Web Locks 非対応の古いブラウザは従来どおりタブ内の排他のみ。
     if (navigator.locks?.request) {
+      let gotLock = false;
       await navigator.locks.request('mainte-outbox-flush', { ifAvailable: true }, async (lock) => {
-        if (lock) await sendQueued();
+        if (lock) { gotLock = true; await sendQueued(); }
       });
+      // 送信は別のタブが担当中。終わる（ロックが空く）まで待ってからバーを更新する
+      // （待たずに更新すると、送信済みの件数がこのタブのバーに残り続けていた）
+      if (!gotLock) await navigator.locks.request('mainte-outbox-flush', async () => {});
     } else {
       await sendQueued();
     }

@@ -311,7 +311,7 @@ function draftKey(){ return activeEquipment==='main' ? 'inspection_draft'   : `i
 // 記録・設定は localStorage を作業ストアにしつつ、起動時に D1 → localStorage へ充填し（D1が真実）、
 // 書き込み点でだけ D1 にも反映する（write-through）。多数の読み取り/描画コードは localStorage を
 // そのまま読むため無改修。下書き・基本情報の記憶は端末ローカルのまま。
-const SERVER = { user: null, canEditConfig: false, online: true };
+const SERVER = { user: null, canEditConfig: false, online: true, cfgUpdatedAt: {} }; // cfgUpdatedAt: 設備種別ごとのサーバー設定の更新日時
 const REC_KEYS_ALL = { main:'inspection_records', battery:'inspection_records_battery', generator:'inspection_records_generator' };
 const CFG_KEYS_ALL = { main:'inspection_config',  battery:'inspection_config_battery',  generator:'inspection_config_generator' };
 const DEF_KEYS_ALL = { main:'inspection_default', battery:'inspection_default_battery', generator:'inspection_default_generator' };
@@ -337,6 +337,7 @@ async function loadServerData() {
     Object.entries(REC_KEYS_ALL).forEach(([eq,key]) => { try { localStorage.setItem(key, JSON.stringify(buckets[eq])); } catch(e){} });
     const unsynced = await resendUnsyncedSettings(); // 前回送れなかった設定・既定を先に再送する
     const cfg = await api('/electrical-config');
+    SERVER.cfgUpdatedAt = (cfg && cfg.updated_at) || {};
     ['main','battery','generator'].forEach(eq => { try {
       // 再送したもの（＝この端末の内容が最新）は D1 の内容で上書きしない（再送がまた失敗しても消えないように）
       if (!unsynced['config_' + eq]) {
@@ -425,13 +426,30 @@ async function uploadPendingPhotos() {
 // 上書きせず再送する（以前は失敗しても次回起動時の充填で黙って消えていた）。
 const UNSYNCED_PREFIX = 'elec_unsynced_';
 function unsyncedKey(kind, eqType) { return `${UNSYNCED_PREFIX}${kind}_${eqType}`; }
-function pushSettingToServer(kind, eqType, value) {
+// base: 未送信分の再送時だけ渡す「この端末が編集を始めたときのサーバーの更新日時」（undefined なら確認しない）
+function pushSettingToServer(kind, eqType, value, base) {
   if (!SERVER.canEditConfig) return Promise.resolve();
   const key = unsyncedKey(kind, eqType);
-  return api('/electrical-config', { method:'PUT', body: JSON.stringify({ equipment_type: eqType, [kind]: value }) })
-    .then(() => { try { localStorage.removeItem(key); } catch(e){} })
+  const body = { equipment_type: eqType, [kind]: value };
+  if (base !== undefined) body.expected_updated_at = base;
+  const prevAt = SERVER.cfgUpdatedAt[eqType];
+  return api('/electrical-config', { method:'PUT', body: JSON.stringify(body) })
+    .then((res) => {
+      try { localStorage.removeItem(key); } catch(e){}
+      if (res && res.updated_at) {
+        SERVER.cfgUpdatedAt[eqType] = res.updated_at;
+        // 同じ設備の、もう一方（設定／既定）の未送信分の基準も進める（自分の保存を「他の人の変更」と誤認しない）
+        const otherKey = unsyncedKey(kind === 'config' ? 'default' : 'config', eqType);
+        try { const o = JSON.parse(localStorage.getItem(otherKey) || 'null'); if (o && o.base === prevAt) { o.base = res.updated_at; localStorage.setItem(otherKey, JSON.stringify(o)); } } catch(e){}
+      }
+    })
     .catch(e => {
-      try { localStorage.setItem(key, JSON.stringify({ value })); } catch(_) {}
+      if (e.status === 409) throw e; // 再送時の競合は呼び出し元（resendUnsyncedSettings）で確認する
+      try {
+        // 既に未送信分があれば、その基準（最初に編集を始めた時点）を保つ
+        const old = JSON.parse(localStorage.getItem(key) || 'null');
+        localStorage.setItem(key, JSON.stringify({ value, base: old && 'base' in old ? old.base : (prevAt ?? null) }));
+      } catch(_) {}
       toast((kind === 'config' ? '設定' : '既定') + 'をサーバーに保存できませんでした（この端末に残し、次回起動時に再送します）: ' + e.message);
     });
 }
@@ -447,7 +465,18 @@ async function resendUnsyncedSettings() {
       try { saved = JSON.parse(localStorage.getItem(unsyncedKey(kind, eq)) || 'null'); } catch(e){}
       if (!saved) continue;
       pending[`${kind}_${eq}`] = true;
-      await pushSettingToServer(kind, eq, saved.value);
+      try {
+        // 端末に残した時点のサーバーの更新日時を添えて送る（その後に他の管理者が保存していたら 409）
+        await pushSettingToServer(kind, eq, saved.value, 'base' in saved ? saved.base : undefined);
+      } catch (e) {
+        const label = EQ_NAMES[eq] + 'の' + (kind === 'config' ? '点検設定' : '既定値');
+        if (confirm(label + 'は、この端末で保存できなかった後に、他の管理者がサーバーで変更しています。\n\nOK: この端末の内容で上書きする\nキャンセル: サーバーの内容を使う（この端末の未送信分は破棄）')) {
+          await pushSettingToServer(kind, eq, saved.value);
+        } else {
+          try { localStorage.removeItem(unsyncedKey(kind, eq)); } catch(_) {}
+          delete pending[`${kind}_${eq}`]; // サーバーの内容で充填させる
+        }
+      }
     }
   }
   return pending;

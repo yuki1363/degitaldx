@@ -126,7 +126,8 @@ function expandRecurring(plan, rangeStart, rangeEnd) {
 // 年間計画表からの一括登録（/api/plans/batch）で作られた予定のID集合を返す。
 // 監査ログの diff に batch:true が残るため、登録日（1日以外でも）に依存せず判定できる。
 // → annual_only 列の導入前に登録した「旧年間計画」を確実に復元するための手がかり。
-async function getBatchPlanIds(db) {
+// 旧形式の年間計画（annual_only 列が入る前に一括登録した予定）の ID。audit_log の batch 署名で見分ける
+export async function getBatchPlanIds(db) {
   try {
     const { results } = await db.prepare(`
       SELECT record_id FROM audit_log

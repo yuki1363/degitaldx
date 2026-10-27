@@ -160,6 +160,13 @@ try {
   await check();
   const n = sqlite.prepare(`SELECT body FROM notifications WHERE type = 'plan_overdue' AND related_id = ?`).all(forgotId);
   ok('リセット忘れの前年度分は期限超過を通知（予定月 2027-09）', n.length === 1 && n[0].body.includes('2027-09'), JSON.stringify(n));
+
+  // 旧形式の年間計画（annual_only 列が入る前の一括登録＝audit_log の batch 署名）も月単位で判定する
+  at('2026-10-15');
+  const legacyId = ins(`INSERT INTO maintenance_plan (title, plan_type, planned_date, status, created_by, created_at) VALUES ('旧年間', 'inspection', '2026-10-01', 'pending', 't', '2026-01-01T00:00:00Z')`);
+  sqlite.prepare(`INSERT INTO audit_log (table_name, record_id, action, changed_by, diff_json) VALUES ('maintenance_plan', ?, 'create', 't', '{"batch":true}')`).run(legacyId);
+  await check();
+  ok('旧形式の年間計画は当月中に期限超過を通知しない（月単位）', count('plan_overdue', legacyId) === 0, `n=${count('plan_overdue', legacyId)}`);
 } finally {
   Date.now = realNow;
 }

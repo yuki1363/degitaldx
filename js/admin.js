@@ -457,6 +457,9 @@ async function renderRestore() {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
     const { records, total = 0, limit = 200 } = await api.get(`/api/admin/restore?table=${selectedTable}&offset=${offset}`);
     if (!records || records.length === 0) {
+      // 最後のページの最後の1件を復元すると、そのページが空になる。前のページがあればそちらを出す
+      // （「削除済みデータはありません」と出て、残りの削除済みデータが無いように見えていた）
+      if (offset > 0 && total > 0) { offset = Math.max(0, offset - limit); return load(); }
       render(listBox, el('p', { class: 'empty' }, '削除済みデータはありません'));
       return;
     }
@@ -483,7 +486,7 @@ async function renderRestore() {
                 if (!confirm('このデータを復元しますか？')) return;
                 try {
                   await api.post('/api/admin/restore', { table: selectedTable, id: r.id });
-                } catch (err) { alert(err.message); return; } // 例: ユーティリティ日報の同日重複（409）
+                } catch (err) { alert(err.message); return; } // 例: ユーティリティ日報の同日重複・同じ部品が既にある（409）
                 await load();
               },
             }, '復元')),
