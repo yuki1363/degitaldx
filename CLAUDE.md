@@ -167,9 +167,9 @@
 ### 09. 管理機能
 - ユーザー・グループ・権限管理（閲覧のみ / 入力可 / 管理者 の3段階。承認者ロールは不要のため削除）。**ユーザー削除は物理削除**（無効化ではなく完全に削除。過去に無効化したユーザーは「再有効化」または「完全削除」が可能）
 - マスタ管理画面: 点検項目・設備・部品・トラブルジャンル・ユーザーの各マスタを画面から**追加・削除可能**
-- マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**
+- マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**。電気設備点検の設定（`electrical_config`。設備種別単位で id 列が無いため `restoreElectricalConfig` で別扱い）と帳票テンプレート（更新前の定義＝入力項目 `fields_json` を含めて退避）も戻せる
 - `audit_log` の閲覧画面（誰がいつ何を追加・編集・削除したかを検索）
-- 削除済みデータの閲覧・復元（論理削除の復元）
+- 削除済みデータの閲覧・復元（論理削除の復元）。対象はトラブル・業務依頼・部品・点検・日報・保全計画・設備・ユーティリティ日報・電気設備点検・帳票テンプレート（`admin/restore/index.js` の `ALLOWED_TABLES`）。**200件ずつページ送り**（`offset`。大量削除時も全件を復元できる）。ユーティリティ日報は同じ日の記録があると 409（1日1件）
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）。**タグ確認機能**: テンプレ編集画面の「🔍 Excelのタグを確認」で、アップロード済みExcelの `{{タグ}}` を抽出し、差込対象と突合して「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの（＝出力されない）」を表示（休止時間が出ない・○が付かない等のタグ名不一致を管理者が自力で発見できる。`js/excel-fill.js` の `extractTemplateTags`）
 **テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
 ### 10. チャット
@@ -178,7 +178,7 @@
 - 画面表示中は**5秒ポーリング**でほぼ即時表示（タブが裏に回ったら停止して無駄なリクエストを出さない）。必要なら Durable Objects + WebSocket へ拡張
 - **既読数は送信者本人を数えない**（自分の投稿を自分が見ても既読は付かない。ホームの「◯人中N人既読」も送信者を除いた人数）
 - **👍確認リアクション**: 既読（=見た）とは別に「了解した」をタップで表明できる（editor以上・他人の投稿のみ。誰が確認したか名前で表示）。`chat_reactions` テーブルにトグル保存し audit_log に記録。`POST /api/chat/:id`（action=react）
-- **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
+- **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり（メッセージを削除するとピン留めも外れる＝削除済みが永久に残らない）、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
 - **既読数・👍・📌はライブ更新**: `GET /api/chat` が直近20件の meta（既読数・リアクション）と pinned 一覧を返し、5秒ポーリングでリロードなしに反映される
 - **添付ファイルは本人がアップロードした未紐づけファイルのみ**（`POST /api/chat` の `file_ids`。それ以外は400）。投稿時に `attachFiles` で `related_table='chat_messages'` に紐づける。自動削除がR2から消すのも「そのメッセージに紐づくファイル」と紐づけ導入前の「投稿者本人の未紐づけファイル」だけ（他の記録のファイルIDを指定されて、そのファイルが消えるのを防ぐ）
 - **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）
@@ -209,7 +209,8 @@
 - **保存・削除は D1 が先**: `saveRecord`／`deleteRecord`／`deleteRecordById` は D1 への送信が成功してから localStorage を更新する。逆順だと送信失敗時に「端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の `loadServerData`（D1→localStorage 充填）で黙って消えた（削除なら復活した）。失敗時は端末側・編集状態（`editingRecordId`）・下書きを変えず、そのまま押し直せる
 - **JSON インポート/エクスポートは廃止**（記録・設定は D1 で自動共有されるため端末間移行が不要。UI・関数とも削除済み）。
 - **前回値コピー**: 新規入力時に前回記録の値を各欄へコピーできる。多相（電圧/電流の3相等）のコピーは `onclick` 内の JSON を `&quot;` エスケープして属性破壊を防いでいる（未エスケープだと `JSON.stringify` の `"` が二重引用符 `onclick` 属性を閉じてボタンが無効化する）。
-- **権限**: 記録の保存/削除=editor、**設定編集=admin**（非adminは設定タブ非表示）、閲覧=全員。点検者名は `/api/me` の氏名を既定。
+- **権限**: 記録の保存/削除=editor、**設定編集=admin**（非adminは設定タブ非表示）、閲覧=全員。点検者名は `/api/me` の氏名を既定。設定の変更は `audit_log` にも記録する
+- **削除済みの記録は再保存で復活させない**（同じ client_id の POST は 409。古い画面を開いたままの端末が保存すると、他の端末で削除した記録が黙って復活していた。戻すのは管理画面の「削除済み」から）。上書き保存の監査ログには上書き前の `record_json`（`before_record_json`）を残す
 - **記録の保存形式**: 元アプリの Record を `record_json` にそのまま保存（config スナップショット含む＝設定変更後も過去記録が壊れない。02 の items_json と同じ思想）。検索用に `equipment_type`/`inspected_date`/`has_abnormal`(caution/repairで1) を列に持つ。`client_id`(元アプリのDate.now() id) で冪等 upsert。
 - **API**: `functions/api/electrical-inspections/`（`index.js` GET一覧`{records:{[client_id]:Record}}`/POST upsert、`[id].js` DELETE論理削除）、`functions/api/electrical-config/`（GET`{main,battery,generator,defaults}`/PUT admin・`master_history`退避）。
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから添付できる（editor以上）。アップロードはアプリ共通の `js/files.js`（`uploadFile`/`resizeImageFile`＝長辺1280pxへ縮小しEXIF除去・R2容量ガード）を使い、classic script のこのページへは末尾の module から `window.ElecFiles` として渡す。「保存する」で先に送信し、記録（`record_json`）に `photos:[{id,file_name,content_type}]` として持つ。サーバー側は `attachFiles` で `related_table='electrical_inspection'` に紐づけ、記録詳細・印刷にサムネイルを出す。保存後はフォームから外す（次の記録へ持ち越さない）。**添付は入力・編集画面の「🗑 削除」から削除できる**（`DELETE /api/files/:id` の論理削除。記録側の参照は「保存する」で消えるため、未保存のまま残っても壊れたサムネイルが出ないよう `onerror` で隠す）。

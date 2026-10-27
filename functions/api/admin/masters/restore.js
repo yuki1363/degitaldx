@@ -18,6 +18,7 @@ const MASTERS = {
   inspection_master:    ['equipment_id', 'name', 'input_type', 'unit', 'min_value', 'max_value', 'options_json', 'sort_order'],
   trouble_custom_field: ['name', 'input_type', 'options_json', 'sort_order'],
   utility_item:         ['section', 'name', 'input_type', 'unit', 'min_value', 'max_value', 'options_json', 'alert_options_json', 'sort_order'],
+  print_templates:      ['name', 'template_type', 'image_file_id', 'orientation', 'fields_json'], // 09 帳票テンプレート
 };
 
 export async function onRequestPost({ request, env, data }) {
@@ -31,6 +32,11 @@ export async function onRequestPost({ request, env, data }) {
 
   const hist = await db.prepare(`SELECT * FROM master_history WHERE id = ?`).bind(historyId).first();
   if (!hist) return jsonError(404, '履歴が見つかりません');
+
+  // 電気設備点検の設定は equipment_type 単位（id 列が無い）のため別扱い
+  if (hist.master_name === 'electrical_config') {
+    return restoreElectricalConfig(db, hist, data.user.email);
+  }
 
   const cols = MASTERS[hist.master_name];
   if (!cols) return jsonError(400, `このマスタは復元に対応していません: ${hist.master_name}`);
@@ -92,5 +98,43 @@ export async function onRequestPost({ request, env, data }) {
     diff: { restored_from_history_id: historyId },
   });
 
+  return json({ ok: true });
+}
+
+// 12 電気設備点検の設定（electrical_config）の復元。スナップショットは
+// { equipment_type, config_json, default_json } の形（electrical-config/index.js が退避）。
+const ELECTRICAL_TYPES = ['main', 'battery', 'generator'];
+async function restoreElectricalConfig(db, hist, userEmail) {
+  let snap;
+  try { snap = JSON.parse(hist.snapshot_json); } catch { return jsonError(500, 'スナップショットの読み込みに失敗しました'); }
+  const type = snap?.equipment_type;
+  if (!ELECTRICAL_TYPES.includes(type)) return jsonError(400, 'スナップショットの設備種別が不正です');
+
+  // 復元の取り消しができるよう、復元前の現在値も退避する
+  const current = await db.prepare(
+    'SELECT config_json, default_json FROM electrical_config WHERE equipment_type = ?'
+  ).bind(type).first();
+  await writeMasterHistory(db, {
+    masterName: 'electrical_config',
+    recordId: null,
+    snapshot: { equipment_type: type, config_json: current?.config_json ?? null, default_json: current?.default_json ?? null },
+    changedBy: userEmail,
+  });
+
+  const now = nowIso();
+  await db.prepare(
+    `INSERT INTO electrical_config (equipment_type, config_json, default_json, updated_by, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT(equipment_type) DO UPDATE
+       SET config_json = ?2, default_json = ?3, updated_by = ?4, updated_at = ?5`
+  ).bind(type, snap.config_json ?? null, snap.default_json ?? null, userEmail, now).run();
+
+  await writeAuditLog(db, {
+    tableName: 'electrical_config',
+    recordId: type,
+    action: 'restore',
+    changedBy: userEmail,
+    diff: { equipment_type: type, restored_from_history_id: hist.id },
+  });
   return json({ ok: true });
 }

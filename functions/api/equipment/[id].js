@@ -213,7 +213,7 @@ export async function onRequestDelete({ env, data, params }) {
   if (!existing) return jsonError(404, '設備が見つかりません。');
 
   await env.DB.prepare(
-    `UPDATE equipment_ledger SET deleted_by = ?1, deleted_at = ?2 WHERE id = ?3 AND deleted_at IS NULL`
+    `UPDATE equipment_ledger SET deleted_by = ?1, deleted_at = ?2, updated_by = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL`
   )
     .bind(data.user.email, nowIso(), existing.id)
     .run();

@@ -21,8 +21,8 @@ export async function onRequestDelete({ env, params, data }) {
 
   const now = nowIso();
   await db.prepare(
-    'UPDATE electrical_inspection SET deleted_at = ?, deleted_by = ? WHERE client_id = ?'
-  ).bind(now, data.user.email, clientId).run();
+    'UPDATE electrical_inspection SET deleted_at = ?, deleted_by = ?, updated_at = ?, updated_by = ? WHERE client_id = ?'
+  ).bind(now, data.user.email, now, data.user.email, clientId).run();
   await writeAuditLog(db, {
     tableName: 'electrical_inspection', recordId: row.id, action: 'delete', changedBy: data.user.email,
   });

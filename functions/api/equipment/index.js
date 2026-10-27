@@ -164,8 +164,8 @@ export async function onRequestPost({ request, env, data }) {
 
   const result = await env.DB.prepare(
     `INSERT INTO equipment_ledger
-       (code, name, line_name, equipment_name, location, manufacturer, model, serial_no, manufactured_on, installed_on, status, note, created_by, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`
+       (code, name, line_name, equipment_name, location, manufacturer, model, serial_no, manufactured_on, installed_on, status, note, created_by, created_at, updated_by, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?13, ?14)`
   )
     .bind(
       v.code, v.name, v.line_name, v.equipment_name, v.location, v.manufacturer, v.model,

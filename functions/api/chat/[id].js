@@ -9,6 +9,7 @@ export async function onRequestDelete({ params, env, data }) {
   if (denied) return denied;
 
   const db = env.DB;
+  await ensureChatSchema(db); // pinned_at / pinned_by 列を自動で用意（削除時にピン留めを外すため）
   const id = Number(params.id);
   if (!id) return jsonError(400, '不正なIDです');
 
@@ -22,7 +23,9 @@ export async function onRequestDelete({ params, env, data }) {
   const now = nowIso();
   const userEmail = data.user.email;
 
-  await db.prepare(`UPDATE chat_messages SET deleted_by=?, deleted_at=? WHERE id=?`).bind(userEmail, now, id).run();
+  // ピン留めも外す（ピン留め中は10日自動削除の対象外のため、残すと削除済みメッセージが永久に残る）
+  await db.prepare(`UPDATE chat_messages SET deleted_by=?, deleted_at=?, updated_by=?, updated_at=?, pinned_at=NULL, pinned_by=NULL WHERE id=?`)
+    .bind(userEmail, now, userEmail, now, id).run();
   await writeAuditLog(db, { tableName: 'chat_messages', recordId: id, action: 'delete', changedBy: userEmail, diff: null });
   return json({ ok: true });
 }
