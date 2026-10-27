@@ -51,8 +51,15 @@ export async function createNotification(db, {
 // 購読中の全端末へ Web Push を送る。失効した購読（404/410）は掃除する。
 // 1件ずつ送るため、他の購読者への送信は1件の失敗に引きずられない。
 async function pushToAllSubscribers(env, notif) {
+  // 有効なユーザーの端末だけに送る（削除・無効化したユーザーの端末に業務内容が届き続けないように。
+  // ユーザー削除時にも購読を消しているが、それ以前に残った購読や無効化ユーザーにも効くよう送信側でも絞る）
   const { results } = await env.DB
-    .prepare(`SELECT id, endpoint, p256dh, auth FROM push_subscriptions`)
+    .prepare(
+      `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+         FROM push_subscriptions ps
+        WHERE EXISTS (SELECT 1 FROM users u
+                       WHERE lower(u.email) = lower(ps.user_email) AND u.deleted_at IS NULL)`
+    )
     .all();
   const payload = { title: notif.title, body: notif.body || '', url: notif.linkUrl || '/' };
   for (const sub of results ?? []) {

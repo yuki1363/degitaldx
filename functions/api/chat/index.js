@@ -3,6 +3,9 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { ensureColumns } from '../_lib/db-compat.js';
+import { attachFiles } from '../_lib/storage.js';
+
+const MAX_CHAT_FILES = 20; // 1投稿あたりの添付上限（IN句の bind 数を D1 の上限100より十分小さく保つ）
 
 // 後付けの列・テーブルを、未マイグレーションの本番DBでも自動で用意する（自己修復）。
 //   file_ids_json 列が無いDBでは投稿INSERTが「has no column named」で500になるため、
@@ -42,7 +45,7 @@ async function cleanupOldMessages(env) {
   const cutoff = new Date(Date.now() - CHAT_RETENTION_DAYS * 86400000).toISOString();
   // 📌ピン留め中のメッセージは削除しない（重要な申し送りを残す。解除すると次回の対象になる）
   const { results: olds } = await db
-    .prepare('SELECT id, file_ids_json FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL')
+    .prepare('SELECT id, file_ids_json, created_by FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL')
     .bind(cutoff).all();
   if (!olds || olds.length === 0) return;
 
@@ -53,7 +56,15 @@ async function cleanupOldMessages(env) {
     try { const a = JSON.parse(m.file_ids_json || 'null'); if (Array.isArray(a)) fileIds = a; } catch { /* 壊れたJSONは無視 */ }
     for (const fid of fileIds) {
       try {
-        const f = await db.prepare('SELECT r2_key, purged_at FROM files WHERE id = ?').bind(fid).first();
+        // このメッセージのファイルだけを消す（file_ids_json は投稿者が送ったIDのため、他の記録の
+        // ファイルIDが入っていると、それを R2 から消してしまう）。対象は「このメッセージに紐づく
+        // ファイル」と、紐づけ導入前の投稿ぶん＝「投稿者本人がアップロードした未紐づけファイル」。
+        const f = await db.prepare(
+          `SELECT r2_key, purged_at FROM files
+            WHERE id = ?1
+              AND ((related_table = 'chat_messages' AND related_id = ?2)
+                   OR (related_id IS NULL AND created_by = ?3))`
+        ).bind(fid, m.id, m.created_by).first();
         if (f && !f.purged_at) {
           try { if (env.FILES) await env.FILES.delete(f.r2_key); } catch { /* R2削除失敗は無視 */ }
           await db.prepare(
@@ -143,7 +154,7 @@ export async function onRequestGet({ request, env, data, waitUntil }) {
   const sp = new URL(request.url).searchParams;
   const channel = sp.get('channel') || 'general';
   const since   = sp.get('since');
-  const limit   = Math.min(Number(sp.get('limit')) || 50, 200);
+  const limit   = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 50), 200);
 
   // count_unread=1: 現ユーザーの未読数 + 最新メッセージの既読者数を返す（ホーム概要タブ用）
   if (sp.get('count_unread') === '1') {
@@ -217,9 +228,29 @@ export async function onRequestPost({ request, env, data }) {
 
   const now = nowIso();
   const userEmail = data.user.email;
-  const fileIdsJson = Array.isArray(file_ids) && file_ids.length > 0
-    ? JSON.stringify(file_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))
-    : null;
+  // 添付は「本人がアップロードした未紐づけファイル」だけを受け付ける（他の記録のファイルIDを
+  // 指定されると、10日後の自動削除でそのファイルが R2 から消えるため）。上限20件（bind数対策）。
+  const requestedIds = Array.isArray(file_ids)
+    ? [...new Set(file_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+    : [];
+  if (requestedIds.length > MAX_CHAT_FILES) {
+    return jsonError(400, `添付ファイルは1回の投稿につき${MAX_CHAT_FILES}件までです。`);
+  }
+  let fileIdList = [];
+  if (requestedIds.length > 0) {
+    const placeholders = requestedIds.map((_, i) => `?${i + 2}`).join(', ');
+    const { results: owned } = await db.prepare(
+      `SELECT id FROM files
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL
+          AND related_id IS NULL AND created_by = ?1`
+    ).bind(userEmail, ...requestedIds).all();
+    const ownedIds = new Set((owned ?? []).map((r) => r.id));
+    fileIdList = requestedIds.filter((fid) => ownedIds.has(fid));
+    if (fileIdList.length !== requestedIds.length) {
+      return jsonError(400, '添付できないファイルが含まれています（自分がアップロードしたファイルのみ添付できます）。');
+    }
+  }
+  const fileIdsJson = fileIdList.length > 0 ? JSON.stringify(fileIdList) : null;
 
   const result = await db.prepare(`
     INSERT INTO chat_messages (channel, body, file_ids_json, created_by, created_at, updated_by, updated_at)
@@ -227,12 +258,16 @@ export async function onRequestPost({ request, env, data }) {
   `).bind(channel, (msgBody || '').trim(), fileIdsJson, userEmail, now, userEmail, now).run();
 
   const id = result.meta?.last_row_id;
+  // 添付をこのメッセージに紐づける（自動削除・ファイル管理で持ち主を判別できるように）
+  if (fileIdList.length > 0) {
+    await attachFiles(env, { fileIds: fileIdList, relatedTable: 'chat_messages', relatedId: id, userEmail, now });
+  }
   await writeAuditLog(db, {
     tableName: 'chat_messages',
     recordId: id,
     action: 'create',
     changedBy: userEmail,
-    diff: { channel, body: (msgBody || '').trim(), file_ids: file_ids || [] },
+    diff: { channel, body: (msgBody || '').trim(), file_ids: fileIdList },
   });
 
   return json({ id }, 201);

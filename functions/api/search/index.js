@@ -70,7 +70,7 @@ export async function onRequestGet({ request, env }) {
   const equipId     = sp.get('equipment_id');
   const categoryId  = sp.get('category_id');
   const typeParam   = sp.get('type');        // comma-separated
-  const limit       = Math.min(Number(sp.get('limit')) || 50, 200);
+  const limit       = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 50), 200);
 
   const keywords = q ? q.split(/\s+/).filter(Boolean).slice(0, 5) : [];
   const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan', 'utility'];

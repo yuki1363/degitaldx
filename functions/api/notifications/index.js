@@ -26,7 +26,7 @@ export async function onRequestGet({ request, env, waitUntil }) {
   const fromMonth = sp.get('from_month');    // YYYY-MM（JST）範囲開始
   const toMonth = sp.get('to_month');        // YYYY-MM（JST）範囲終了
   const assignee = sp.get('assignee');       // created_by のメール
-  const limit = Math.min(Number(sp.get('limit')) || 50, 200);
+  const limit = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 50), 200);
 
   let sql = `SELECT * FROM notifications WHERE deleted_at IS NULL`;
   const binds = [];

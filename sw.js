@@ -15,7 +15,7 @@
  *   push イベントでプッシュ通知を表示し、notificationclick でアプリの該当画面を開く。
  *   ペイロードは functions/api/_lib/notify.js が { title, body, url } のJSONで送る。
  */
-const CACHE_VERSION = 'v1.25.1';
+const CACHE_VERSION = 'v1.25.2';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -146,7 +146,10 @@ self.addEventListener('fetch', (event) => {
   // 静的アセット: キャッシュ優先 + 裏で最新化（stale-while-revalidate）
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
-      const cached = await cache.match(request);
+      // ページ遷移はクエリ（?id= / ?new=1 等）を無視して照合する。各ページは同じHTMLで、
+      // クエリは画面側のJSが読むため。無視しないとプリキャッシュ（/pages/ledger 等）に当たらず、
+      // オフライン時に QR の遷移先や「点検を記録」などクエリ付きのページが開けない。
+      const cached = await cache.match(request, { ignoreSearch: request.mode === 'navigate' });
       const network = fetch(request)
         .then((response) => {
           if (response.ok && response.type === 'basic') {
@@ -159,9 +162,11 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached;
       const fresh = await network;
       if (fresh) return fresh;
-      // オフラインで未キャッシュのページに来た場合はアプリシェルへフォールバック
+      // オフラインで未キャッシュのページに来た場合はアプリシェルへフォールバック。
+      // '/index.html' は Pages が '/' へリダイレクトするため、リダイレクト済み応答を
+      // ページ遷移に返すとブラウザがエラーにする。リダイレクトの無い '/' を返す。
       if (request.mode === 'navigate') {
-        const shell = await cache.match('/index.html');
+        const shell = await cache.match('/');
         if (shell) return shell;
       }
       return new Response('オフラインのため表示できません。', {

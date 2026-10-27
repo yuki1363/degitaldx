@@ -8,7 +8,7 @@ export async function onRequestGet({ request, env, data }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
   const masterName = sp.get('master_name');
-  const limit      = Math.min(Number(sp.get('limit')) || 100, 500);
+  const limit      = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 100), 500);
 
   let sql = `SELECT * FROM master_history WHERE 1=1`;
   const binds = [];

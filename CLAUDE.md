@@ -37,10 +37,10 @@
 - **アクセス制御**: Cloudflare Access のワンタイムコード認証（会社メールの許可リスト方式）。アプリ側にログイン画面は実装しない。ログインユーザーの識別は Access が付与するヘッダー `Cf-Access-Authenticated-User-Email` を Functions 側で読み取り、`users` テーブルと突合する。環境変数 `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` を設定すると、ヘッダーの代わりに Access の署名付きJWT（`Cf-Access-Jwt-Assertion`／Cookie `CF_Authorization`）を Web Crypto で検証して email を取り出す（`functions/api/_lib/access-jwt.js`。署名鍵は `https://<チーム>/cdn-cgi/access/certs` から取得し1時間キャッシュ）。設定時はメールヘッダーと `DEV_USER_EMAIL` を無視する＝保護漏れのURL（プレビューURL等）でもヘッダー偽装でなりすませない。未設定なら従来どおりヘッダーで識別
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
-- **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期
+- **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期。**ページ遷移はクエリを無視してキャッシュと照合する**（`sw.js` の `ignoreSearch`。`/pages/ledger?id=` 等のクエリ付きページもオフラインで開ける）。未キャッシュ時の代替表示は `/`（`/index.html` は Pages が `/` へリダイレクトするため、リダイレクト済み応答はページ遷移に使えない）
 - **ログイン切れ時の「再ログイン」ボタン**: Access セッション切れで API に届かないとき、`js/api.js` が自動で再認証へ誘導する（1回のみ・15秒ガード）。それでも届かない（メールアプリ内ブラウザ・PCのPWA窓など）かつオンラインなら、画面上部に「🔑 再ログインする」バナーを出す（`showReloginBanner`）。押すと `/cdn-cgi/access/logout?returnTo=現在のURL` へ移動して Access を再認証させる。本当のオフライン（`navigator.onLine === false`）では出さない
 - **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
-- **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する。**購読の endpoint は各社のプッシュサービス（fcm.googleapis.com／push.services.mozilla.com／notify.windows.com／push.apple.com）の https URL に限定**する（任意URLを登録されるとサーバーがそこへPOSTする＝SSRFのため。`isAllowedPushEndpoint`。登録時に400、送信時もスキップ）
+- **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する。**送信先は有効なユーザー（`users` に存在し `deleted_at IS NULL`）の購読に限り、ユーザー削除時は購読も物理削除する**（退職者等の端末へ業務内容が届き続けないように）。**購読の endpoint は各社のプッシュサービス（fcm.googleapis.com／push.services.mozilla.com／notify.windows.com／push.apple.com）の https URL に限定**する（任意URLを登録されるとサーバーがそこへPOSTする＝SSRFのため。`isAllowedPushEndpoint`。登録時に400、送信時もスキップ）
 ### バージョン復元（3層の安全網）— 必須要件
 「編集してアプリが動かなくなる」事故に備え、以下を必ず運用・実装する。
 1. **アプリ本体**: Cloudflare Pages のデプロイ履歴から**ワンクリックで旧バージョンに即時ロールバック**できる（標準機能）。壊れたら直前のデプロイに戻すのが第一手。README にロールバック手順を記載すること
@@ -138,6 +138,7 @@
   - SharePoint リストを CSV エクスポート → 管理画面の「CSVインポート」で取り込み
   - インポート画面で CSV列 ↔ アプリ項目の**列マッピングUI**を提供（文字コードは UTF-8 / Shift_JIS 両対応）
   - 取込前にプレビュー表示、重複部品番号の検出、取込結果レポート表示
+  - **差分マージ（`mode=merge`）は CSV で対応付けた列だけを更新する**（対応付けていない列はキーごと送られないので既存値を保つ。全列更新だと型番と部品名だけのマージで在庫数・場所等が0／空になった。`functions/api/parts/import.js` の `MERGE_UPDATABLE`）
   - 移行後は本アプリを正とし、PowerApps側は参照のみ → 廃止
 **テーブル**: `parts_inventory`（+監査列）、`parts_transaction`（入出庫履歴）
 ### 06. 設備台帳
@@ -178,8 +179,9 @@
 - **👍確認リアクション**: 既読（=見た）とは別に「了解した」をタップで表明できる（editor以上・他人の投稿のみ。誰が確認したか名前で表示）。`chat_reactions` テーブルにトグル保存し audit_log に記録。`POST /api/chat/:id`（action=react）
 - **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
 - **既読数・👍・📌はライブ更新**: `GET /api/chat` が直近20件の meta（既読数・リアクション）と pinned 一覧を返し、5秒ポーリングでリロードなしに反映される
+- **添付ファイルは本人がアップロードした未紐づけファイルのみ**（`POST /api/chat` の `file_ids`。それ以外は400）。投稿時に `attachFiles` で `related_table='chat_messages'` に紐づける。自動削除がR2から消すのも「そのメッセージに紐づくファイル」と紐づけ導入前の「投稿者本人の未紐づけファイル」だけ（他の記録のファイルIDを指定されて、そのファイルが消えるのを防ぐ）
 - **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）
-- **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?body=`）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
+- **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?new=1&body=`。日報は `new=1` が無いと一覧が開き本文が引き継がれない）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
 - **申し送りテンプレート**: 定型文（【引き継ぎ】【対応中】【要確認】【完了報告】【部品発注】）をタップで入力欄へ挿入（現場スマホの入力を軽く・書き方を統一。`js/chat.js` の `HANDOFF_TEMPLATES`）
 - **個人情報の入力防止**:
   - 入力欄に注意書きを常設（「氏名・電話番号・住所等の個人情報は入力しないでください」）
@@ -321,6 +323,7 @@
 | Phase 6 | 横断検索（キーワード検索） | 11 |
 ## 共通の技術的注意事項
 - **SQLインジェクション対策**: D1 へのクエリは必ずプリペアドステートメント。SQL文字列連結禁止
+- **一覧APIの `limit` は下限1・上限ありで丸める**（`Math.min(Math.max(1, Math.trunc(Number(v)) || 既定), 上限)`。`limit=-1` が `LIMIT -1`＝無制限になり、全件読み取りで D1 の読み取り枠を消費されるのを防ぐ）
 - **権限チェックはサーバー側（Functions）で必ず実施**。フロントの出し分けはUX目的のみ
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
 ### AI機能（Workers AI）の出し分け

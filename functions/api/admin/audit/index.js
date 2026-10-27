@@ -12,7 +12,7 @@ export async function onRequestGet({ request, env, data }) {
   const user     = sp.get('user');
   const from     = sp.get('from');
   const to       = sp.get('to');
-  const limit    = Math.min(Number(sp.get('limit')) || 100, 500);
+  const limit    = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 100), 500);
   const offset   = Number(sp.get('offset')) || 0;
 
   let sql = `SELECT * FROM audit_log WHERE 1=1`;

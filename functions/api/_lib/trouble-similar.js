@@ -44,7 +44,7 @@ export async function findSimilarTroubles(db, phenomenonText, { excludeId, equip
   }
 
   sql += ' LIMIT ?';
-  params.push(Math.min(Number(limit) || 5, 20));
+  params.push(Math.min(Math.max(1, Math.trunc(Number(limit)) || 5), 20));
 
   const { results } = await db.prepare(sql).bind(...params).all();
   return results || [];

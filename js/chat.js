@@ -49,7 +49,7 @@ function buildRecordActions(body) {
   const links = [
     ['🔧 トラブル記録', `/pages/trouble?${new URLSearchParams({ new: '1', phenomenon: body })}`],
     ['🛠 業務依頼',    `/pages/repair?${new URLSearchParams({ new: '1', title, description: body })}`],
-    ['📝 日報',        `/pages/report?${new URLSearchParams({ body })}`],
+    ['📝 日報',        `/pages/report?${new URLSearchParams({ new: '1', body })}`],
   ];
   return el('div', { class: 'chat-record-actions', style: 'display:none' },
     links.map(([label, href]) => el('a', { class: 'btn btn-sm', href }, label))

@@ -2,7 +2,7 @@
 // POST /api/parts/import  フロントが CSV をパースして送った行データを取り込む（editor以上）
 //
 // mode: 'replace'（デフォルト）= 全置き換え（既存を全論理削除 → 再作成）
-// mode: 'merge'               = 差分マージ（型番一致で更新・新規のみ追加・既存不変）
+// mode: 'merge'               = 差分マージ（型番一致で更新＝CSVで対応付けた列のみ・新規は追加・既存の他部品は不変）
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
@@ -21,6 +21,18 @@ const num = (v) => {
   const s = v === undefined || v === null ? '' : String(v).trim();
   return s !== '' && Number.isFinite(Number(s)) ? Math.trunc(Number(s)) : 0;
 };
+
+// 差分マージで更新してよい列（name は必須のため常に更新）と、その値の変換
+const MERGE_UPDATABLE = [
+  ['line_name', cell],
+  ['equipment_name', cell],
+  ['location', cell],
+  ['quantity', num],
+  ['safety_stock', num],
+  ['importance', (v) => normImportance(v)],
+  ['supplier', cell],
+  ['note', cell],
+];
 
 export async function onRequestPost({ env, data, request }) {
   const denied = requireRole(data.user, 'editor');
@@ -141,28 +153,21 @@ async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
     const existingId = modelNo ? existingByModelNo.get(modelNo) : null;
 
     if (existingId) {
-      // UPDATE: 既存レコードを上書き
+      // UPDATE: 既存レコードを上書き。ただし CSV で対応付けた列（＝行にキーがある列）だけを更新する。
+      // 画面は対応付けていない列をキーごと送らないため、全列を更新すると未対応付けの列が
+      // 0／空で上書きされ、型番と部品名だけのマージで在庫数・場所・仕入先などが消えてしまう。
+      // 列名は固定リスト（MERGE_UPDATABLE）からのみ組み立てる（入力値を SQL に連結しない）。
+      const sets = ['name = ?'];
+      const binds = [name];
+      for (const [col, conv] of MERGE_UPDATABLE) {
+        if (!Object.prototype.hasOwnProperty.call(row, col)) continue;
+        sets.push(`${col} = ?`);
+        binds.push(conv(row[col]));
+      }
+      sets.push('updated_by = ?', 'updated_at = ?');
+      binds.push(userEmail, now, existingId);
       statements.push(
-        DB.prepare(
-          `UPDATE parts_inventory SET
-             name = ?1, line_name = ?2, equipment_name = ?3, location = ?4,
-             quantity = ?5, safety_stock = ?6, importance = ?7,
-             supplier = ?8, note = ?9, updated_by = ?10, updated_at = ?11
-           WHERE id = ?12`
-        ).bind(
-          name,
-          cell(row.line_name),
-          cell(row.equipment_name),
-          cell(row.location),
-          num(row.quantity),
-          num(row.safety_stock),
-          normImportance(row.importance),
-          cell(row.supplier),
-          cell(row.note),
-          userEmail,
-          now,
-          existingId
-        )
+        DB.prepare(`UPDATE parts_inventory SET ${sets.join(', ')} WHERE id = ?`).bind(...binds)
       );
       updated++;
     } else {

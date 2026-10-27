@@ -26,7 +26,7 @@ export async function onRequestGet({ request, env, data }) {
   const to = sp.get('to');
   const date = sp.get('date');
   const withValues = sp.get('with_values') === '1';
-  const limit = Math.min(Number(sp.get('limit')) || 200, 500);
+  const limit = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 200), 500);
 
   let sql = `SELECT id, report_date, inspected_at, reporter_name, has_abnormal, note,
                     values_json, created_by, created_at, updated_by, updated_at
