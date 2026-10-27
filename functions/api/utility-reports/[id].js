@@ -123,8 +123,8 @@ export async function onRequestDelete({ params, env, data }) {
   const now = nowIso();
   const email = data.user.email;
   await db.prepare(
-    `UPDATE utility_report SET deleted_by = ?, deleted_at = ? WHERE id = ?`
-  ).bind(email, now, id).run();
+    `UPDATE utility_report SET deleted_by = ?, deleted_at = ?, updated_by = ?, updated_at = ? WHERE id = ?`
+  ).bind(email, now, email, now, id).run();
 
   await writeAuditLog(db, {
     tableName: 'utility_report', recordId: id, action: 'delete', changedBy: email, diff: null,

@@ -444,21 +444,31 @@ async function renderAudit() {
 const TABLE_LABELS = {
   trouble_record: 'トラブル記録', repair_request: '業務依頼', parts_inventory: '部品在庫',
   inspection_result: '点検結果', daily_report: '日報', maintenance_plan: '保全計画', equipment_ledger: '設備台帳',
+  utility_report: 'ユーティリティ日報', electrical_inspection: '電気設備点検', print_templates: '帳票テンプレート',
 };
 
 async function renderRestore() {
   let selectedTable = '';
+  let offset = 0;
   const listBox = el('div', {}, []);
 
   const load = async () => {
     if (!selectedTable) { render(listBox, []); return; }
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
-    const { records } = await api.get(`/api/admin/restore?table=${selectedTable}`);
+    const { records, total = 0, limit = 200 } = await api.get(`/api/admin/restore?table=${selectedTable}&offset=${offset}`);
     if (!records || records.length === 0) {
       render(listBox, el('p', { class: 'empty' }, '削除済みデータはありません'));
       return;
     }
-    render(listBox, el('div', { style: 'overflow-x:auto' }, [
+    // 200件ずつページ送り（大量に削除したときも全件を復元できるように）
+    const pager = total > limit
+      ? el('div', { class: 'action-row', style: 'align-items:center;margin:8px 0' }, [
+          el('button', { class: 'btn btn-sm', disabled: offset === 0, onclick: () => { offset = Math.max(0, offset - limit); load().catch(showError); } }, '‹ 前へ'),
+          el('span', { class: 'hint' }, `全${total}件中 ${offset + 1}〜${offset + records.length}件`),
+          el('button', { class: 'btn btn-sm', disabled: offset + records.length >= total, onclick: () => { offset += limit; load().catch(showError); } }, '次へ ›'),
+        ])
+      : null;
+    render(listBox, [pager, el('div', { style: 'overflow-x:auto' }, [
       el('table', { class: 'extract-table' }, [
         el('thead', {}, [el('tr', {}, ['内容', '日付', '削除者', '削除日時', '操作'].map((h) => el('th', {}, h)))]),
         el('tbody', {}, records.map((r) =>
@@ -471,17 +481,19 @@ async function renderRestore() {
               class: 'btn btn-sm',
               onclick: async () => {
                 if (!confirm('このデータを復元しますか？')) return;
-                await api.post('/api/admin/restore', { table: selectedTable, id: r.id });
+                try {
+                  await api.post('/api/admin/restore', { table: selectedTable, id: r.id });
+                } catch (err) { alert(err.message); return; } // 例: ユーティリティ日報の同日重複（409）
                 await load();
               },
             }, '復元')),
           ])
         )),
       ]),
-    ]));
+    ])]);
   };
 
-  const tableSel = el('select', { onchange: (e) => { selectedTable = e.target.value; load().catch(() => {}); }}, [
+  const tableSel = el('select', { onchange: (e) => { selectedTable = e.target.value; offset = 0; load().catch(() => {}); }}, [
     el('option', { value: '' }, '— テーブルを選択'),
     ...Object.entries(TABLE_LABELS).map(([v, l]) => el('option', { value: v }, l)),
   ]);
@@ -496,6 +508,7 @@ async function renderRestore() {
 // ---------------- マスタ変更履歴 ----------------
 
 const MASTER_LABELS = {
+  electrical_config: '電気設備点検の設定', print_templates: '帳票テンプレート',
   inspection_master: '点検項目マスタ', trouble_category: 'トラブルジャンル',
   report_category: '日報カテゴリ', trouble_custom_field: 'トラブルカスタム項目',
 };
@@ -525,7 +538,8 @@ async function renderMasters() {
             el('td', { style: 'font-size:11px;max-width:200px;word-break:break-all' },
               String(h.snapshot_json || '').slice(0, 120)
             ),
-            el('td', {}, h.record_id != null
+            // 電気設備点検の設定は設備種別単位（record_id なし）だが復元できる
+            el('td', {}, (h.record_id != null || h.master_name === 'electrical_config')
               ? el('button', { class: 'btn btn-sm', onclick: async () => {
                   if (!confirm('この時点の内容に復元しますか？\n（復元前の現在値も履歴に残るため、復元の取り消しもできます）')) return;
                   try {

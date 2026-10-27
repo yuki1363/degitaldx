@@ -94,9 +94,13 @@ export async function onRequestPost({ env, request, data }) {
   const now = nowIso();
   const email = data.user.email;
 
-  // client_id で冪等 upsert（論理削除済みでも同IDで再保存されたら復活させる）
-  const existing = await db.prepare('SELECT id FROM electrical_inspection WHERE client_id = ?')
+  // client_id で冪等 upsert。論理削除済みの記録は復活させない（古い画面を開いたままの端末が
+  // 保存すると、他の端末で削除した記録が黙って復活していた）。戻すときは管理画面の「削除済み」から復元する
+  const existing = await db.prepare('SELECT id, record_json, deleted_at FROM electrical_inspection WHERE client_id = ?')
     .bind(clientId).first();
+  if (existing?.deleted_at) {
+    return jsonError(409, 'この記録は削除されています。必要なら管理者が管理画面の「削除済み」から復元してください。');
+  }
 
   // 記録に添えた写真・動画のID（record_json 側にもメタが残るので一覧はDB追加なしで描ける）
   const fileIds = Array.isArray(rec.photos) ? rec.photos.map((p) => p && p.id) : [];
@@ -105,15 +109,16 @@ export async function onRequestPost({ env, request, data }) {
     await db.prepare(
       `UPDATE electrical_inspection
           SET equipment_type = ?, inspected_date = ?, has_abnormal = ?, record_json = ?,
-              updated_by = ?, updated_at = ?, deleted_at = NULL, deleted_by = NULL
-        WHERE client_id = ?`
+              updated_by = ?, updated_at = ?
+        WHERE client_id = ? AND deleted_at IS NULL`
     ).bind(type, date, hasAbnormal, recordJson, email, now, clientId).run();
     const attached = await attachFiles(env, {
       fileIds, relatedTable: 'electrical_inspection', relatedId: existing.id, userEmail: email, now,
     });
     await writeAuditLog(db, {
       tableName: 'electrical_inspection', recordId: existing.id, action: 'update',
-      changedBy: email, diff: { equipment_type: type, date, attached_files: attached },
+      // 上書き前の記録を残す（任意の editor が同じ記録を保存し直せるため、誰が何を上書きしたか追えるように）
+      changedBy: email, diff: { equipment_type: type, date, attached_files: attached, before_record_json: existing.record_json },
     });
     return json({ ok: true, id: existing.id, client_id: clientId, attached_files: attached });
   }

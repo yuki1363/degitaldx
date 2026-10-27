@@ -6,6 +6,7 @@
 //        body: { equipment_type, config?, default? }
 //        渡されたキー（config / default）だけ更新。変更前を master_history に退避（復元用）。
 
+import { writeAuditLog } from '../_lib/audit.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeMasterHistory } from '../_lib/history.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
@@ -66,6 +67,15 @@ export async function onRequestPut({ env, request, data }) {
      ON CONFLICT(equipment_type) DO UPDATE
        SET config_json = ?2, default_json = ?3, updated_by = ?4, updated_at = ?5`
   ).bind(type, newConfig, newDefault, data.user.email, now).run();
+
+  // 誰がいつどの設定を変えたかを監査ログにも残す（変更前の内容は master_history に退避済み）
+  await writeAuditLog(db, {
+    tableName: 'electrical_config',
+    recordId: type,
+    action: 'update',
+    changedBy: data.user.email,
+    diff: { equipment_type: type, changed: [hasConfig ? 'config' : null, hasDefault ? 'default' : null].filter(Boolean) },
+  });
 
   return json({ ok: true });
 }

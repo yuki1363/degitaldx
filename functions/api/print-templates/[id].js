@@ -4,6 +4,7 @@
 
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
+import { writeMasterHistory } from '../_lib/history.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { parseTemplateInput, attachTemplateImage } from './index.js';
@@ -28,6 +29,10 @@ export async function onRequestPut({ request, env, data, params }) {
   const now = nowIso();
   const userEmail = data.user.email;
 
+  // 変更前の定義（入力項目 fields_json を含む）を master_history に退避する。
+  // 誤って入力項目を消した・壊したときに、管理画面の「マスタ変更履歴」から戻せるように
+  await writeMasterHistory(db, { masterName: 'print_templates', recordId: id, snapshot: existing, changedBy: userEmail });
+
   await db.prepare(
     `UPDATE print_templates
         SET name = ?1, template_type = ?2, image_file_id = ?3, orientation = ?4, fields_json = ?5,
@@ -43,8 +48,8 @@ export async function onRequestPut({ request, env, data, params }) {
     action: 'update',
     changedBy: userEmail,
     diff: {
-      before: { name: existing.name, template_type: existing.template_type, orientation: existing.orientation, image_file_id: existing.image_file_id },
-      after: { name: v.name, template_type: v.template_type, orientation: v.orientation, image_file_id: v.image_file_id },
+      before: { name: existing.name, template_type: existing.template_type, orientation: existing.orientation, image_file_id: existing.image_file_id, fields_json: existing.fields_json },
+      after: { name: v.name, template_type: v.template_type, orientation: v.orientation, image_file_id: v.image_file_id, fields_json: v.fields_json },
     },
   });
 
@@ -68,7 +73,7 @@ export async function onRequestDelete({ env, data, params }) {
   const userEmail = data.user.email;
 
   await db.prepare(
-    `UPDATE print_templates SET deleted_by = ?1, deleted_at = ?2 WHERE id = ?3`
+    `UPDATE print_templates SET deleted_by = ?1, deleted_at = ?2, updated_by = ?1, updated_at = ?2 WHERE id = ?3`
   ).bind(userEmail, now, id).run();
 
   await writeAuditLog(db, {

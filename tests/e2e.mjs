@@ -1677,6 +1677,70 @@ const rnEq = (await api('/api/equipment')).json?.equipment || [];
 check('設備番号の振り直し: すべて NN-MM 形式で TMP- が残らない', rnEq.length > 0 && rnEq.every((e) => /^\d{2}-\d{2}$/.test(e.code)),
   JSON.stringify(rnEq.map((e) => e.code).slice(0, 10)));
 
+
+// ---------- 9.13 復元・履歴・監査の穴 ----------
+section('9.13 復元・履歴・監査');
+const historyOf = async (master) => ((await api(`/api/admin/masters?master_name=${master}&limit=50`)).json?.history || []);
+
+// 電気設備点検: 削除した記録は「削除済み」から復元でき、古い画面からの保存では復活しない
+const elRestoreId = 'E2ERST' + Date.now();
+await api('/api/electrical-inspections', { method: 'POST', body: { id: elRestoreId, equipmentType: 'main', date: '2032-06-01', inspector: 'E2E復元', statuses: {}, measurements: {} } });
+await api(`/api/electrical-inspections/${elRestoreId}`, { method: 'DELETE' });
+const elResave = await api('/api/electrical-inspections', { method: 'POST', body: { id: elRestoreId, equipmentType: 'main', date: '2032-06-01', inspector: 'E2E古い画面', statuses: {}, measurements: {} } });
+check('電気点検: 削除済みの記録は再保存で復活しない（409）', elResave.status === 409, `status=${elResave.status}`);
+const elDeleted = (await api('/api/admin/restore?table=electrical_inspection')).json;
+const elDelRow = (elDeleted?.records || []).find((r) => r.date_val === '2032-06-01');
+check('復元: 電気設備点検が削除済み一覧に出る（件数・ページ情報付き）', !!elDelRow && typeof elDeleted.total === 'number' && elDeleted.offset === 0);
+const elRestore = await api('/api/admin/restore', { method: 'POST', body: { table: 'electrical_inspection', id: elDelRow?.id } });
+const elAfterRestore = (await api('/api/electrical-inspections?equipment_type=main')).json?.records?.[elRestoreId];
+check('復元: 電気設備点検を復元できる', elRestore.status === 200 && elAfterRestore?.inspector === 'E2E復元', `status=${elRestore.status}`);
+await api(`/api/electrical-inspections/${elRestoreId}`, { method: 'DELETE' });
+
+// 電気設備点検の設定: 変更は監査ログに残り、マスタ変更履歴から元に戻せる
+const elCfgA = [{ id: 'r1', title: 'E2E設定A', checks: [], measurements: [] }];
+const elCfgB = [{ id: 'r1', title: 'E2E設定B', checks: [], measurements: [] }];
+await api('/api/electrical-config', { method: 'PUT', body: { equipment_type: 'generator', config: elCfgA } });
+await api('/api/electrical-config', { method: 'PUT', body: { equipment_type: 'generator', config: elCfgB } });
+const elCfgHist = (await historyOf('electrical_config')).find((h) => String(h.snapshot_json).includes('E2E設定A'));
+const elCfgRestore = await api('/api/admin/masters/restore', { method: 'POST', body: { history_id: elCfgHist?.id } });
+const elCfgNow = (await api('/api/electrical-config')).json?.generator;
+check('設定履歴: 電気設備点検の設定を履歴から戻せる', elCfgRestore.status === 200 && elCfgNow?.[0]?.title === 'E2E設定A', `status=${elCfgRestore.status} ${JSON.stringify(elCfgNow)?.slice(0, 80)}`);
+check('監査ログ: 電気設備点検の設定変更が残る',
+  ((await api('/api/admin/audit?table=electrical_config&limit=20')).json?.logs || []).some((l) => l.action === 'update'));
+
+// 帳票テンプレート: 入力項目（fields_json）の変更前を履歴に残し、戻せる
+const ptNew = await api('/api/print-templates', { method: 'POST', body: { name: 'E2E帳票', template_type: 'trouble_report', fields_json: [{ key: '旧項目', label: '旧項目', type: 'text' }] } });
+const ptId = ptNew.json?.id ?? ptNew.json?.template?.id;
+await api(`/api/print-templates/${ptId}`, { method: 'PUT', body: { name: 'E2E帳票', template_type: 'trouble_report', fields_json: [] } });
+const ptHist = (await historyOf('print_templates')).find((h) => Number(h.record_id) === ptId);
+const ptRestore = await api('/api/admin/masters/restore', { method: 'POST', body: { history_id: ptHist?.id } });
+const ptNow = ((await api('/api/print-templates')).json?.templates || []).find((t) => t.id === ptId);
+check('設定履歴: 帳票テンプレートの入力項目を履歴から戻せる', ptRestore.status === 200 && String(ptNow?.fields_json).includes('旧項目'),
+  `status=${ptRestore.status} new=${ptNew.status} ${String(ptNow?.fields_json).slice(0, 80)}`);
+await api(`/api/print-templates/${ptId}`, { method: 'DELETE' });
+check('復元: 帳票テンプレートが削除済み一覧に出る',
+  ((await api('/api/admin/restore?table=print_templates')).json?.records || []).some((r) => r.id === ptId));
+
+// ユーティリティ日報: 同じ日の記録があるときは復元しない（1日1件）
+const utRDate = '2032-07-01';
+const utR1 = await api('/api/utility-reports', { method: 'POST', body: { report_date: utRDate, values: {} } });
+await api(`/api/utility-reports/${utR1.json?.id}`, { method: 'DELETE' });
+const utR2 = await api('/api/utility-reports', { method: 'POST', body: { report_date: utRDate, values: {} } });
+const utRestore = await api('/api/admin/restore', { method: 'POST', body: { table: 'utility_report', id: utR1.json?.id } });
+check('復元: 同じ日のユーティリティ日報があるときは409', utRestore.status === 409, `status=${utRestore.status}`);
+await api(`/api/utility-reports/${utR2.json?.id}`, { method: 'DELETE' });
+
+// チャット: ピン留めしたまま削除すると、ピン留めも外れる（10日自動削除の対象に戻る）
+const pinDel = await api('/api/chat', { method: 'POST', body: { body: 'E2Eピン留め削除', channel: 'general' } });
+await api(`/api/chat/${pinDel.json?.id}`, { method: 'PUT', body: { pinned: true } });
+await api(`/api/chat/${pinDel.json?.id}`, { method: 'DELETE' });
+check('チャット: 削除するとピン一覧から消える', !((await api('/api/chat?channel=general&limit=10')).json?.pinned || []).some((p) => p.id === pinDel.json?.id));
+
+// 監査列: 設備の新規登録で更新者・更新日時も入る
+const eqAudit = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-AUD', name: 'E2E監査列設備' } });
+const eqAuditGot = (await api(`/api/equipment/${eqAudit.json?.id}`)).json?.equipment;
+check('監査列: 設備の新規登録で updated_by / updated_at が入る', !!eqAuditGot?.updated_by && !!eqAuditGot?.updated_at, JSON.stringify({ by: eqAuditGot?.updated_by, at: eqAuditGot?.updated_at }));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
