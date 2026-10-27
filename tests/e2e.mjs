@@ -510,7 +510,11 @@ const anList = await api('/api/plans?annual_only=1');
 const anThisRow = (anList.json?.plans || []).find((p) => p.title === 'E2E年間当月');
 const anPrevRow = (anList.json?.plans || []).find((p) => p.title === 'E2E年間先月');
 check('年間計画: 当月分は月単位判定で超過にならない', anThisRow?.status === 'pending', `status=${anThisRow?.status}`);
-check('年間計画: 先月分は超過になる', anPrevRow?.status === 'overdue', `status=${anPrevRow?.status}`);
+// 年間計画は月を「今の会計年度（10月始まり）」に当てはめて判定する。10月は年度の初月で、先月（9月）は
+// 前年度に属する＝今年度の9月（来年9月）として扱うため超過にならない。それ以外の月は先月分が超過。
+const isFyFirstMonth = new Date().toLocaleDateString('sv-SE').slice(5, 7) === '10';
+check(isFyFirstMonth ? '年間計画: 年度初月（10月）は前年度の9月分を超過にしない' : '年間計画: 先月分は超過になる',
+  anPrevRow?.status === (isFyFirstMonth ? 'pending' : 'overdue'), `status=${anPrevRow?.status}`);
 
 // ---------- 7.5 保全計画: 期間予定の「1日だけ削除」----------
 section('7.5 保全計画（期間予定の1日だけ削除）');
@@ -717,6 +721,68 @@ const prAfter = await api(`/api/plans/${prPlan.json?.id}`);
 check('印刷記録: 記録後は詳細に printed_at が入る', !!prAfter.json?.plan?.printed_at, `printed_at=${prAfter.json?.plan?.printed_at}`);
 const prMissing = await api('/api/plans/99999999/printed', { method: 'POST' });
 check('印刷記録: 存在しない計画は404', prMissing.status === 404, `status=${prMissing.status}`);
+
+
+// ---------- 7.8 年間計画の会計年度判定・年度リセット/部品全置き換えの権限 ----------
+section('7.8 年間計画（年度またぎの期限超過）・管理者限定操作');
+// 指定ユーザーとして API を呼ぶ（Access のメールヘッダーで識別。JWT 未設定のローカルでのみ有効）
+const apiAs = (email, path, opts) => page.evaluate(async ({ email, path, opts }) => {
+  const res = await fetch(path, {
+    method: opts?.method || 'GET',
+    headers: { 'Content-Type': 'application/json', 'Cf-Access-Authenticated-User-Email': email },
+    body: opts?.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let json = null;
+  try { json = await res.json(); } catch { /* JSONでないレスポンス */ }
+  return { status: res.status, json };
+}, { email, path, opts });
+
+// 年間計画は毎年共通のテンプレートで、予定日の年は登録年のまま残る。年込みで比べると
+// 年度リセット直後に前年度の月が一斉に「期限超過」になるため、月を今の会計年度に当てはめて判定する
+const nowJstYm = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
+const [nowY, nowM] = nowJstYm.split('-').map(Number);
+const mm2 = (m) => String(m).padStart(2, '0');
+// 今月（2年前の日付で登録）＝当月は月末までにやる扱い → 超過にならない
+const annCur = await api('/api/plans', { method: 'POST', body: { title: 'E2E年間_今月', plan_type: 'inspection', planned_date: `${nowY - 2}-${mm2(nowM)}-01`, annual_only: 1 } });
+check('年間計画: 登録（201）', annCur.status === 201, `status=${annCur.status}`);
+let annPrev = null;
+if (nowM !== 10) { // 10月は会計年度の初月で、同じ年度内に「前の月」が無い
+  const prevM = nowM === 1 ? 12 : nowM - 1;
+  annPrev = await api('/api/plans', { method: 'POST', body: { title: 'E2E年間_先月', plan_type: 'inspection', planned_date: `${nowY - 2}-${mm2(prevM)}-01`, annual_only: 1 } });
+}
+const annList = (await api('/api/plans?annual_only=1')).json?.plans || [];
+const annCurGot = annList.find((p) => p.id === annCur.json?.id);
+check('年間計画: 過去年の日付でも今月の予定は期限超過にならない', annCurGot?.status === 'pending', `status=${annCurGot?.status}`);
+if (annPrev) {
+  const annPrevGot = annList.find((p) => p.id === annPrev.json?.id);
+  check('年間計画: 今年度の過ぎた月の未実施は期限超過', annPrevGot?.status === 'overdue', `status=${annPrevGot?.status}`);
+}
+
+// 年度リセット・部品CSVの全置き換えは管理者のみ（入力可=editor は403、差分マージは可）
+const editorEmail = 'e2e-editor@example.com';
+const mkEditor = await api('/api/admin/users', { method: 'POST', body: { email: editorEmail, name: 'E2E入力者', role: 'editor' } });
+check('権限: 入力可ユーザーを作成（201/409）', mkEditor.status === 201 || mkEditor.status === 409, `status=${mkEditor.status}`);
+const resetByEditor = await apiAs(editorEmail, '/api/plans/annual-reset', { method: 'POST', body: { fiscal_year: 2099 } });
+check('権限: 年度リセットは入力可では403', resetByEditor.status === 403, `status=${resetByEditor.status}`);
+const replaceByEditor = await apiAs(editorEmail, '/api/parts/import', { method: 'POST', body: { mode: 'replace', rows: [{ name: 'E2E置換テスト' }] } });
+check('権限: 部品CSVの全置き換えは入力可では403', replaceByEditor.status === 403, `status=${replaceByEditor.status}`);
+const mergeByEditor = await apiAs(editorEmail, '/api/parts/import', { method: 'POST', body: { mode: 'merge', rows: [{ name: 'E2E入力者マージ部品' }] } });
+check('権限: 部品CSVの差分マージは入力可でも実行できる', mergeByEditor.status === 200, `status=${mergeByEditor.status}`);
+
+// 年度リセット（admin）: 監査ログに戻した予定のIDと変更前の状態が残る
+if (annCur.json?.id) await api(`/api/plans/${annCur.json.id}`, { method: 'PUT', body: { status: 'done' } });
+const resetRes = await api('/api/plans/annual-reset', { method: 'POST', body: { fiscal_year: 2098, force: true } });
+check('年度リセット: 管理者は実行できる（200）', resetRes.status === 200, `status=${resetRes.status} ${JSON.stringify(resetRes.json)}`);
+const resetAudit = await api('/api/admin/audit?table=maintenance_plan&limit=50');
+const resetEntry = (resetAudit.json?.logs || resetAudit.json?.entries || []).find((l) => String(l.record_id) === 'annual_reset');
+const resetDiff = (() => { try { return typeof resetEntry?.diff_json === 'string' ? JSON.parse(resetEntry.diff_json) : (resetEntry?.diff_json || resetEntry?.diff); } catch { return null; } })();
+check('年度リセット: 監査ログに戻した予定と変更前の状態が残る',
+  Array.isArray(resetDiff?.reset_plans) && resetDiff.reset_plans.some((r) => r.id === annCur.json?.id && r.from === 'done'),
+  JSON.stringify(resetDiff)?.slice(0, 200));
+const annAfter = ((await api('/api/plans?annual_only=1')).json?.plans || []);
+check('年度リセット: リセット直後に過去年の今月分が期限超過にならない',
+  annAfter.find((p) => p.id === annCur.json?.id)?.status === 'pending');
+for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
