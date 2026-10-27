@@ -48,8 +48,9 @@ export async function onRequestGet({ request, env }) {
   return json({ logs: logs ?? [] });
 }
 
+// 全タスクの完了状態をまとめて消す操作のため管理者のみ（画面のボタンも admin にだけ出す）
 export async function onRequestPost({ request, env, data }) {
-  const denied = requireRole(data.user, 'editor');
+  const denied = requireRole(data.user, 'admin');
   if (denied) return denied;
 
   const db = env.DB;
@@ -73,9 +74,16 @@ export async function onRequestPost({ request, env, data }) {
   const userEmail = data.user.email;
   const now = nowIso();
 
-  // annual_only=1 の全予定を pending にリセット
+  // annual_only=1 の全予定を pending にリセット。
+  // 監査用に、戻す対象のIDと変更前の状態を先に控える（件数だけだと誰が何を戻したか追えない）
   let resetCount = 0;
+  let targets = [];
   try {
+    const { results } = await db.prepare(
+      `SELECT id, status FROM maintenance_plan
+        WHERE annual_only = 1 AND deleted_at IS NULL AND status != 'pending'`
+    ).all();
+    targets = results ?? [];
     const result = await db.prepare(
       `UPDATE maintenance_plan SET status = 'pending', updated_by = ?, updated_at = ?
        WHERE annual_only = 1 AND deleted_at IS NULL AND status != 'pending'`
@@ -108,7 +116,12 @@ export async function onRequestPost({ request, env, data }) {
     recordId: 'annual_reset',
     action: 'update',
     changedBy: userEmail,
-    diff: { fiscal_year: fiscalYear, reset_count: resetCount },
+    diff: {
+      fiscal_year: fiscalYear,
+      reset_count: resetCount,
+      // 戻した予定と変更前の状態（D1 の Time Travel を使わずに、誤操作時の確認・手動復旧ができるように）
+      reset_plans: targets.map((t) => ({ id: t.id, from: t.status })),
+    },
   });
 
   return json({ ok: true, fiscal_year: fiscalYear, reset_count: resetCount });

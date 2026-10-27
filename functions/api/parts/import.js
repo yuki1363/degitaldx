@@ -1,5 +1,5 @@
 // 05: 部品在庫 — CSVインポート
-// POST /api/parts/import  フロントが CSV をパースして送った行データを取り込む（editor以上）
+// POST /api/parts/import  フロントが CSV をパースして送った行データを取り込む（差分マージ=editor以上／全置き換え=admin）
 //
 // mode: 'replace'（デフォルト）= 全置き換え（既存を全論理削除 → 再作成）
 // mode: 'merge'               = 差分マージ（型番一致で更新＝CSVで対応付けた列のみ・新規は追加・既存の他部品は不変）
@@ -44,6 +44,12 @@ export async function onRequestPost({ env, data, request }) {
   }
 
   const mode = body.mode === 'merge' ? 'merge' : 'replace';
+  // 全置き換えは全部品を論理削除して作り直す（入出庫履歴との紐づきも切れる）ため管理者のみ。
+  // 差分マージは既存部品を消さないので入力可（editor）でも実行できる。
+  if (mode === 'replace') {
+    const deniedReplace = requireRole(data.user, 'admin');
+    if (deniedReplace) return deniedReplace;
+  }
   const { DB } = env;
   const userEmail = data.user.email;
   const now = nowIso();

@@ -802,7 +802,9 @@ async function renderImport() {
   let csvHeaders = [];
   let csvRows = [];
   let mapping = {};
-  let importMode = 'replace'; // 'replace' | 'merge'
+  // 全置き換え（全部品を作り直す）は管理者のみ。入力可（editor）は差分マージだけ使える（サーバー側でも403）
+  const canReplace = hasRole(currentUser, 'admin');
+  let importMode = canReplace ? 'replace' : 'merge'; // 'replace' | 'merge'
 
   const mappingBox = el('div', {}, []);
   const previewBox = el('div', {}, []);
@@ -969,13 +971,13 @@ async function renderImport() {
       mergeTipEl.style.display  = importMode === 'merge'   ? '' : 'none';
     },
   }, [
-    el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）'),
+    canReplace ? el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）') : null,
     el('option', { value: 'merge' },   '差分マージ（型番一致で更新・新規のみ追加）'),
   ]);
 
-  const modeWarnEl = el('p', { class: 'notice is-error', style: 'margin-bottom:8px' },
+  const modeWarnEl = el('p', { class: 'notice is-error', style: `margin-bottom:8px${importMode === 'replace' ? '' : ';display:none'}` },
     '⚠ 既存の部品データはすべて置き換えられます。CSVの内容が新しい正データになります（現在の在庫数も上書き）。');
-  const mergeTipEl = el('p', { class: 'notice', style: 'margin-bottom:8px;display:none' },
+  const mergeTipEl = el('p', { class: 'notice', style: `margin-bottom:8px${importMode === 'merge' ? '' : ';display:none'}` },
     'ℹ 型番（model_no）が一致する既存部品は更新されます。CSV にない既存部品はそのまま残ります。型番が空の行は常に新規追加されます。');
 
   const fileInput = el('input', {

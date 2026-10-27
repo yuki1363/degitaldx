@@ -17,6 +17,9 @@ const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 // （月末までにやる扱い）。monthly を明示指定できるが、未指定なら plan.annual_only で自動判定。
 //   ※ 呼び出しは必ず (p) => deriveOverdue(p) の形にする。map に直接渡すと第2引数に
 //     配列の index が入り、通常予定まで月単位判定になってしまう。
+//   年間計画は「毎年共通のテンプレート」で、planned_date の年は登録した年のまま残る。年込みで
+//   比べると、年度リセットで未実施に戻した直後に前年度の月がすべて超過になる（通知も一斉に出る）
+//   ため、予定の「月」を今の会計年度（10月始まり）に当てはめて判定する（annualMonthInCurrentFy）。
 export function deriveOverdue(plan, monthly) {
   if (!plan || plan.status !== 'pending' || plan.unscheduled) return plan;
   const limit = (plan.planned_end_date || plan.planned_date || '').slice(0, 10);
@@ -24,9 +27,23 @@ export function deriveOverdue(plan, monthly) {
   const isMonthly = monthly ?? !!plan.annual_only;
   const nowJst = new Date(Date.now() + 9 * 3600_000).toISOString();
   if (isMonthly) {
-    return limit.slice(0, 7) < nowJst.slice(0, 7) ? { ...plan, status: 'overdue' } : plan;
+    const nowYm = nowJst.slice(0, 7);
+    return annualMonthInCurrentFy(limit, nowYm) < nowYm ? { ...plan, status: 'overdue' } : plan;
   }
   return limit < nowJst.slice(0, 10) ? { ...plan, status: 'overdue' } : plan;
+}
+
+// 会計年度の開始月（10月始まり9月終わり。js/plan-annual.js の currentFiscalYear と同じ）
+export const FISCAL_YEAR_START_MONTH = 10;
+
+// 年間計画の予定日（YYYY-MM-DD）の「月」を、今（nowYm = JSTの YYYY-MM）の会計年度の年月に当てはめる。
+// 例: 今が 2026-11（FY2026＝2026/10〜2027/09）なら、5月の予定は 2027-05、10月の予定は 2026-10。
+export function annualMonthInCurrentFy(dateStr, nowYm) {
+  const m = Number(String(dateStr).slice(5, 7));
+  const [nowY, nowM] = nowYm.split('-').map(Number);
+  const fyStartYear = nowM >= FISCAL_YEAR_START_MONTH ? nowY : nowY - 1;
+  const year = m >= FISCAL_YEAR_START_MONTH ? fyStartYear : fyStartYear + 1;
+  return `${year}-${String(m).padStart(2, '0')}`;
 }
 
 // 繰り返し予定を指定範囲内に展開して返す

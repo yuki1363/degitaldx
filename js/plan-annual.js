@@ -564,7 +564,7 @@ function toolbar() {
       hasRole(currentUser, 'editor')
         ? el('button', { class: 'btn btn-sm', onclick: () => renderPlanImport(year, () => renderYear()) }, '📤 CSV取込')
         : null,
-      hasRole(currentUser, 'editor')
+      hasRole(currentUser, 'admin')
         ? el('button', { class: 'btn btn-sm btn-danger', onclick: () => runAnnualReset(currentFiscalYear(), null) }, '🔁 年度リセット')
         : null,
     ]),

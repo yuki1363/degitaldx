@@ -18,10 +18,12 @@ const LEVEL_DOT = { alert: '#dc2626', warning: '#b45309', info: '#1e40af' };
 // ─── 年間計画: 期限超過 ＋ 今月末までの未完了（超過しそう）────────────
 //   年間計画のタスクは各月「1日」の日付で登録される（月単位の管理）。
 //   日単位で比較すると月の2日以降に当月分が「超過」になってしまうため、
-//   判定は年月（YYYY-MM）単位で行う: 予定月が過ぎたら超過、当月中は「今月末までにやる」。
+//   判定は月単位: 予定月が過ぎたら超過、当月中は「今月末までにやる」。
+//   年間計画は毎年共通のテンプレートで planned_date の年は登録年のまま残るため、超過かどうかは
+//   API が会計年度に当てはめて判定した status（deriveOverdue）を使い、ここでは年を比べない。
 async function fetchAnnualAlerts() {
-  // JSTの今日を基準にする（toISOStringはUTCのため朝9時まで前日扱いになる）
-  const curYm = new Date().toLocaleDateString('sv-SE').slice(0, 7); // 例: '2026-07'
+  // JSTの今月を基準にする（toISOStringはUTCのため朝9時まで前日扱いになる）
+  const curMonth = new Date().toLocaleDateString('sv-SE').slice(5, 7); // 例: '07'
 
   const { plans } = await api.get('/api/plans?annual_only=1');
   const overdue = [], thisMonth = [];
@@ -29,11 +31,10 @@ async function fetchAnnualAlerts() {
   for (const p of plans || []) {
     if (p.status === 'done') continue;
     if (p.unscheduled) continue;          // 未定は表示しない
-    const ym = (p.planned_date || '').slice(0, 7);
-    if (!ym) continue;
-    if (ym < curYm) {
+    if (!p.planned_date) continue;
+    if (p.status === 'overdue') {
       overdue.push(p);                    // 予定月が終わっても未完了 = 超過
-    } else if (ym === curYm) {
+    } else if (p.planned_date.slice(5, 7) === curMonth) {
       thisMonth.push(p);                  // 今月分 = 月末までにやる（超過ではない）
     }
   }
