@@ -412,6 +412,9 @@ async function renderForm(existing, prefill = null) {
       body.source_id = prefill.source_id;
     }
     if (!body.title) { alert('タイトルは必須です。'); return; }
+    // 保存中はボタンを無効化（遅い回線で2回タップすると依頼が2件できるため）
+    if (saveBtn.disabled) return;
+    saveBtn.disabled = true;
     try {
       if (existing) {
         await api.put(`/api/repairs/${existing.id}`, body);
@@ -435,8 +438,11 @@ async function renderForm(existing, prefill = null) {
         } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
       }
       alert(saveErrorMessage(err));
+    } finally {
+      saveBtn.disabled = false;
     }
   };
+  const saveBtn = el('button', { class: 'btn btn-primary', onclick: save }, '保存');
 
   render(app, [
     el('div', { class: 'card' }, [
@@ -459,7 +465,7 @@ async function renderForm(existing, prefill = null) {
       ]),
       field('詳細・症状', f.description),
       el('div', { class: 'action-row' }, [
-        el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
+        saveBtn,
         el('button', { class: 'btn', onclick: () => { guard.clear(); existing ? go(`?id=${existing.id}`) : go(''); } }, 'キャンセル'),
       ]),
     ]),

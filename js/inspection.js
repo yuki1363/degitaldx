@@ -209,6 +209,8 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
 
   // 写真・動画
   const pendingFiles = [];
+  // 送信済みファイルのID（保存が409等で失敗して押し直したとき、同じ写真を再アップロードしないため）
+  const uploadedIdOf = new WeakMap();
   const fileListBox = el('div', { class: 'row-list' }, []);
   const renderPending = () => {
     render(
@@ -304,9 +306,12 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
       // 写真・動画を先にアップロード（画像はリサイズ=EXIF除去）
       for (const f of pendingFiles) {
         saveBtn.textContent = `写真を送信中… (${fileIds.length + 1}/${pendingFiles.length})`;
-        const prepared = await resizeImageFile(f);
-        const meta = await uploadFile(prepared, {});
-        fileIds.push(meta.id);
+        if (!uploadedIdOf.has(f)) {
+          const prepared = await resizeImageFile(f);
+          const meta = await uploadFile(prepared, {});
+          uploadedIdOf.set(f, meta.id);
+        }
+        fileIds.push(uploadedIdOf.get(f));
       }
       saveBtn.textContent = '保存中…';
       const body = { ...baseBody, file_ids: fileIds };

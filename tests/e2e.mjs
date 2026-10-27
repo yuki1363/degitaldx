@@ -346,6 +346,44 @@ await page.waitForTimeout(2500);
 const synced = await api('/api/troubles');
 check('復帰後にサーバーへ自動送信', (synced.json?.troubles || []).some((t) => t.phenomenon === 'E2Eオフライン同期'));
 
+// 2つのタブ（PWAの窓とブラウザ等）で同時に復帰しても二重送信しない（Web Locks で端末内の送信を1つに絞る）
+const page2 = await context.newPage();
+await page2.goto(`${BASE}/pages/trouble`, { waitUntil: 'networkidle' });
+await page.goto(`${BASE}/pages/trouble?new=1`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+await context.setOffline(true);
+await page.fill('textarea[placeholder*="異音"]', 'E2E二重送信防止');
+await page.click('button:has-text("保存")');
+await page.waitForTimeout(1200);
+await context.setOffline(false);
+await Promise.all([page, page2].map((pg) => pg.evaluate(() => window.dispatchEvent(new Event('online')))));
+await page.waitForTimeout(3000);
+const dupCount = ((await api('/api/troubles')).json?.troubles || []).filter((t) => t.phenomenon === 'E2E二重送信防止').length;
+check('送信キュー: 2つのタブで同時に復帰しても1件だけ送信される', dupCount === 1, `件数=${dupCount}`);
+await page2.close();
+
+// 保存ボタンの連打で二重登録しない（保存中はボタンを無効化）
+await page.goto(`${BASE}/pages/repair?new=1`, { waitUntil: 'networkidle' });
+await page.fill('input[placeholder="例: 3号機 ポンプ異音"]', 'E2E連打防止依頼');
+await page.evaluate(() => {
+  const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存');
+  btn.click(); btn.click(); // 遅い回線での2回タップを再現（1回目の送信中に2回目）
+});
+await page.waitForTimeout(1500);
+const rpCount = ((await api('/api/repairs')).json?.repairs || []).filter((r) => r.title === 'E2E連打防止依頼').length;
+check('業務依頼: 保存ボタンを2回押しても1件だけ登録される', rpCount === 1, `件数=${rpCount}`);
+const dblPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E連打防止部品', quantity: 5, safety_stock: 0 } });
+await page.goto(`${BASE}/pages/parts?id=${dblPart.json?.id}`, { waitUntil: 'networkidle' });
+await page.evaluate(() => {
+  const sel = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => o.value === 'out'));
+  sel.value = 'out';
+  const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '更新');
+  btn.click(); btn.click();
+});
+await page.waitForTimeout(1500);
+const dblQty = (await api(`/api/parts/${dblPart.json?.id}`)).json?.part?.quantity;
+check('部品: 出庫の「更新」を2回押しても1回分だけ反映される', dblQty === 4, `在庫=${dblQty}`);
+
 // ---------- 6. 部品: 発注中→入庫で解除 ----------
 section('6. 発注状態管理');
 const p1 = await api('/api/parts', { method: 'POST', body: { name: 'E2Eテスト部品', safety_stock: 5, quantity: 1 } });
