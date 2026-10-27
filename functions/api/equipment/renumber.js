@@ -4,7 +4,7 @@
 //   UNIQUE 制約（論理削除済みも対象）と衝突しないよう、二段階更新＋削除済みコード退避を行う。
 import { json } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { auditStatement } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
 
 const CODE_RE = /^\d+-\d+$/;
@@ -49,40 +49,47 @@ export async function onRequestPost({ env, data }) {
     machines.forEach((eq, j) => finalCode.set(eq.id, `${pad(i + 1)}-${pad(j + 1)}`));
   });
 
-  // 削除済みで NN-MM 形式のコードは退避（有効設備の最終コードと衝突しないように）
+  // 以下の書き込みはすべて1トランザクション（D1 batch）で行う。1件ずつ実行していたときは、
+  // 途中で失敗すると設備番号が「TMP-12」のまま残った。batch なら失敗時は全部元に戻る。
+  const statements = [];
+  const setCode = (code, eqId) => db.prepare('UPDATE equipment_ledger SET code = ?1 WHERE id = ?2').bind(code, eqId);
+
+  // 削除済みで NN-MM 形式のコードは退避（有効設備の最終コードと衝突しないように）。
+  // 削除済みでも番号が変わるので監査ログに残す
   const { results: deleted } = await db.prepare(
     `SELECT id, code FROM equipment_ledger WHERE deleted_at IS NOT NULL`
   ).all();
   for (const d of deleted || []) {
     if (CODE_RE.test(d.code || '')) {
-      await db.prepare('UPDATE equipment_ledger SET code = ?1 WHERE id = ?2')
-        .bind(`DEL-${d.id}`, d.id).run();
+      statements.push(setCode(`DEL-${d.id}`, d.id));
+      statements.push(auditStatement(db, {
+        tableName: 'equipment_ledger', recordId: d.id, action: 'update', changedBy: userEmail,
+        diff: { code: { before: d.code, after: `DEL-${d.id}` }, reason: 'renumber_deleted' },
+      }));
     }
   }
 
   // 二段階更新: いったん一意な一時コードにしてから最終コードへ（途中の衝突を回避）
-  for (const eq of active) {
-    await db.prepare('UPDATE equipment_ledger SET code = ?1 WHERE id = ?2')
-      .bind(`TMP-${eq.id}`, eq.id).run();
-  }
+  for (const eq of active) statements.push(setCode(`TMP-${eq.id}`, eq.id));
 
   const updated = [];
   for (const eq of active) {
     const newCode = finalCode.get(eq.id);
-    await db.prepare(
+    statements.push(db.prepare(
       'UPDATE equipment_ledger SET code = ?1, updated_by = ?2, updated_at = ?3 WHERE id = ?4'
-    ).bind(newCode, userEmail, now, eq.id).run();
+    ).bind(newCode, userEmail, now, eq.id));
     if (eq.code !== newCode) {
       updated.push({ id: eq.id, old_code: eq.code, new_code: newCode });
-      await writeAuditLog(db, {
+      statements.push(auditStatement(db, {
         tableName: 'equipment_ledger',
         recordId: eq.id,
         action: 'update',
         changedBy: userEmail,
         diff: { code: { before: eq.code, after: newCode } },
-      });
+      }));
     }
   }
+  if (statements.length > 0) await db.batch(statements);
 
   return json({ updated: updated.length, total: active.length });
 }

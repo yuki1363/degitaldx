@@ -1607,6 +1607,69 @@ check('ヘッダー: API 応答に nosniff / X-Frame-Options が付く', hdr.api
   JSON.stringify(hdr.api));
 check('ヘッダー: テスト全体を通して CSP 違反が出ていない', cspViolations.length === 0, cspViolations.slice(0, 3).join(' / '));
 
+
+// ---------- 9.12 一括処理の原子化（D1 batch）・同時操作ガード ----------
+section('9.12 一括処理の原子化・同時操作ガード');
+const auditFor = async (table) => ((await api(`/api/admin/audit?table=${table}&limit=200`)).json?.logs || []);
+
+// 予定の一括登録: 全件が1トランザクションで登録され、監査ログが各予定のIDを指す（last_insert_rowid）
+const pb = await api('/api/plans/batch', { method: 'POST', body: { items: [
+  { title: 'E2E一括A', planned_date: '2032-01-01', plan_type: 'inspection', annual_only: 1 },
+  { title: 'E2E一括B', planned_date: '2032-02-01', plan_type: 'inspection', annual_only: 1 },
+] } });
+check('一括登録: 予定2件（201）', pb.status === 201 && pb.json?.ids?.length === 2 && pb.json.ids.every(Boolean), JSON.stringify(pb.json));
+const pbAudit = await auditFor('maintenance_plan');
+check('一括登録: 監査ログが各予定のIDで残る', (pb.json?.ids || []).every((pid) =>
+  pbAudit.some((l) => Number(l.record_id) === pid && l.action === 'create' && String(l.diff_json).includes('"batch":true'))));
+const pbBad = await api('/api/plans/batch', { method: 'POST', body: { items: [
+  { title: 'E2E一括C', planned_date: '2032-03-01', plan_type: 'inspection' },
+  { title: 'E2E一括D', planned_date: 'bad', plan_type: 'inspection' },
+] } });
+const pbBadLeft = ((await api('/api/plans?annual_only=1')).json?.plans || []).some((p) => p.title === 'E2E一括C');
+check('一括登録: 1件でも不正なら1件も登録しない', pbBad.status === 400 && !pbBadLeft, `status=${pbBad.status}`);
+for (const pid of pb.json?.ids || []) await api(`/api/plans/${pid}`, { method: 'DELETE' });
+
+// 点検のまとめ入力: 監査ログが各点検記録のIDを指す
+const ib = await api('/api/inspections/batch', { method: 'POST', body: {
+  inspected_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  entries: [{ equipment_id: eqSearchId, items: [{ master_id: mSearch.json?.id, value: 'ok' }] }],
+} });
+check('点検まとめ入力（201）', ib.status === 201 && ib.json?.saved?.length === 1, `status=${ib.status} ${JSON.stringify(ib.json)}`);
+const ibId = ib.json?.saved?.[0]?.id;
+check('点検まとめ入力: 監査ログが点検記録のIDで残る',
+  (await auditFor('inspection_result')).some((l) => Number(l.record_id) === ibId && l.action === 'create'));
+
+// 期間予定の「1日だけ完了」を同時に2回押しても、完了済みの単日レコードは1件だけ（2つ目は409）
+const cc = await api('/api/plans', { method: 'POST', body: { title: 'E2E同時完了', plan_type: 'construction', planned_date: '2032-05-10', planned_end_date: '2032-05-14' } });
+await api(`/api/plans/${cc.json?.id}/printed`, { method: 'POST' });
+const [cc1, cc2] = await page.evaluate(async (pid) => Promise.all([1, 2].map(() =>
+  fetch(`/api/plans/${pid}/complete-day`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: '2032-05-12' }) })
+    .then((r) => r.status))), cc.json?.id);
+// 2つ目は、1つ目と同時に読んでいれば 409（処理中の確保に失敗）、1つ目の完了後に読めば 400（その日は切り出し済み）
+check('1日完了: 同時に2回押すと片方だけ成功（もう片方は409/400）',
+  [cc1, cc2].filter((x) => x === 200).length === 1 && [cc1, cc2].some((x) => x === 409 || x === 400), `${cc1},${cc2}`);
+const ccPlans = ((await api('/api/plans?from=2032-05-01&to=2032-05-31')).json?.plans || []).filter((p) => p.title === 'E2E同時完了');
+check('1日完了: 完了済みの単日レコードは1件だけ', ccPlans.filter((p) => p.status === 'done').length === 1, JSON.stringify(ccPlans.map((p) => [p.planned_date, p.planned_end_date, p.status])));
+check('1日完了: 分割した予定にも工事連絡書の印刷日が引き継がれる', ccPlans.length === 3 && ccPlans.every((p) => !!p.printed_at),
+  JSON.stringify(ccPlans.map((p) => p.printed_at)));
+for (const p of ccPlans) await api(`/api/plans/${p.id}`, { method: 'DELETE' });
+
+// 棚卸調整: 履歴の増減は「書き込む瞬間の在庫」から計算される（在庫 3 → 実数 10 なら +7）
+const adjPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E棚卸調整部品', quantity: 3, safety_stock: 0 } });
+await api(`/api/parts/${adjPart.json?.id}/transaction`, { method: 'POST', body: { type: 'adjust', quantity: 10, note: '棚卸' } });
+const adjOut = await api(`/api/parts/${adjPart.json?.id}/transaction`, { method: 'POST', body: { type: 'out', quantity: 99 } });
+const adjGot = (await api(`/api/parts/${adjPart.json?.id}`)).json;
+check('棚卸調整: 在庫は実数・履歴の増減は+7', adjGot?.part?.quantity === 10 && (adjGot?.transactions || []).some((t) => t.type === 'adjust' && t.quantity === 7),
+  JSON.stringify(adjGot?.transactions));
+check('出庫: 在庫不足は400で、在庫も履歴も変わらない', adjOut.status === 400 && !(adjGot?.transactions || []).some((t) => t.type === 'out'));
+
+// 設備番号の振り直し: 1トランザクションで NN-MM に揃い、一時コード（TMP-）が残らない
+const rn = await api('/api/equipment/renumber', { method: 'POST' });
+check('設備番号の振り直し（200）', rn.status === 200, `status=${rn.status} ${JSON.stringify(rn.json)}`);
+const rnEq = (await api('/api/equipment')).json?.equipment || [];
+check('設備番号の振り直し: すべて NN-MM 形式で TMP- が残らない', rnEq.length > 0 && rnEq.every((e) => /^\d{2}-\d{2}$/.test(e.code)),
+  JSON.stringify(rnEq.map((e) => e.code).slice(0, 10)));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
