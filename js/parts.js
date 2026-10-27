@@ -568,8 +568,10 @@ async function renderDetail(id) {
     try {
       await api.post(`/api/parts/${id}/transaction`, { type, quantity, note });
       go(`?id=${id}`);
-    } catch (err) { alert(err.message); }
-    finally { txBtn.disabled = false; }
+    } catch (err) {
+      alert(err.message);
+      txBtn.disabled = false; // 失敗したときだけ押し直せるようにする（成功時は再描画まで無効のまま）
+    }
   };
   const txBtn = el('button', { class: 'btn btn-primary', onclick: doTransaction }, '更新');
 

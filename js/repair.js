@@ -438,8 +438,7 @@ async function renderForm(existing, prefill = null) {
         } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
       }
       alert(saveErrorMessage(err));
-    } finally {
-      saveBtn.disabled = false;
+      saveBtn.disabled = false; // 失敗したときだけ押し直せるようにする（成功時は遷移するまで無効のまま）
     }
   };
   const saveBtn = el('button', { class: 'btn btn-primary', onclick: save }, '保存');
