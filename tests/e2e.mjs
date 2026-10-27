@@ -914,6 +914,35 @@ const uploadTestImage = (filename) => page.evaluate(async (name) => {
   return { status: res.status, json: await res.json().catch(() => null) };
 }, filename);
 
+// チャット添付: 本人がアップロードした未紐づけファイルだけを受け付け、メッセージに紐づける
+// （他の記録のファイルIDを指定すると、10日後の自動削除でそのファイルが R2 から消えるため）
+const chatUp = await uploadTestImage('e2e-chat.png');
+const chatFileId = chatUp.json?.file?.id;
+const chatWithFile = await api('/api/chat', { method: 'POST', body: { body: 'E2E添付チャット', channel: 'general', file_ids: [chatFileId] } });
+check('チャット添付: 自分の未紐づけファイルは添付できる（201）', chatWithFile.status === 201, `status=${chatWithFile.status}`);
+const chatFiles = await api('/api/files');
+check('チャット添付: ファイルがメッセージに紐づく（related_table=chat_messages）',
+  (chatFiles.json?.files ?? []).some((f) => f.id === chatFileId && f.related_table === 'chat_messages' && f.related_id === chatWithFile.json?.id));
+const chatReuse = await api('/api/chat', { method: 'POST', body: { body: 'E2E添付の使い回し', channel: 'general', file_ids: [chatFileId] } });
+check('チャット添付: 紐づけ済み（他の記録）のファイルIDは400', chatReuse.status === 400, `status=${chatReuse.status}`);
+
+// 部品CSVの差分マージ: CSVで対応付けていない列（在庫数・場所など）は既存値を保つ
+const mergePart = await api('/api/parts', { method: 'POST', body: { name: 'E2Eマージ部品', model_no: 'E2E-MERGE-001', quantity: 7, location: 'E2E棚A', supplier: 'E2E商事' } });
+check('部品マージ: 事前登録（201）', mergePart.status === 201, `status=${mergePart.status}`);
+const mergeRes = await api('/api/parts/import', { method: 'POST', body: { mode: 'merge', rows: [{ model_no: 'E2E-MERGE-001', name: 'E2Eマージ部品 改' }] } });
+check('部品マージ: 取込（200・更新1件）', mergeRes.status === 200 && mergeRes.json?.updated === 1, JSON.stringify(mergeRes.json));
+const mergedPart = (await api(`/api/parts/${mergePart.json?.id}`)).json?.part;
+check('部品マージ: 部品名は更新される', mergedPart?.name === 'E2Eマージ部品 改', mergedPart?.name);
+check('部品マージ: 対応付けていない在庫数・場所・仕入先は保たれる',
+  mergedPart?.quantity === 7 && mergedPart?.location === 'E2E棚A' && mergedPart?.supplier === 'E2E商事', JSON.stringify(mergedPart));
+
+// limit の下限: 負の値でも LIMIT が無制限（-1）にならない
+const sNeg = await api(`/api/search?q=${encodeURIComponent('E2E')}&limit=-1`);
+const negByType = {};
+for (const r of sNeg.json?.results || []) negByType[r.type] = (negByType[r.type] || 0) + 1;
+check('検索: limit=-1 は1件に丸められる（種別ごとに最大1件）', sNeg.status === 200 && Object.values(negByType).every((n) => n <= 1) && Object.keys(negByType).length > 0,
+  JSON.stringify(negByType));
+
 // ---------- 9.6 電気設備点検（D1同期・別アプリ統合） ----------
 section('9.6 電気設備点検（/electrical/ + /api/electrical-*）');
 // 記録を POST → client_id キーで取得できる。has_abnormal は repair 混在で1（サーバー算出）
