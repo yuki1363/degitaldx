@@ -99,6 +99,12 @@ const at = (ymd) => { Date.now = () => new Date(`${ymd}T03:00:00Z`).getTime(); }
 const admin = { user: { email: 'admin@example.com', role: 'admin' } };
 const reset = async (body = {}) => {
   const res = await resetPost({ request: new Request('http://x/api/plans/annual-reset', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }), env, data: admin });
+  // nowIso() は new Date()（差し替えていない本物の時計）を使うため、記録されたリセット日時を
+  // 差し替えた時刻に合わせる（合わせないと、テストを実行した月によって結果が変わる）
+  if (res.status === 200) {
+    sqlite.prepare('UPDATE plan_reset_log SET reset_at = ? WHERE id = (SELECT MAX(id) FROM plan_reset_log)')
+      .run(new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/, 'Z'));
+  }
   return { status: res.status, json: await res.json().catch(() => null) };
 };
 const annual = (ym) => ({ id: 1, status: 'pending', annual_only: 1, planned_date: `2020-${ym}-01` });
@@ -167,6 +173,38 @@ try {
   sqlite.prepare(`INSERT INTO audit_log (table_name, record_id, action, changed_by, diff_json) VALUES ('maintenance_plan', ?, 'create', 't', '{"batch":true}')`).run(legacyId);
   await check();
   ok('旧形式の年間計画は当月中に期限超過を通知しない（月単位）', count('plan_overdue', legacyId) === 0, `n=${count('plan_overdue', legacyId)}`);
+
+  // ---- 旧画面で10月以降にリセットした履歴（始まったばかりの年度が記録されている）の補正 ----
+  // 旧画面は端末の時計の年度を送っていたため、2026年10月に押すと FY2026（実際は前の FY2025 を締めた）と記録していた
+  const fresh = await import(`${PLANS}?legacy=1`); // 補正は1回だけ行うため、モジュールを読み直して試す
+  sqlite.exec('DELETE FROM plan_reset_log');
+  sqlite.exec(`DELETE FROM audit_log WHERE table_name = 'plan_reset_log'`);
+  at('2026-10-28');
+  sqlite.exec(`INSERT INTO plan_reset_log (fiscal_year, reset_at, reset_by, plan_count, csv_snapshot) VALUES (2026, '2026-10-05T01:00:00Z', 'admin', 3, 'csv-of-fy2025')`);
+  st = await fresh.getAnnualFyState(env.DB);
+  ok('旧画面で今月リセット済み: 今年度は FY2026（FY2027 に進まない）', st.current === 2026 && st.lastReset === 2025 && st.resetTarget === 2026, JSON.stringify(st));
+  const fixed = sqlite.prepare('SELECT fiscal_year, csv_snapshot FROM plan_reset_log').all();
+  ok('履歴の年度を1つ前（FY2025）に直す（CSVスナップショットはそのまま）', fixed.length === 1 && fixed[0].fiscal_year === 2025 && fixed[0].csv_snapshot === 'csv-of-fy2025', JSON.stringify(fixed));
+  const fixAudit = sqlite.prepare(`SELECT changed_by, diff_json FROM audit_log WHERE table_name = 'plan_reset_log'`).all();
+  ok('補正は監査ログに残る（誰が・何から何へ）', fixAudit.length === 1 && fixAudit[0].changed_by === 'system:legacy-fy-fix' && JSON.parse(fixAudit[0].diff_json).fiscal_year.from === 2026, JSON.stringify(fixAudit));
+  st = await fresh.getAnnualFyState(env.DB);
+  ok('補正は1回だけ（2回目は何も変えない）', st.current === 2026 && sqlite.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE table_name = 'plan_reset_log'`).get().n === 1);
+  ok('補正後、10月分の未実施は超過にならず、来年度の予定も超過にならない',
+    fresh.deriveOverdue(annual('10'), { fy: st.current }).status === 'pending' && fresh.deriveOverdue(annual('05'), { fy: st.current }).status === 'pending');
+  // 旧画面で前年度（FY2025）を9月に正しく記録済みで、さらに今月も押した（二重）: 重複するため直せないが、年度は正しく数える
+  const fresh2 = await import(`${PLANS}?legacy=2`);
+  sqlite.exec('DELETE FROM plan_reset_log');
+  sqlite.exec(`INSERT INTO plan_reset_log (fiscal_year, reset_at, reset_by, plan_count) VALUES (2025, '2026-09-20T01:00:00Z', 'admin', 3)`);
+  sqlite.exec(`INSERT INTO plan_reset_log (fiscal_year, reset_at, reset_by, plan_count) VALUES (2026, '2026-10-05T01:00:00Z', 'admin', 0)`);
+  st = await fresh2.getAnnualFyState(env.DB);
+  ok('FY2025 を9月に記録済み＋10月にも押した場合: 重複は直さず、今年度は FY2026 のまま',
+    st.current === 2026 && sqlite.prepare('SELECT COUNT(*) AS n FROM plan_reset_log WHERE fiscal_year = 2026').get().n === 1, JSON.stringify(st));
+  // 新しい画面の記録は触らない（10月に前年度を締めた・9月の前倒し）
+  const fresh3 = await import(`${PLANS}?legacy=3`);
+  sqlite.exec('DELETE FROM plan_reset_log');
+  sqlite.exec(`INSERT INTO plan_reset_log (fiscal_year, reset_at, reset_by, plan_count) VALUES (2025, '2026-10-05T01:00:00Z', 'admin', 3)`);
+  st = await fresh3.getAnnualFyState(env.DB);
+  ok('新しい画面で10月に FY2025 を締めた記録は補正しない', st.current === 2026 && sqlite.prepare('SELECT fiscal_year FROM plan_reset_log').get().fiscal_year === 2025, JSON.stringify(st));
 } finally {
   Date.now = realNow;
 }
