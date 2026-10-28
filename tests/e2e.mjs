@@ -230,6 +230,29 @@ check('類似トラブル: exclude_idで自分を除外', Array.isArray(sim2.jso
 const sim3 = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('こんぷれっさ')}`);
 check('類似トラブル: あいまい（かなゆれ）でヒット', (sim3.json?.similar || []).length > 0);
 
+// 一致した語の多い順に並べる: よくある語だけに一致する新しい記録が多数あっても、全部の語に一致する古い記録が出る
+const rankOld = await api('/api/troubles', { method: 'POST', body: { occurred_at: '2020-01-10T01:00:00Z', phenomenon: 'E2E順位圧縮機 E2E順位異音', cause: '古い事例' } });
+const rankNew = [];
+for (let i = 0; i < 12; i++) {
+  rankNew.push(await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: `E2E順位異音 その${i}` } }));
+}
+const simRank = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('E2E順位圧縮機 E2E順位異音')}&limit=10`);
+check('類似トラブル: 全部の語に一致する古い記録が先頭（新しい順だけで切らない）', simRank.json?.similar?.[0]?.id === rankOld.json?.id,
+  JSON.stringify((simRank.json?.similar || []).slice(0, 3).map((x) => x.phenomenon)));
+// 設備名・ジャンルでも見つかる（現象に設備名を書いていない記録）
+const simEq = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-SIMEQ', name: 'E2E類似用ボイラー' } });
+const simEqT = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: '圧力が上がらない', equipment_id: simEq.json?.id } });
+const simByEq = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('E2E類似用ボイラー')}`);
+check('類似トラブル: 設備名でも見つかる', (simByEq.json?.similar || []).some((x) => x.id === simEqT.json?.id), JSON.stringify(simByEq.json));
+const simByCode = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('E2E-SIMEQ')}`);
+check('類似トラブル: 設備番号でも見つかる', (simByCode.json?.similar || []).some((x) => x.id === simEqT.json?.id));
+check('類似トラブル: 応答に検索用の内部列（hay）を含めない', !(simByEq.json?.similar || []).some((x) => 'hay' in x));
+// 4語目・5語目も使う（以前は3語目まで）
+const sim5w = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('あいう かきく さしす E2E類似用ボイラー たちつ')}`);
+check('類似トラブル: 4語目以降の語でも見つかる', (sim5w.json?.similar || []).some((x) => x.id === simEqT.json?.id));
+for (const t of [rankOld, ...rankNew, simEqT]) await api(`/api/troubles/${t.json?.id}`, { method: 'DELETE' });
+await api(`/api/equipment/${simEq.json?.id}`, { method: 'DELETE' });
+
 // 現象2文字未満はノイズ防止で空配列
 const sim4 = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent('あ')}`);
 check('類似トラブル: 1文字は空配列（ノイズ防止）', Array.isArray(sim4.json?.similar) && sim4.json.similar.length === 0);
