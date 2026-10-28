@@ -2438,6 +2438,14 @@ input.is-abnormal {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   white-space: nowrap;
 }
+/* 送信待ちバー: 文言・「今すぐ送信」・「失敗を確認」が並ぶため、スマホ幅では折り返す */
+#offline-queue-bar {
+  flex-wrap: wrap;
+  justify-content: center;
+  white-space: normal;
+  max-width: calc(100vw - 24px);
+}
+
 /* ○で1つ選択（休止区分など）: 選択肢を横並びにする */
 .pf-choice-row {
   display: flex;

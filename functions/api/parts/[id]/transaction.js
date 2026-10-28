@@ -3,6 +3,8 @@
 //   client_tx_id（任意・英数字と - で8〜64文字）: 端末が1回の操作ごとに作る識別番号。
 //   同じ番号の入出庫が既にあれば何もせず duplicate:true を返す（オフラインの送信待ちの再送や、
 //   通信が途中で切れて押し直したときに、同じ出庫が2回在庫に反映されないように）。
+//   ただし登録済みの内容（部品・種別・数量）が今回と違うときは 409 を返す（数量を変えて押し直した
+//   のに、変更前の内容で成功扱いになり、画面では変更後の数量が記録されたように見えるのを防ぐ）。
 
 import { requireRole } from '../../_lib/auth.js';
 import { writeAuditLog } from '../../_lib/audit.js';
@@ -23,6 +25,13 @@ async function runTxBatch(DB, clientTxId, statements) {
     throw err;
   }
 }
+
+// 同じ識別番号で登録済みの入出庫と、今回の内容が同じか。棚卸調整（adjust）は履歴の数量が増減分で、
+// 今回の絶対値と比べられないため、部品と種別だけ比べる
+function sameTransaction(row, { partId, type, delta }) {
+  return Number(row.part_id) === partId && row.type === type && (type === 'adjust' || Number(row.quantity) === delta);
+}
+const CLIENT_TX_CONFLICT = '同じ識別番号で、内容の違う入出庫が既に登録されています。画面を開き直して、もう一度記録してください。';
 
 export async function ensurePartsTxColumns(db) {
   await ensureColumns(db, 'parts_transaction_client_tx', [
@@ -83,11 +92,18 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
     return jsonError(400, 'related_id は整数で指定してください。');
   }
 
+  // 入庫・出庫の増減分（棚卸調整は書き込む瞬間の在庫で決まる）。登録済みの同じ識別番号との比較に使う
+  const expectedDelta = type === 'in' ? bodyQty : type === 'out' ? -bodyQty : null;
+  const wanted = { partId: id, type, delta: expectedDelta };
+
   // 同じ識別番号の入出庫が登録済みなら、もう反映済み（再送・押し直し）。何もしないで現在の在庫を返す
   await ensurePartsTxColumns(DB);
   if (clientTxId !== null) {
-    const done = await DB.prepare('SELECT id FROM parts_transaction WHERE client_tx_id = ?1').bind(clientTxId).first();
-    if (done) return json({ ok: true, duplicate: true, quantity: part.quantity });
+    const done = await DB.prepare('SELECT part_id, type, quantity FROM parts_transaction WHERE client_tx_id = ?1').bind(clientTxId).first();
+    if (done) {
+      if (!sameTransaction(done, wanted)) return jsonError(409, CLIENT_TX_CONFLICT);
+      return json({ ok: true, duplicate: true, quantity: part.quantity });
+    }
   }
 
   // 在庫の更新と入出庫履歴の登録は1トランザクション（D1 batch）で行う。別々に実行していると、
@@ -144,6 +160,9 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
     }
   } catch (err) {
     if (err !== DUPLICATE_TX) throw err;
+    // 同時に同じ番号が届いて、先に登録された方がある。内容が同じなら反映済み、違えば 409
+    const done = await DB.prepare('SELECT part_id, type, quantity FROM parts_transaction WHERE client_tx_id = ?1').bind(clientTxId).first();
+    if (done && !sameTransaction(done, wanted)) return jsonError(409, CLIENT_TX_CONFLICT);
     const cur = await DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id).first();
     return json({ ok: true, duplicate: true, quantity: cur?.quantity ?? part.quantity });
   }

@@ -2177,6 +2177,95 @@ check('部品ラベル: 指定した部品だけを型番・部品名・場所�
   JSON.stringify(rtLabel));
 await api(`/api/parts/${rtId}`, { method: 'DELETE' });
 
+// ---------- 9.20 在庫: 識別番号の内容比較・オフライン画面の連続記録・送信待ち失敗の確認と破棄 ----------
+section('9.20 在庫の再点検対応（同じ識別番号で内容違いは409・連続記録・失敗の確認と破棄）');
+const kPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E再点検部品', model_no: 'E2E-K-1', location: '棚K', quantity: 10, safety_stock: 1 } });
+const kId = kPart.json?.id;
+const kTx = (body) => api(`/api/parts/${kId}/transaction`, { method: 'POST', body });
+const kQty = async () => (await api(`/api/parts/${kId}`)).json?.part?.quantity;
+// 同じ識別番号でも、数量・種別が違えば成功扱いにしない（変更後の内容が記録されたように見えてしまう）
+const k1 = await kTx({ type: 'out', quantity: 1, client_tx_id: 'e2e-k-tx-0001' });
+const k2 = await kTx({ type: 'out', quantity: 5, client_tx_id: 'e2e-k-tx-0001' });
+const k3 = await kTx({ type: 'in', quantity: 1, client_tx_id: 'e2e-k-tx-0001' });
+const k4 = await kTx({ type: 'out', quantity: 1, client_tx_id: 'e2e-k-tx-0001' });
+check('識別番号: 同じ内容の再送は成功（duplicate）、数量違い・種別違いは409で在庫を変えない',
+  k1.status === 200 && k2.status === 409 && k3.status === 409 && k4.status === 200 && k4.json?.duplicate === true && (await kQty()) === 9,
+  JSON.stringify([k1.status, k2.status, k3.status, k4.json]));
+const [kc1, kc2] = await Promise.all([kTx({ type: 'out', quantity: 1, client_tx_id: 'e2e-k-tx-0002' }), kTx({ type: 'out', quantity: 2, client_tx_id: 'e2e-k-tx-0002' })]);
+const kcStatuses = [kc1.status, kc2.status].sort();
+const kcAfter = await kQty();
+check('識別番号: 同じ番号で内容違いが同時に届いても、片方だけ反映して片方は409',
+  kcStatuses[0] === 200 && kcStatuses[1] === 409 && (kcAfter === 8 || kcAfter === 7), JSON.stringify({ kcStatuses, kcAfter }));
+const kAdj1 = await kTx({ type: 'adjust', quantity: 20, client_tx_id: 'e2e-k-tx-0003' });
+const kAdj2 = await kTx({ type: 'adjust', quantity: 20, client_tx_id: 'e2e-k-tx-0003' });
+check('識別番号: 棚卸調整の再送は二重に反映されない', kAdj1.status === 200 && kAdj2.json?.duplicate === true && (await kQty()) === 20);
+await kTx({ type: 'adjust', quantity: 10 });
+
+// 電波のない画面で続けて記録できる（1回記録するとボタンが押せなくなっていた）→ 復帰で全部送られる
+await page.goto(`${BASE}/pages/parts?id=${kId}`, { waitUntil: 'networkidle' }); // 端末に部品の目安を保存
+await context.setOffline(true);
+await page.goto(`${BASE}/pages/parts?id=${kId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForSelector('.quick-record', { timeout: 10000 });
+const kOutBtn = '.quick-record .quick-btn:has-text("出庫")';
+await page.click(kOutBtn);
+await page.waitForTimeout(500);
+const kBtnAfterFirst = await page.evaluate(() => [...document.querySelectorAll('.quick-record .quick-btn')].map((b) => b.disabled));
+check('オフライン: 1回記録した後も、出庫・入庫ボタンが押せる（続けて記録できる）', kBtnAfterFirst.every((d) => !d), JSON.stringify(kBtnAfterFirst));
+await page.click(kOutBtn); // 同じ内容（出庫1）をもう一度
+await page.waitForTimeout(400);
+await page.click('.quick-record button[aria-label="数量を増やす"]');
+await page.click('.quick-record button[aria-label="数量を増やす"]');
+await page.click(kOutBtn); // 出庫3
+await page.waitForTimeout(500);
+const kQueuedText = await page.evaluate(() => document.querySelector('.offline-queued')?.textContent || '');
+check('オフライン: 同じ内容を2回・別の数量も、それぞれ送信待ちに積まれる', (kQueuedText.match(/出庫 −/g) || []).length === 3 && kQueuedText.includes('−3'), kQueuedText);
+// 電波が戻ったあと、そのまま記録しても、記録欄と編集ボタンが消えない（権限情報を取り直す）
+await context.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+await page.waitForTimeout(2500);
+check('オフライン: 復帰後に3件とも送信され、在庫が合計5減る（二重に引かれない）', (await kQty()) === 5, `qty=${await kQty()}`);
+
+// 権限情報が取れないまま開いた画面でも、電波が戻って記録したあとに記録欄が出る
+await context.setOffline(true);
+await page.goto(`${BASE}/pages/parts?id=${kId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForSelector('.quick-record', { timeout: 10000 });
+await context.setOffline(false);
+await page.click(kOutBtn);
+await page.waitForFunction(() => [...document.querySelectorAll('.info-row')].some((r) => r.textContent.includes('在庫数') && !r.textContent.includes('目安')), { timeout: 8000 }).catch(() => {});
+check('オフラインで開いた画面: 電波が戻って記録できたら、通常の部品画面（記録欄つき）に切り替わる',
+  await page.evaluate(() => !!document.querySelector('.quick-record') && !![...document.querySelectorAll('.info-row')].find((r) => r.textContent.includes('在庫数') && !r.textContent.includes('目安'))));
+check('オフラインで開いた画面: その出庫も反映される', (await kQty()) === 4, `qty=${await kQty()}`);
+
+// 送信できなかった記録（在庫不足）: 理由が見え、破棄できる。在庫は変わらない
+await kTx({ type: 'adjust', quantity: 2 });
+await page.goto(`${BASE}/pages/parts?id=${kId}`, { waitUntil: 'networkidle' });
+await context.setOffline(true);
+await page.goto(`${BASE}/pages/parts?id=${kId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForSelector('.quick-record', { timeout: 10000 });
+for (let i = 0; i < 4; i++) await page.click('.quick-record button[aria-label="数量を増やす"]'); // 数量5
+await page.click(kOutBtn); // 在庫2に対して出庫5（電波が戻ると在庫不足で失敗する）
+await page.waitForTimeout(500);
+await context.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+await page.waitForTimeout(2500);
+const kBar = await page.evaluate(() => ({
+  text: document.getElementById('offline-queue-bar')?.textContent || '',
+  detailBtn: [...document.querySelectorAll('#offline-queue-bar button')].some((b) => b.textContent.includes('失敗を確認') && b.style.display !== 'none'),
+  overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+}));
+check('送信待ちで失敗: バーに「うち失敗」と「失敗を確認」が出る（在庫は変わらない）', kBar.text.includes('うち失敗 1件') && kBar.detailBtn && (await kQty()) === 2, JSON.stringify(kBar));
+await page.click('#offline-queue-bar .queue-failed-btn');
+await page.waitForSelector('#offline-failed-dialog .queue-failed-row', { timeout: 5000 });
+const kDlg = await page.evaluate(() => document.querySelector('#offline-failed-dialog')?.innerText || '');
+check('失敗の確認: 部品名・出庫5・失敗の理由（在庫不足）が見える', kDlg.includes('E2E再点検部品') && kDlg.includes('出庫 −5') && kDlg.includes('在庫不足'), kDlg.slice(0, 200));
+await page.click('#offline-failed-dialog .queue-failed-row button:has-text("破棄")'); // confirm は自動承諾
+await page.waitForTimeout(600);
+check('失敗の破棄: 一覧から消え、閉じるとバーも消える', await page.evaluate(() => !document.querySelector('#offline-failed-dialog .queue-failed-row')));
+await page.click('#offline-failed-dialog button:has-text("閉じる")');
+await page.waitForTimeout(300);
+check('失敗の破棄: 送信待ちバーが残らない・在庫は変わらない', await page.evaluate(() => !document.getElementById('offline-queue-bar')) && (await kQty()) === 2);
+await api(`/api/parts/${kId}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
