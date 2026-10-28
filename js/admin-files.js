@@ -37,6 +37,45 @@ function meterRow(label, usedBytes, limitBytes) {
   ]);
 }
 
+// Cloudflare の API から取る利用量（/api/admin/usage の cloudflare.items）。表示名・単位・期間
+const CF_ITEMS = [
+  { key: 'workers_requests', label: '⚙ Workers リクエスト（Pages Functions を含む）', unit: '回' },
+  { key: 'd1_rows_read', label: '🗄 D1 読取行数', unit: '行' },
+  { key: 'd1_rows_written', label: '🗄 D1 書込行数', unit: '行' },
+  { key: 'r2_class_a', label: '📦 R2 Class A 操作（アップロード・一覧など）', unit: '回' },
+  { key: 'r2_class_b', label: '📦 R2 Class B 操作（ファイルの表示・取得）', unit: '回' },
+  { key: 'ai_neurons', label: '🤖 Workers AI（ニューロン）', unit: 'ニューロン' },
+  { key: 'pages_builds', label: '🚀 Pages ビルド（デプロイ数・概算）', unit: '回' },
+];
+const PERIOD_LABELS = { day: '今日', month: '今月' };
+const fmtNum = (n) => Number(n || 0).toLocaleString('ja-JP');
+
+// 回数・行数のメーター。80%で黄・90%で赤（課金・停止の手前で気づけるように）
+function countRow(def, it) {
+  const period = PERIOD_LABELS[it.period] || '';
+  const freeText = `無料枠 ${fmtNum(it.limit)}${def.unit}/${it.period === 'month' ? '月' : '日'}`;
+  if (it.error != null || it.used == null) {
+    return el('div', { class: 'cf-usage-row', style: 'margin:10px 0' }, [
+      el('strong', {}, def.label),
+      el('div', { class: 'hint' }, `取得できませんでした（${freeText}・Cloudflare ダッシュボードで確認してください）`),
+      it.error ? el('div', { class: 'hint', style: 'font-size:11px;color:#94a3b8;word-break:break-all' }, String(it.error)) : null,
+    ]);
+  }
+  const pct = it.limit > 0 ? Math.min(100, Math.round((it.used / it.limit) * 1000) / 10) : 0;
+  const barColor = pct >= 90 ? '#dc2626' : pct >= 80 ? '#d97706' : '#16a34a';
+  return el('div', { class: 'cf-usage-row', style: 'margin:10px 0' }, [
+    el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap' }, [
+      el('strong', {}, def.label),
+      el('span', { class: 'hint cf-usage-value' }, `${period} ${fmtNum(it.used)} / ${fmtNum(it.limit)}${def.unit}（${pct}%）`),
+    ]),
+    el('div', { style: 'height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden;margin-top:4px' }, [
+      el('div', { style: `height:100%;width:${pct}%;background:${barColor}` }),
+    ]),
+    it.partial ? el('div', { class: 'hint' }, '※ Workers と Pages Functions の片方しか取得できなかったため、取得できた分だけの数です') : null,
+    pct >= 80 ? el('div', { class: 'hint', style: 'color:#b45309' }, `⚠ 無料枠の${pct}%です（${freeText}）`) : null,
+  ]);
+}
+
 export async function renderFileManager(container) {
   let filterMode = 'all';   // 'all' | 'deleted'（論理削除済みのみ）| 'orphan'（未添付のみ）
   let files = [];
@@ -46,10 +85,10 @@ export async function renderFileManager(container) {
   const usageBox = el('div', {});
   const listBox = el('div', {});
 
-  const fetchData = async () => {
+  const fetchData = async ({ refresh = false } = {}) => {
     const [filesRes, usageRes] = await Promise.all([
       api.get('/api/files'),
-      api.get('/api/admin/usage').catch(() => null),
+      api.get(`/api/admin/usage${refresh ? '?refresh=1' : ''}`).catch(() => null),
     ]);
     files = filesRes.files || [];
     usage = filesRes.usage || null;
@@ -118,16 +157,39 @@ export async function renderFileManager(container) {
       ]));
     }
 
-    // アプリから取得できない無料枠 → Cloudflare ダッシュボードへ誘導
-    rows.push(el('div', { style: 'margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb' }, [
-      el('div', { class: 'hint' }, 'アプリから取得できない無料枠（Cloudflare ダッシュボードで確認）:'),
-      el('ul', { class: 'hint', style: 'margin:4px 0 6px;padding-left:18px' }, [
-        el('li', {}, 'Workers リクエスト 10万/日（Pages Functions）'),
-        el('li', {}, 'D1 読取 500万行/日・書込 10万行/日'),
-        el('li', {}, 'Pages ビルド 500回/月'),
-      ]),
-      el('a', { class: 'btn btn-sm', href: 'https://dash.cloudflare.com/', target: '_blank', rel: 'noopener' }, 'Cloudflare ダッシュボードを開く'),
-    ]));
+    // Cloudflare の API から取る利用量（リクエスト・行数・操作回数・AI・ビルド）
+    const cf = freeTier && freeTier.cloudflare;
+    const dashLink = el('a', { class: 'btn btn-sm', href: 'https://dash.cloudflare.com/', target: '_blank', rel: 'noopener' }, 'Cloudflare ダッシュボードを開く');
+    if (cf && cf.configured && cf.items) {
+      rows.push(el('div', { id: 'cf-usage', style: 'margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb' }, [
+        el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap' }, [
+          el('div', { class: 'hint' },
+            `Cloudflare から取得（${formatDateTime(cf.fetched_at)} 時点）。今日＝UTC 0時（日本時間 9時）から、今月＝UTC の1日から。5分ごとに更新`),
+          el('button', { class: 'btn btn-sm', onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { await fetchData({ refresh: true }); renderUsage(); } catch (err) { alert(err.message); }
+          } }, '🔄 再取得'),
+        ]),
+        ...CF_ITEMS.map((def) => (cf.items[def.key] ? countRow(def, cf.items[def.key]) : null)),
+        el('div', { class: 'hint' }, 'Workers AI は Workers 無料プランなら無料枠を超えても課金されず、その日は使えなくなります（有料プランでは超過分が課金）。'),
+        dashLink,
+      ]));
+    } else {
+      rows.push(el('div', { id: 'cf-usage', style: 'margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb' }, [
+        el('div', { class: 'hint' }, cf && cf.error
+          ? `Cloudflare の利用量を取得できませんでした（${cf.error}）。次の無料枠は Cloudflare ダッシュボードで確認してください:`
+          : 'Cloudflare の利用量は未設定のため表示していません。次の無料枠は Cloudflare ダッシュボードで確認してください:'),
+        el('ul', { class: 'hint', style: 'margin:4px 0 6px;padding-left:18px' }, [
+          el('li', {}, 'Workers リクエスト 10万/日（Pages Functions を含む）'),
+          el('li', {}, 'D1 読取 500万行/日・書込 10万行/日'),
+          el('li', {}, 'R2 Class A 100万回/月・Class B 1000万回/月'),
+          el('li', {}, 'Workers AI 1万ニューロン/日'),
+          el('li', {}, 'Pages ビルド 500回/月'),
+        ]),
+        el('div', { class: 'hint' }, 'この画面に表示するには、Pages の環境変数に CF_API_TOKEN（読み取り専用トークン）・CF_ACCOUNT_ID を設定します（手順は README）。'),
+        dashLink,
+      ]));
+    }
 
     if (overWarn) {
       rows.push(el('p', { class: 'notice is-warning', style: 'margin:10px 0 0' },
