@@ -189,7 +189,7 @@ async function sendQueued() {
     showToast(`📤 オフライン保存していた ${summary} を送信しました`, 6000);
   }
   if (stillFailed > 0) {
-    showToast('⚠ 送信できなかった記録があります（送信待ちバーから再試行できます）', 8000);
+    showToast('⚠ 送信できなかった記録があります（バーの「失敗を確認」で理由を見て、再送か破棄を選べます）', 8000);
   }
 }
 
@@ -206,6 +206,86 @@ function showToast(text, ms = 5000) {
   setTimeout(() => toast.remove(), ms);
 }
 
+// 送信待ち1件の中身を、人が読める1行にする（失敗した記録を確認する画面用）
+function describeItem(item) {
+  const p = item.payload || {};
+  const cut = (v, n = 30) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
+  switch (item.kind) {
+    case 'parts_tx': {
+      let name = `部品 #${p.part_id}`;
+      try { const snap = JSON.parse(localStorage.getItem(`parts:snap:${p.part_id}`) || 'null'); if (snap?.name) name = snap.name; } catch { /* 名前が分からなくても番号で表示 */ }
+      return `${name}：${p.type === 'in' ? '入庫 +' : p.type === 'out' ? '出庫 −' : '棚卸 '}${p.quantity}`;
+    }
+    case 'trouble': return cut(p.phenomenon);
+    case 'inspection': return `設備 #${p.equipment_id ?? '?'} の点検`;
+    case 'repair': return cut(p.title);
+    case 'report': return cut(p.body);
+    default: return '';
+  }
+}
+
+// 送信できなかった（failed）記録の一覧。理由を見て、再送か破棄を選べる。
+//   理由が見えず捨てることもできないと、在庫不足・部品の削除・権限なしで失敗した記録が、
+//   全ページ下部のバーに出続けた
+function openFailedDialog() {
+  if (document.getElementById('offline-failed-dialog')) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'offline-failed-dialog';
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  backdrop.appendChild(modal);
+  const close = () => { backdrop.remove(); updateBar(); };
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  document.body.appendChild(backdrop);
+
+  const mk = (tag, text, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const draw = async () => {
+    const failed = (await getAll()).filter((i) => i.status === 'failed');
+    modal.textContent = '';
+    modal.append(mk('h3', '送信できなかった記録', 'modal-title'));
+    if (failed.length === 0) {
+      modal.append(mk('p', '送信できなかった記録はありません。', 'hint'));
+    } else {
+      modal.append(mk('p', '電波が戻っても送れなかった記録です。理由を確認し、直せる場合は「再送」、不要なら「破棄」してください（破棄した記録は元に戻せません）。', 'hint'));
+    }
+    for (const item of failed) {
+      const row = mk('div', null, 'queue-failed-row');
+      row.style.cssText = 'border-top:1px solid #e5e7eb;padding:8px 0';
+      row.append(mk('strong', `${KIND_LABELS[item.kind] || item.kind}　${describeItem(item)}`));
+      const when = mk('div', `保存: ${new Date(item.created_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false })}`, 'hint');
+      row.append(when);
+      const reason = mk('div', `理由: ${item.error || '不明'}`);
+      reason.style.cssText = 'color:#dc2626;margin:2px 0 6px';
+      row.append(reason);
+      const actions = mk('div', null, 'modal-actions');
+      const retry = mk('button', '再送', 'btn btn-sm');
+      retry.addEventListener('click', async () => {
+        item.status = 'pending'; item.error = null;
+        await updateItem(item);
+        await flushOutbox();
+        await draw();
+      });
+      const drop = mk('button', '破棄', 'btn btn-sm btn-danger');
+      drop.addEventListener('click', async () => {
+        if (!confirm(`この記録を破棄します。サーバーには送られず、元に戻せません。\n\n${KIND_LABELS[item.kind] || item.kind}　${describeItem(item)}\n理由: ${item.error || '不明'}`)) return;
+        await removeItem(item.id);
+        await draw();
+        updateBar();
+      });
+      actions.append(retry, drop);
+      row.append(actions);
+      modal.append(row);
+    }
+    const actions = mk('div', null, 'modal-actions');
+    const closeBtn = mk('button', '閉じる', 'btn');
+    closeBtn.addEventListener('click', close);
+    actions.append(closeBtn);
+    modal.append(actions);
+  };
+  draw();
+}
+
 async function updateBar() {
   let items = [];
   try { items = await getAll(); } catch { return; }
@@ -219,6 +299,8 @@ async function updateBar() {
     (navigator.onLine === false ? ' — オンラインになると自動送信' : '');
   if (bar) {
     bar.querySelector('span').textContent = label;
+    const detail = bar.querySelector('.queue-failed-btn');
+    if (detail) detail.style.display = failed ? '' : 'none';
     return;
   }
   const wrap = document.createElement('div');
@@ -237,7 +319,13 @@ async function updateBar() {
     }
     flushOutbox();
   });
-  wrap.append(msg, btn);
+  // 失敗した記録の理由を見て、再送か破棄を選ぶ（失敗があるときだけ表示）
+  const detailBtn = document.createElement('button');
+  detailBtn.className = 'btn btn-sm queue-failed-btn';
+  detailBtn.textContent = '失敗を確認';
+  detailBtn.style.display = failed ? '' : 'none';
+  detailBtn.addEventListener('click', openFailedDialog);
+  wrap.append(msg, btn, detailBtn);
   document.body.appendChild(wrap);
 }
 

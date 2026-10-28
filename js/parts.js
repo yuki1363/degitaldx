@@ -21,6 +21,21 @@ const AUTO_REFRESH_MS = Number(window.__PARTS_REFRESH_MS__) || 20_000;
 // 1回の入出庫の識別番号。押し直し・送信待ちの再送でも同じ番号を送り、サーバーは2回反映しない
 const newTxId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
 
+// 識別番号の置き場。同じ内容（種別・数量）の押し直しには同じ番号を使い回し（通信が切れて結果が分からない
+// ときに2回反映しない）、内容を変えたら新しい番号にする（変えたのに前の内容の記録として扱われない）。
+// 記録できたら（送信待ちに保存した場合も）その内容の番号は捨て、次に同じ内容を記録するときは新しい番号にする
+function makeTxIdPool() {
+  const ids = new Map();
+  return {
+    get(type, qty) {
+      const key = `${type}:${qty}`;
+      if (!ids.has(key)) ids.set(key, newTxId());
+      return ids.get(key);
+    },
+    done(type, qty) { ids.delete(`${type}:${qty}`); },
+  };
+}
+
 // 入出庫を記録する。電波が無いとき（入庫・出庫のみ）は送信待ちに保存して { queued:true } を返す。
 //   棚卸調整は絶対値なので、後から送ると間の出庫を消してしまうため送信待ちにしない
 async function recordTransaction(partId, { type, quantity, note }, txId) {
@@ -59,7 +74,7 @@ const queuedText = (items) => items.map((i) => `${i.payload.type === 'in' ? '入
 //   onDone(result) … 記録できた／送信待ちに保存したあとの処理
 function buildQuickRecord(partId, onDone) {
   let qty = 1;
-  let txId = newTxId();
+  const txIds = makeTxIdPool();
   let busy = false;
   const qtyEl = el('span', { class: 'quick-qty-value' }, '1');
   const setQty = (n) => { qty = Math.max(1, Math.min(9999, n)); qtyEl.textContent = String(qty); };
@@ -68,10 +83,18 @@ function buildQuickRecord(partId, onDone) {
     if (busy) return; // 2回タップで2回反映しない
     busy = true;
     btn.disabled = true;
+    const q = qty;
     try {
-      const res = await recordTransaction(partId, { type, quantity: qty, note: 'その場で記録' }, txId);
-      txId = newTxId(); // 次の操作は別の番号
-      onDone(res, { type, quantity: qty });
+      const res = await recordTransaction(partId, { type, quantity: q, note: 'その場で記録' }, txIds.get(type, q));
+      txIds.done(type, q);
+      msg.textContent = '';
+      onDone(res, { type, quantity: q });
+      if (res?.queued) {
+        // 画面を作り直さない（電波が無い）ときは、続けて別の記録ができるようにボタンを戻す。
+        // 戻さないと、1回記録した後はボタンが押せないままで、画面を開き直すまで記録できなかった
+        btn.disabled = false;
+        setQty(1);
+      }
     } catch (err) {
       msg.textContent = `記録できませんでした: ${err.message}`;
       msg.style.color = '#dc2626';
@@ -116,8 +139,13 @@ async function renderOfflineDetail(id) {
       const items = await queuedFor(id);
       queuedBox.textContent = `📤 送信待ち: ${queuedText(items)}（電波が戻ると自動で送信します）`;
       queuedBox.style.display = '';
-      if (!res?.queued) await renderDetail(id).catch(() => {}); // 電波が戻っていた
-      else alert(`${op.type === 'in' ? '入庫' : '出庫'} ${op.quantity} を送信待ちに保存しました。`);
+      if (!res?.queued) {
+        // 電波が戻っていて、そのまま記録できた。権限情報が無いままだと記録欄や編集ボタンが出ないので、取り直す
+        currentUser = await getCurrentUser().catch(() => currentUser);
+        await renderDetail(id).catch(() => {});
+      } else {
+        alert(`${op.type === 'in' ? '入庫' : '出庫'} ${op.quantity} を送信待ちに保存しました。`);
+      }
     }),
   ]);
 }
@@ -687,7 +715,7 @@ async function renderDetail(id) {
   const canEdit = hasRole(currentUser, 'editor');
   const isLow = part.quantity < part.safety_stock; // 在庫数 < 必要数 で要発注
   const queued = await queuedFor(id);
-  let txId = newTxId(); // 下の「在庫数を更新」フォームの1回分の識別番号
+  const txIds = makeTxIdPool(); // 下の「在庫数を更新」フォームの識別番号
   const updatedAt = new Date();
 
   // 在庫数更新フォーム
@@ -708,7 +736,7 @@ async function renderDetail(id) {
     if (txBtn.disabled) return;
     txBtn.disabled = true;
     try {
-      const res = await recordTransaction(id, { type, quantity, note }, txId);
+      const res = await recordTransaction(id, { type, quantity, note }, txIds.get(type, quantity));
       if (res?.queued) alert('オフラインのため送信待ちに保存しました。電波が戻ると自動で送信します。');
       go(`?id=${id}`);
     } catch (err) {
