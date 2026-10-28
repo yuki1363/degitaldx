@@ -1,5 +1,5 @@
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { writeAuditLog, auditStatement } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 
@@ -62,12 +62,59 @@ export function annualMonthInFy(dateStr, fy) {
 //   始まったばかりの年度を締めた記録になっていた）。
 //   resetAvailable: 締める年度の最終月（9月）以降だけ true。10月にリセットした直後に、もう一度押して
 //   始まったばかりの年度まで締めてしまうのを防ぐ。
+// 旧画面の誤記録の見分け方: 旧画面は年度リセットの年度を端末の時計から決めていたため、10月以降に押すと
+//   「始まったばかりの年度」＝実行日の属する年（JST）を記録していた（正しくはその前の年度）。
+//   新しい画面ではこの組み合わせ（10〜12月に実行・年度＝実行年）は作られない
+//   （締める年度の9月より前は実行できないため）ので、これに当てはまる行は旧画面の誤記録と判断できる。
+const LEGACY_RESET_LOG_SIG =
+  `CAST(strftime('%Y', reset_at, '+9 hours') AS INTEGER) = fiscal_year
+   AND CAST(strftime('%m', reset_at, '+9 hours') AS INTEGER) >= ${FISCAL_YEAR_START_MONTH}`;
+
+// 旧画面の誤記録を1つ前の年度に直す（1回だけ・監査ログ付き）。1つ前の年度の行が既にあるときは
+// 重複（UNIQUE）になるため直さない（その行は読み取り時に補正して扱う）。
+let legacyResetLogChecked = false;
+async function repairLegacyResetLog(db) {
+  if (legacyResetLogChecked) return;
+  try {
+    for (let pass = 0; pass < 5; pass++) { // 連続して誤記録がある場合に備えて古い方から順に直す
+      const { results } = await db.prepare(
+        `SELECT id, fiscal_year, reset_at FROM plan_reset_log
+          WHERE ${LEGACY_RESET_LOG_SIG}
+            AND NOT EXISTS (SELECT 1 FROM plan_reset_log o WHERE o.fiscal_year = plan_reset_log.fiscal_year - 1)`
+      ).all();
+      if (!results?.length) break;
+      for (const r of results) {
+        await db.batch([
+          db.prepare(
+            `UPDATE plan_reset_log SET fiscal_year = fiscal_year - 1
+              WHERE id = ?1 AND fiscal_year = ?2
+                AND NOT EXISTS (SELECT 1 FROM plan_reset_log o WHERE o.fiscal_year = ?2 - 1)`
+          ).bind(r.id, r.fiscal_year),
+          auditStatement(db, {
+            tableName: 'plan_reset_log', recordId: r.id, action: 'update', changedBy: 'system:legacy-fy-fix',
+            diff: {
+              fiscal_year: { from: r.fiscal_year, to: r.fiscal_year - 1 },
+              reset_at: r.reset_at,
+              reason: '旧画面が10月以降のリセットで始まったばかりの年度を記録していたため、1つ前の年度に補正',
+            },
+          }, { ifPrevChanged: true }),
+        ]);
+      }
+    }
+    legacyResetLogChecked = true;
+  } catch { /* plan_reset_log が無い旧DB等は何もしない（次回また試す） */ }
+}
+
 export async function getAnnualFyState(db) {
   const nowYm = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
   const clockFy = clockFiscalYear(nowYm);
   let last = null;
   try {
-    const row = await db.prepare('SELECT MAX(fiscal_year) AS fy FROM plan_reset_log').first();
+    await repairLegacyResetLog(db);
+    // 直せなかった旧誤記録（1つ前の年度の行と重複する場合）も、ここで1つ前の年度として数える
+    const row = await db.prepare(
+      `SELECT MAX(CASE WHEN ${LEGACY_RESET_LOG_SIG} THEN fiscal_year - 1 ELSE fiscal_year END) AS fy FROM plan_reset_log`
+    ).first();
     last = row?.fy == null ? null : Number(row.fy);
   } catch { /* plan_reset_log が無い旧DBは履歴なし扱い */ }
   if (last == null) {
