@@ -26,11 +26,17 @@ export async function getCurrentUser(force = false) {
   if (!currentUser || force) {
     const data = await api.get('/api/me');
     currentUser = data.user;
+    try { localStorage.setItem('auth:role', String(currentUser?.role || '')); } catch { /* 保存できなくても動く */ }
     vapidPublicKey = data.vapid_public_key || null;
     aiEnabled = Boolean(data.ai_enabled);
     aiVisionEnabled = Boolean(data.ai_vision_enabled);
   }
   return currentUser;
+}
+
+/** この端末で最後に確認した権限（電波が無く /api/me を取れないときの画面の出し分け用。未確認なら null） */
+export function getCachedRole() {
+  try { return localStorage.getItem('auth:role') || null; } catch { return null; }
 }
 
 /** Web Push の VAPID公開鍵（未構成なら null）。getCurrentUser() 実行後に使えるようになる */

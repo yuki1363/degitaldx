@@ -9,6 +9,7 @@ import { normImportance } from './index.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
+import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
 
 // NFKC 正規化＋trim（半角カナ→全角カナ・全角英数→半角。検索・表示の統一）。空は null
 const nz = (v) => { const s = normalizeJa(String(v)).trim(); return s === '' ? null : s; };
@@ -87,6 +88,7 @@ export async function onRequestPut({ env, data, params, request }) {
   const newLineName     = line_name      !== undefined ? (line_name ? nz(line_name) : null)                      : part.line_name;
   const newEquipName    = equipment_name !== undefined ? (equipment_name ? nz(equipment_name) : null)            : part.equipment_name;
   const newSafetyStock  = safety_stock   !== undefined ? (Number.isFinite(Number(safety_stock)) ? Math.trunc(Number(safety_stock)) : part.safety_stock) : part.safety_stock;
+  if (newSafetyStock < 0 || newSafetyStock > MAX_PART_QTY) return jsonError(400, `安全在庫は0以上、${PART_QTY_MESSAGE}`);
   const newLocation     = location       !== undefined ? (location ? nz(location) : null)                        : part.location;
   const newImportance   = importance     !== undefined ? normImportance(importance)                              : part.importance;
   const newSupplier     = supplier       !== undefined ? (supplier ? nz(supplier) : null)                        : part.supplier;

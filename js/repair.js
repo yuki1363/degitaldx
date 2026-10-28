@@ -51,7 +51,7 @@ function showError(err) {
 
 async function renderList(equipmentId) {
   const [{ equipment }, { users }] = await Promise.all([
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
     api.get('/api/users'),
   ]);
 
@@ -364,7 +364,7 @@ function field(label, input) {
 
 async function renderForm(existing, prefill = null) {
   const [{ equipment }, { users }] = await Promise.all([
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
     api.get('/api/users'),
   ]);
 

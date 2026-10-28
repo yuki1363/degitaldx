@@ -12,6 +12,7 @@ import { notifyTeam } from '../../_lib/notify.js';
 import { json, jsonError, readJson } from '../../_lib/http.js';
 import { nowIso } from '../../_lib/util.js';
 import { ensureColumns } from '../../_lib/db-compat.js';
+import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../../_lib/parts-limits.js';
 
 const CLIENT_TX_RE = /^[A-Za-z0-9-]{8,64}$/;
 const DUPLICATE_TX = Symbol('duplicate client_tx_id');
@@ -33,8 +34,9 @@ function sameTransaction(row, { partId, type, delta }) {
 }
 const CLIENT_TX_CONFLICT = '同じ識別番号で、内容の違う入出庫が既に登録されています。画面を開き直して、もう一度記録してください。';
 
+// 識別番号の列が使えるか（ALTER に失敗し続ける環境では false。その間は識別番号なしで登録する＝入出庫を止めない）
 export async function ensurePartsTxColumns(db) {
-  await ensureColumns(db, 'parts_transaction_client_tx', [
+  return ensureColumns(db, 'parts_transaction_client_tx', [
     'ALTER TABLE parts_transaction ADD COLUMN client_tx_id TEXT',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_transaction_client_tx ON parts_transaction (client_tx_id) WHERE client_tx_id IS NOT NULL',
   ]);
@@ -76,6 +78,7 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
   if (!Number.isInteger(bodyQty) || bodyQty < 0) {
     return jsonError(400, 'quantity は0以上の整数を指定してください。');
   }
+  if (bodyQty > MAX_PART_QTY) return jsonError(400, PART_QTY_MESSAGE);
   if (bodyQty === 0 && type !== 'adjust') {
     return jsonError(400, '入庫・出庫の数量は1以上を指定してください。');
   }
@@ -97,8 +100,9 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
   const wanted = { partId: id, type, delta: expectedDelta };
 
   // 同じ識別番号の入出庫が登録済みなら、もう反映済み（再送・押し直し）。何もしないで現在の在庫を返す
-  await ensurePartsTxColumns(DB);
-  if (clientTxId !== null) {
+  // client_tx_id 列を追加できない環境（権限・一時障害）では、二重反映の防止は効かないが入出庫は止めない
+  const txColumn = await ensurePartsTxColumns(DB);
+  if (txColumn && clientTxId !== null) {
     const done = await DB.prepare('SELECT part_id, type, quantity FROM parts_transaction WHERE client_tx_id = ?1').bind(clientTxId).first();
     if (done) {
       if (!sameTransaction(done, wanted)) return jsonError(409, CLIENT_TX_CONFLICT);
@@ -114,7 +118,9 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
   const now = nowIso();
   // client_tx_id は UNIQUE。確認と登録の間に同じ番号が届いても、後の方は履歴の INSERT で失敗し
   // 同じ batch の在庫更新ごと取り消される（2回反映されない）
-  const historyCols = 'part_id, type, quantity, note, related_table, related_id, created_by, created_at, client_tx_id';
+  const historyCols = 'part_id, type, quantity, note, related_table, related_id, created_by, created_at' + (txColumn ? ', client_tx_id' : '');
+  const txVals = (n) => (txColumn ? `, ?${n}` : '');
+  const txBinds = txColumn ? [clientTxId] : [];
 
   try {
     if (type === 'adjust') {
@@ -125,8 +131,8 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
         DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
         DB.prepare(
           `INSERT INTO parts_transaction (${historyCols})
-           SELECT ?1, 'adjust', ?2 - quantity, ?3, ?4, ?5, ?6, ?7, ?8 FROM parts_inventory WHERE id = ?1`
-        ).bind(id, bodyQty, note ?? null, relatedTable, relatedId, userEmail, now, clientTxId),
+           SELECT ?1, 'adjust', ?2 - quantity, ?3, ?4, ?5, ?6, ?7${txVals(8)} FROM parts_inventory WHERE id = ?1`
+        ).bind(id, bodyQty, note ?? null, relatedTable, relatedId, userEmail, now, ...txBinds),
         DB.prepare(
           `UPDATE parts_inventory SET quantity = ?1, updated_by = ?2, updated_at = ?3 WHERE id = ?4`
         ).bind(bodyQty, userEmail, now, id),
@@ -148,8 +154,8 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
         ).bind(delta, userEmail, now, id),
         DB.prepare(
           `INSERT INTO parts_transaction (${historyCols})
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9 WHERE changes() = 1`
-        ).bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now, clientTxId),
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8${txVals(9)} WHERE changes() = 1`
+        ).bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now, ...txBinds),
         DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
       ]);
       if ((upd.meta?.changes ?? 0) === 0) {

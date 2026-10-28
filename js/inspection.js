@@ -37,7 +37,7 @@ function abnBadge(isAbnormal) {
 // ---------------- 一覧 ----------------
 
 async function renderList(presetEquipmentId) {
-  const { equipment } = await api.get('/api/equipment');
+  const { equipment } = await api.get('/api/equipment?limit=2000');
   const equipmentSelect = buildEquipSelect(equipment, {
     value: presetEquipmentId || '',
     allLabel: 'すべての設備',
@@ -120,7 +120,7 @@ async function renderEntry({ equipmentId, existing, planId, planDay, plannedDate
   window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
   const [{ equipment }, { users }] = await Promise.all([
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
     api.get('/api/users'),
   ]);
   if (equipment.length === 0) {

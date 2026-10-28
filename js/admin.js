@@ -333,7 +333,7 @@ function customFieldSection() {
 }
 
 async function renderManage() {
-  const { equipment } = await api.get('/api/equipment');
+  const { equipment } = await api.get('/api/equipment?limit=2000');
 
   const equipSel = buildEquipSelect(equipment, {
     allLabel: '設備を選択',

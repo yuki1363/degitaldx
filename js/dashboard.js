@@ -224,7 +224,7 @@ function aggregateRows(rows, axis, fromStr, toStr) {
 async function renderCustom(fromStr, toStr) {
   const contentEl = app.querySelector('#tab-content');
   render(contentEl, el('p', { class: 'loading' }, '読み込み中…'));
-  const { equipment } = await api.get('/api/equipment');
+  const { equipment } = await api.get('/api/equipment?limit=2000');
 
   let dataType = 'trouble';
   let axis = 'month';

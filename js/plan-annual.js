@@ -684,7 +684,7 @@ async function renderYear() {
   resetAvailable = !!annual.reset_available;
   if (fy === null) fy = currentFy;
   const [equipData, inspData, resetLogs] = await Promise.all([
-    api.get('/api/equipment').catch(() => ({ equipment: [] })),
+    api.get('/api/equipment?limit=2000').catch(() => ({ equipment: [] })),
     // 表示年度（10月〜翌9月）の点検実績。limit=5000: 既定200件だと古い月の実績が欠ける。
     // 失敗しても計画表は実績なしで表示する（.catch）
     api.get(`/api/inspections?from=${fy}-10-01&to=${fy + 1}-09-30&limit=5000`).catch(() => ({ inspections: [] })),

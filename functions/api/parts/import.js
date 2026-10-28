@@ -10,6 +10,7 @@ import { normImportance } from './index.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
+import { MAX_PART_QTY } from '../_lib/parts-limits.js';
 
 const cell = (v) => {
   if (v === undefined || v === null) return null;
@@ -64,6 +65,13 @@ export async function onRequestPost({ env, data, request }) {
     if (!name) {
       skipped++;
       errors.push({ row: i + 1, reason: '部品名（name）が空のため取り込めません。' });
+      continue;
+    }
+    // 数量の範囲外は行ごとスキップ（黙って丸めると在庫が実態とずれる）。未対応付け・空欄は0扱いのまま
+    const qtyBad = ['quantity', 'safety_stock'].find((k) => { const n = num(row[k]); return n < 0 || n > MAX_PART_QTY; });
+    if (qtyBad) {
+      skipped++;
+      errors.push({ row: i + 1, reason: `${qtyBad === 'quantity' ? '在庫数' : '安全在庫'}が範囲外です（0〜${MAX_PART_QTY.toLocaleString('en-US')}）。` });
       continue;
     }
     validRows.push({ row, name });

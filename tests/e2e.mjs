@@ -2266,6 +2266,30 @@ await page.waitForTimeout(300);
 check('失敗の破棄: 送信待ちバーが残らない・在庫は変わらない', await page.evaluate(() => !document.getElementById('offline-queue-bar')) && (await kQty()) === 2);
 await api(`/api/parts/${kId}`, { method: 'DELETE' });
 
+// ---------- 9.21 在庫の数量上限・設備一覧の limit・閲覧のみのオフライン画面 ----------
+section('9.21 数量の上限・設備一覧の limit/truncated・閲覧のみ端末のオフライン画面');
+const lPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E上限部品', model_no: 'E2E-L-1', location: '棚L', quantity: 5, safety_stock: 1 } });
+const lId = lPart.json?.id;
+const lBig = await api(`/api/parts/${lId}/transaction`, { method: 'POST', body: { type: 'in', quantity: 1000001 } });
+const lBigPost = await api('/api/parts', { method: 'POST', body: { name: 'E2E上限部品2', quantity: 5000000 } });
+check('数量: 入出庫・登録で100万を超えると400（在庫は変わらない）',
+  lBig.status === 400 && lBigPost.status === 400 && (await api(`/api/parts/${lId}`)).json?.part?.quantity === 5, JSON.stringify([lBig.status, lBigPost.status]));
+const eqLim = await api('/api/equipment?limit=1');
+check('設備一覧: limit を指定でき、超えていれば truncated:true を返す',
+  eqLim.status === 200 && eqLim.json?.equipment?.length === 1 && typeof eqLim.json?.truncated === 'boolean');
+
+// 閲覧のみと分かっている端末は、電波が無い画面に記録欄を出さない（権限不明の端末は出す＝上のテストのとおり）
+await page.goto(`${BASE}/pages/parts?id=${lId}`, { waitUntil: 'networkidle' });
+await page.evaluate(() => localStorage.setItem('auth:role', 'viewer'));
+await context.setOffline(true);
+await page.goto(`${BASE}/pages/parts?id=${lId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForSelector('.notice', { timeout: 10000 });
+check('閲覧のみの端末: オフライン画面に記録欄を出さず、記録できない旨を表示',
+  await page.evaluate(() => !document.querySelector('.quick-record') && document.body.innerText.includes('閲覧のみ')));
+await context.setOffline(false);
+await page.evaluate(() => localStorage.removeItem('auth:role'));
+await api(`/api/parts/${lId}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
