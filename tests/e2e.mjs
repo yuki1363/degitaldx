@@ -2021,6 +2021,53 @@ check('無料枠: スマホ幅（375px）で画面からはみ出さない', !cf
 if (cfVp) await page.setViewportSize(cfVp);
 await page.evaluate(() => sessionStorage.removeItem('e2eFakeCfUsage'));
 
+// ---------- 9.18 ラベル印刷の開始位置（使いかけの台紙） ----------
+section('9.18 ラベル印刷の開始位置');
+await page.goto(`${BASE}/pages/labels`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.label-start-grid .label-start-cell', { timeout: 10000 });
+const lbBefore = await page.evaluate(() => ({
+  skip: document.querySelectorAll('.label-page .label-skip').length,
+  labels: document.querySelectorAll('.label-page .label-cell:not(.label-skip)').length,
+}));
+check('ラベル: 既定は左上から（空きマスなし）', lbBefore.skip === 0 && lbBefore.labels > 0, JSON.stringify(lbBefore));
+// 上から2段目・左から3列目（7マス目）をタップ → 先頭6マスを空ける
+await page.click('.label-start-cell[aria-label="上から2段目・左から3列目から印刷"]');
+const lbAfter = await page.evaluate(() => {
+  const pages = [...document.querySelectorAll('.label-page')];
+  const first = pages[0] ? [...pages[0].children] : [];
+  return {
+    firstSkips: first.filter((c) => c.classList.contains('label-skip')).length,
+    seventhIsLabel: !!first[6] && !first[6].classList.contains('label-skip'),
+    otherSkips: pages.slice(1).reduce((n, p) => n + p.querySelectorAll('.label-skip').length, 0),
+    labels: document.querySelectorAll('.label-page .label-cell:not(.label-skip)').length,
+    pages: pages.length,
+    perPageMax: Math.max(...pages.map((p) => p.children.length)),
+    text: document.querySelector('.label-start-text')?.textContent || '',
+    count: document.querySelector('.labels-controls .action-row .hint')?.textContent || '',
+    pressed: document.querySelector('.label-start-cell[aria-pressed="true"]')?.getAttribute('aria-label'),
+  };
+});
+check('ラベル: 2段目・3列目を選ぶと1枚目の先頭6マスを空け、7マス目から印刷',
+  lbAfter.firstSkips === 6 && lbAfter.seventhIsLabel && lbAfter.otherSkips === 0 && lbAfter.labels === lbBefore.labels,
+  JSON.stringify(lbAfter));
+check('ラベル: 台紙は24面ごとに分かれ、枚数表示も空きマスを含めて数える',
+  lbAfter.perPageMax <= 24 && lbAfter.pages === Math.ceil((6 + lbAfter.labels) / 24) && lbAfter.count.includes(`台紙 ${lbAfter.pages} 枚`),
+  JSON.stringify(lbAfter));
+check('ラベル: 開始位置の案内が出る', lbAfter.text.includes('上から2段目・左から3列目から') && lbAfter.pressed === '上から2段目・左から3列目から印刷', lbAfter.text);
+// 印刷時は空きマスに何も出さない（位置だけ確保）
+await page.emulateMedia({ media: 'print' });
+const lbPrint = await page.evaluate(() => {
+  const skip = document.querySelector('.label-page .label-skip');
+  const label = document.querySelector('.label-page .label-cell:not(.label-skip)');
+  return { skipVis: skip ? getComputedStyle(skip).visibility : null, labelVis: label ? getComputedStyle(label).visibility : null,
+    controls: getComputedStyle(document.querySelector('.labels-controls')).display };
+});
+await page.emulateMedia({ media: 'screen' });
+check('ラベル: 印刷では空きマスを表示せず、操作パネルも出さない',
+  lbPrint.skipVis === 'hidden' && lbPrint.labelVis === 'visible' && lbPrint.controls === 'none', JSON.stringify(lbPrint));
+await page.click('.label-start-wrap button:has-text("左上に戻す")');
+check('ラベル: 「左上に戻す」で空きマスが無くなる', await page.evaluate(() => document.querySelectorAll('.label-page .label-skip').length === 0));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

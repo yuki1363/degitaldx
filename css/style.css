@@ -980,6 +980,59 @@ input.is-abnormal {
   overflow: hidden;
 }
 
+/* 印刷の開始位置: 使いかけの台紙で空けるマス（画面では灰色の斜線、印刷では何も出さない） */
+.label-cell.label-skip {
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 9pt;
+  background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 4px, #e2e8f0 4px, #e2e8f0 8px);
+}
+
+/* 開始位置を選ぶ台紙のミニ図（4列×6段） */
+.label-start-wrap {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.label-start-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 34px);
+  grid-auto-rows: 34px;
+  gap: 4px;
+  padding: 6px;
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.label-start-cell {
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 13px;
+  color: #fff;
+  padding: 0;
+  cursor: pointer;
+}
+
+.label-start-cell.is-used {
+  background: repeating-linear-gradient(45deg, #e2e8f0, #e2e8f0 3px, #cbd5e1 3px, #cbd5e1 6px);
+  border-color: #cbd5e1;
+}
+
+.label-start-cell.is-start {
+  background: var(--color-primary, #2563eb);
+  border-color: var(--color-primary, #2563eb);
+}
+
+.label-start-text {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
 /* ---- 部品在庫（05） ---- */
 .parts-qty {
   display: flex;
@@ -2233,6 +2286,11 @@ input.is-abnormal {
 
   body.labels-page .label-cell .label-name {
     color: #000;
+  }
+
+  /* 開始位置より前の空きマスは何も印刷しない（グリッドの位置だけ確保） */
+  body.labels-page .label-cell.label-skip {
+    visibility: hidden;
   }
 
   /* 点検レポート: 操作UIを隠し、見出しと表だけを用紙幅で出力 */
