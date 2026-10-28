@@ -665,6 +665,12 @@ ALTER TABLE parts_transaction ADD COLUMN related_id INTEGER;   -- 紐づく依�
 CREATE INDEX IF NOT EXISTS idx_parts_transaction_related
   ON parts_transaction (related_table, related_id);
 
+-- 部品在庫（05）: 入出庫の識別番号（端末が1回の操作ごとに作る）。オフラインの送信待ちを再送したり、
+--   通信が途中で切れて押し直したりしても、同じ操作が2回在庫に反映されないようにする（UNIQUE）
+ALTER TABLE parts_transaction ADD COLUMN client_tx_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_transaction_client_tx
+  ON parts_transaction (client_tx_id) WHERE client_tx_id IS NOT NULL;
+
 -- 日報（07）: 入力者を自由入力にする（reporter_id は NOT NULL 制約のため
 --   ログインユーザーIDで埋め続け、表示・入力・検索は reporter_name に一本化）
 ALTER TABLE daily_report ADD COLUMN reporter_name TEXT;        -- 入力者名（自由入力）

@@ -4,10 +4,123 @@
 //        /pages/parts?edit=N     … 編集
 //        /pages/parts?id=N       … 詳細（入出庫履歴）
 //        /pages/parts?import=1   … CSVインポート
+//   部品QRラベル（/pages/labels?type=parts）は /pages/parts?id=N を開く。詳細の「その場で記録」で
+//   棚の前で出庫・入庫をワンタップで記録できる（電波が無ければ送信待ちに保存して後で自動送信）。
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
+import { enqueue as enqueueOffline, listQueued } from '/js/offline-queue.js';
+import { openQrScanner } from '/js/qr-scan.js';
+import qrcode from '/js/vendor/qrcode.mjs';
+
+// 画面を開いている間の自動更新の間隔（他の人の入出庫を反映する。裏に回ったら止める）
+//   （E2E では window.__PARTS_REFRESH_MS__ で短くして確認する）
+const AUTO_REFRESH_MS = Number(window.__PARTS_REFRESH_MS__) || 20_000;
+
+// 1回の入出庫の識別番号。押し直し・送信待ちの再送でも同じ番号を送り、サーバーは2回反映しない
+const newTxId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
+
+// 入出庫を記録する。電波が無いとき（入庫・出庫のみ）は送信待ちに保存して { queued:true } を返す。
+//   棚卸調整は絶対値なので、後から送ると間の出庫を消してしまうため送信待ちにしない
+async function recordTransaction(partId, { type, quantity, note }, txId) {
+  const body = { type, quantity, note, client_tx_id: txId };
+  try {
+    return await api.post(`/api/parts/${partId}/transaction`, body);
+  } catch (err) {
+    const offline = err?.offline === true || navigator.onLine === false;
+    if (!offline || type === 'adjust') throw err;
+    await enqueueOffline('parts_tx', { part_id: partId, ...body });
+    return { queued: true };
+  }
+}
+
+// 最後に見た部品の内容（端末ごと）。電波の無い倉庫で QR を読んだときに名前・在庫の目安を出す
+const snapKey = (id) => `parts:snap:${id}`;
+function saveSnapshot(part) {
+  try {
+    localStorage.setItem(snapKey(part.id), JSON.stringify({
+      id: part.id, name: part.name, model_no: part.model_no, location: part.location,
+      quantity: part.quantity, at: new Date().toISOString(),
+    }));
+  } catch { /* 保存できなくても表示は続ける */ }
+}
+function loadSnapshot(id) {
+  try { return JSON.parse(localStorage.getItem(snapKey(id)) || 'null'); } catch { return null; }
+}
+
+// この部品の送信待ち（まだサーバーに届いていない入出庫）
+async function queuedFor(partId) {
+  return (await listQueued('parts_tx')).filter((i) => Number(i.payload?.part_id) === Number(partId));
+}
+const queuedText = (items) => items.map((i) => `${i.payload.type === 'in' ? '入庫 +' : '出庫 −'}${i.payload.quantity}`).join('、');
+
+// 棚の前でのワンタップ記録（数量のステッパー＋出庫・入庫の大きいボタン）
+//   onDone(result) … 記録できた／送信待ちに保存したあとの処理
+function buildQuickRecord(partId, onDone) {
+  let qty = 1;
+  let txId = newTxId();
+  let busy = false;
+  const qtyEl = el('span', { class: 'quick-qty-value' }, '1');
+  const setQty = (n) => { qty = Math.max(1, Math.min(9999, n)); qtyEl.textContent = String(qty); };
+  const msg = el('p', { class: 'hint quick-msg' }, '');
+  const run = async (type, btn) => {
+    if (busy) return; // 2回タップで2回反映しない
+    busy = true;
+    btn.disabled = true;
+    try {
+      const res = await recordTransaction(partId, { type, quantity: qty, note: 'その場で記録' }, txId);
+      txId = newTxId(); // 次の操作は別の番号
+      onDone(res, { type, quantity: qty });
+    } catch (err) {
+      msg.textContent = `記録できませんでした: ${err.message}`;
+      msg.style.color = '#dc2626';
+      btn.disabled = false; // 失敗したときだけ押し直せる（同じ番号で再送するので2回反映しない）
+    } finally {
+      busy = false;
+    }
+  };
+  const outBtn = el('button', { class: 'btn btn-primary quick-btn', type: 'button', onclick: (e) => run('out', e.currentTarget) }, '📤 出庫（使う）');
+  const inBtn = el('button', { class: 'btn quick-btn', type: 'button', onclick: (e) => run('in', e.currentTarget) }, '📥 入庫');
+  return el('div', { class: 'card quick-record' }, [
+    el('h3', { class: 'card-title' }, 'その場で記録'),
+    el('div', { class: 'quick-qty' }, [
+      el('button', { class: 'btn quick-step', type: 'button', 'aria-label': '数量を減らす', onclick: () => setQty(qty - 1) }, '−'),
+      qtyEl,
+      el('button', { class: 'btn quick-step', type: 'button', 'aria-label': '数量を増やす', onclick: () => setQty(qty + 1) }, '＋'),
+    ]),
+    el('div', { class: 'quick-actions' }, [outBtn, inBtn]),
+    msg,
+  ]);
+}
+
+// 電波が無くて部品の内容を取れないとき（QR を倉庫で読んだ等）の画面。記録は送信待ちに保存する
+async function renderOfflineDetail(id) {
+  const snap = loadSnapshot(id);
+  const queued = await queuedFor(id);
+  const queuedBox = el('p', { class: 'notice is-warning offline-queued' },
+    queued.length ? `📤 送信待ち: ${queuedText(queued)}（電波が戻ると自動で送信します）` : '');
+  if (!queued.length) queuedBox.style.display = 'none';
+  render(app, [
+    el('p', { class: 'notice is-warning' }, '📵 オフラインのため最新の在庫を表示できません。入庫・出庫は送信待ちに保存し、電波が戻ると自動で送信します。'),
+    el('div', { class: 'card' }, [
+      el('h2', { class: 'card-title' }, snap ? snap.name : `部品 #${id}`),
+      snap ? infoRow('型番', snap.model_no) : null,
+      snap ? infoRow('在庫場所', snap.location) : null,
+      snap
+        ? infoRow('在庫数（目安）', `${snap.quantity}（${formatDateTime(snap.at)} にこの端末で確認した数）`)
+        : el('p', { class: 'hint' }, 'この端末ではまだこの部品を開いたことがないため、名前と在庫数は電波が戻ってから表示されます。'),
+    ]),
+    queuedBox,
+    buildQuickRecord(id, async (res, op) => {
+      const items = await queuedFor(id);
+      queuedBox.textContent = `📤 送信待ち: ${queuedText(items)}（電波が戻ると自動で送信します）`;
+      queuedBox.style.display = '';
+      if (!res?.queued) await renderDetail(id).catch(() => {}); // 電波が戻っていた
+      else alert(`${op.type === 'in' ? '入庫' : '出庫'} ${op.quantity} を送信待ちに保存しました。`);
+    }),
+  ]);
+}
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -449,8 +562,9 @@ async function renderList() {
     equipSelect.value = selectedEquip;
   };
 
-  const load = async () => {
-    render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
+  // quiet: 自動更新のとき「読み込み中…」を出さない（画面がちらつかないように）
+  const load = async ({ quiet = false } = {}) => {
+    if (!quiet) render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
     const params = new URLSearchParams();
     if (searchQuery) { params.set('q', searchQuery); params.set('include_similar', '1'); }
     if (filterLow) params.set('low_stock', '1');
@@ -460,7 +574,9 @@ async function renderList() {
     refreshLineOptions();
     refreshEquipOptions();
     renderParts();
+    refreshedEl.textContent = `${formatDateTime(new Date().toISOString())} 時点（${AUTO_REFRESH_MS / 1000}秒ごとに自動更新）`;
   };
+  const refreshedEl = el('span', { class: 'hint parts-refreshed' }, '');
 
   const searchInput = el('input', {
     type: 'search',
@@ -519,19 +635,32 @@ async function renderList() {
     el('div', { class: 'toolbar' }, [
       searchInput,
       lowToggle,
+      el('button', { class: 'btn btn-sm', type: 'button', onclick: () => openQrScanner() }, '📷 部品QR'),
     ]),
+    refreshedEl,
     hasRole(currentUser, 'editor')
       ? el('div', { class: 'action-row', style: 'margin-bottom:12px' }, [
           el('button', { class: 'btn btn-primary', onclick: () => go('?new=1') }, '＋ 部品を追加'),
           el('button', { class: 'btn', onclick: () => go('?import=1') }, '📥 CSVインポート'),
           el('button', { class: 'btn', onclick: (e) => importFromEquipment(e.currentTarget) }, '📥 台帳から一括登録'),
           stocktakeToggle,
+          el('a', { class: 'btn', href: '/pages/labels?type=parts' }, '🏷 部品ラベル印刷'),
         ])
       : null,
     listBox,
     stocktakeBar,
   ]);
   await load();
+
+  // 自動更新: 画面を開いている間は一定間隔で在庫を取り直す（他の人の入出庫を反映）。
+  // 棚卸中・入力中は入力を消さないよう更新しない。裏に回っている間・オフラインの間も止める
+  setInterval(() => {
+    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode) return;
+    const active = document.activeElement;
+    if (active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)) return;
+    if (document.querySelector('.modal-backdrop, .sheet-backdrop, .order-dialog')) return;
+    load({ quiet: true }).catch(() => { /* 次の回に再試行 */ });
+  }, AUTO_REFRESH_MS);
 }
 
 // ---------------- 詳細（入出庫履歴） ----------------
@@ -543,10 +672,23 @@ function infoRow(label, value) {
   ]);
 }
 
+let detailTimer = null;
+
 async function renderDetail(id) {
-  const { part, transactions, equipment: linkedEquipment } = await api.get(`/api/parts/${id}`);
+  let data;
+  try {
+    data = await api.get(`/api/parts/${id}`);
+  } catch (err) {
+    if (err?.offline === true || navigator.onLine === false) { await renderOfflineDetail(id); return; }
+    throw err;
+  }
+  const { part, transactions, equipment: linkedEquipment } = data;
+  saveSnapshot(part);
   const canEdit = hasRole(currentUser, 'editor');
   const isLow = part.quantity < part.safety_stock; // 在庫数 < 必要数 で要発注
+  const queued = await queuedFor(id);
+  let txId = newTxId(); // 下の「在庫数を更新」フォームの1回分の識別番号
+  const updatedAt = new Date();
 
   // 在庫数更新フォーム
   const txTypeEl = el('select', {},
@@ -566,18 +708,36 @@ async function renderDetail(id) {
     if (txBtn.disabled) return;
     txBtn.disabled = true;
     try {
-      await api.post(`/api/parts/${id}/transaction`, { type, quantity, note });
+      const res = await recordTransaction(id, { type, quantity, note }, txId);
+      if (res?.queued) alert('オフラインのため送信待ちに保存しました。電波が戻ると自動で送信します。');
       go(`?id=${id}`);
     } catch (err) {
       alert(err.message);
-      txBtn.disabled = false; // 失敗したときだけ押し直せるようにする（成功時は再描画まで無効のまま）
+      txBtn.disabled = false; // 失敗したときだけ押し直せるようにする（同じ識別番号で再送するので2回反映しない）
     }
   };
   const txBtn = el('button', { class: 'btn btn-primary', onclick: doTransaction }, '更新');
 
   const TYPE_LABELS = { in: '入庫', out: '出庫', adjust: '調整' };
 
+  // 部品QR（読むとこの画面が開き、「その場で記録」で出庫・入庫できる）
+  const partUrl = `${window.location.origin}/pages/parts?id=${part.id}`;
+  const qr = qrcode(0, 'Q');
+  qr.addData(partUrl);
+  qr.make();
+
+  const refreshedEl = el('span', { class: 'hint parts-refreshed' }, `${formatDateTime(updatedAt.toISOString())} 時点の在庫（${AUTO_REFRESH_MS / 1000}秒ごとに自動更新）`);
+
   render(app, [
+    queued.length
+      ? el('p', { class: 'notice is-warning offline-queued' }, `📤 送信待ち: ${queuedText(queued)}（電波が戻ると自動で送信します。在庫数にはまだ入っていません）`)
+      : null,
+    canEdit
+      ? buildQuickRecord(id, (res, op) => {
+          if (res?.queued) alert(`オフラインのため ${op.type === 'in' ? '入庫' : '出庫'} ${op.quantity} を送信待ちに保存しました。`);
+          renderDetail(id).catch(showError);
+        })
+      : null,
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
         el('h2', { class: 'card-title' }, [part.name, importanceBadge(part.importance)]),
@@ -595,6 +755,7 @@ async function renderDetail(id) {
       infoRow('機器名', part.equipment_name),
       infoRow('型番', part.model_no),
       infoRow('在庫数', String(part.quantity)),
+      refreshedEl,
       infoRow('必要数', String(part.safety_stock)),
       infoRow('重要度', part.importance),
       infoRow('在庫場所', part.location),
@@ -656,6 +817,12 @@ async function renderDetail(id) {
         ])
       : null,
     el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '部品QRコード'),
+      el('div', { class: 'qr-box' }, [el('img', { class: 'qr-img', alt: `部品QRコード: ${part.name}`, src: qr.createDataURL(6, 4) })]),
+      el('p', { class: 'hint' }, '棚や部品箱に貼っておくと、読み取ってすぐ出庫・入庫を記録できます（電波が無くても送信待ちに保存）。'),
+      el('a', { class: 'btn btn-sm', href: `/pages/labels?type=parts&ids=${part.id}` }, '🏷 ラベルを印刷'),
+    ]),
+    el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '入出庫履歴（直近50件）'),
       transactions.length === 0
         ? el('p', { class: 'empty' }, '履歴はありません。')
@@ -675,6 +842,17 @@ async function renderDetail(id) {
           ),
     ]),
   ]);
+
+  // 自動更新: 画面を開いている間は一定間隔で取り直す（他の人の入出庫を反映）。入力中は邪魔しない
+  clearInterval(detailTimer);
+  detailTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+    const active = document.activeElement;
+    const typing = active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
+    const touched = txQtyEl.value !== '1' || txNoteEl.value !== '' || txTypeEl.value !== 'in';
+    if (typing || touched || txBtn.disabled || document.querySelector('.quick-qty-value')?.textContent !== '1') return;
+    renderDetail(id).catch(() => { /* 次の回に再試行 */ });
+  }, AUTO_REFRESH_MS);
 }
 
 // ---------------- 登録・編集フォーム ----------------
@@ -1035,9 +1213,18 @@ async function renderImport() {
 // ---------------- 起動 ----------------
 
 (async () => {
+  const params = new URLSearchParams(window.location.search);
   try {
-    currentUser = await getCurrentUser();
-    const params = new URLSearchParams(window.location.search);
+    try {
+      currentUser = await getCurrentUser();
+    } catch (err) {
+      // 電波の無い倉庫で部品QRを読んだ: 送信待ちに記録できる画面を出す（権限はサーバーが送信時に確認する）
+      if (params.get('id') && (err?.offline === true || navigator.onLine === false)) {
+        await renderOfflineDetail(Number(params.get('id')));
+        return;
+      }
+      throw err;
+    }
     if (params.get('id')) {
       await renderDetail(Number(params.get('id')));
     } else if (params.get('edit')) {

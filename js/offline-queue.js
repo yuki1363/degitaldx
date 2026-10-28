@@ -20,7 +20,7 @@ import { completePlanAfterInspection } from '/js/plan-inspection-link.js';
 const DB_NAME = 'mainte-offline';
 const STORE = 'outbox';
 
-const KIND_LABELS = { trouble: 'トラブル記録', inspection: '点検記録', repair: '業務依頼', report: '日報' };
+const KIND_LABELS = { trouble: 'トラブル記録', inspection: '点検記録', repair: '業務依頼', report: '日報', parts_tx: '部品の入出庫' };
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -55,11 +55,16 @@ async function getAll() {
 
 /**
  * 送信待ちに追加する。
- * @param {'trouble'|'inspection'} kind
+ * @param {'trouble'|'inspection'|'repair'|'report'|'parts_tx'} kind
  * @param {object} payload 本体POSTのボディ（file_ids は含めない）
  * @param {File[]} files リサイズ済みの添付（Canvasリサイズはオフラインでも動く）
  * @param {object} [extra] 例: { planId, planDay } 点検保存後に完了化する計画ID（planDay があればその日だけ）
  */
+/** 送信待ちのうち指定した種別の項目（画面で「送信待ち ◯件」を出す用。取得できなければ空） */
+export async function listQueued(kind) {
+  try { return (await getAll()).filter((i) => i.kind === kind); } catch { return []; }
+}
+
 export async function enqueue(kind, payload, files = [], extra = {}) {
   const db = await openDb();
   const record = {
@@ -117,6 +122,11 @@ async function sendOne(item) {
     await api.post('/api/repairs', item.payload); // 依頼はファイル添付なし（file_ids 不要）
   } else if (item.kind === 'report') {
     await api.post('/api/reports', item.payload);
+  } else if (item.kind === 'parts_tx') {
+    // 部品の入出庫（入庫・出庫のみ。棚卸調整は絶対値のため後から送ると間の出庫を消すので対象外）。
+    // client_tx_id 付きなので、送信が途中で切れて再送してもサーバーは2回反映しない
+    const { part_id: partId, ...tx } = item.payload;
+    await api.post(`/api/parts/${Number(partId)}/transaction`, tx);
   } else {
     throw new Error(`不明な送信種別: ${item.kind}`);
   }

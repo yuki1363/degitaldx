@@ -1,11 +1,35 @@
 // 05: 部品在庫 — 入出庫記録
 // POST /api/parts/:id/transaction  在庫数を更新して入出庫履歴を登録（editor以上）
+//   client_tx_id（任意・英数字と - で8〜64文字）: 端末が1回の操作ごとに作る識別番号。
+//   同じ番号の入出庫が既にあれば何もせず duplicate:true を返す（オフラインの送信待ちの再送や、
+//   通信が途中で切れて押し直したときに、同じ出庫が2回在庫に反映されないように）。
 
 import { requireRole } from '../../_lib/auth.js';
 import { writeAuditLog } from '../../_lib/audit.js';
 import { notifyTeam } from '../../_lib/notify.js';
 import { json, jsonError, readJson } from '../../_lib/http.js';
 import { nowIso } from '../../_lib/util.js';
+import { ensureColumns } from '../../_lib/db-compat.js';
+
+const CLIENT_TX_RE = /^[A-Za-z0-9-]{8,64}$/;
+const DUPLICATE_TX = Symbol('duplicate client_tx_id');
+
+// 在庫更新と履歴の batch。同じ client_tx_id が同時に届き、履歴の UNIQUE で失敗したら DUPLICATE_TX を投げる
+async function runTxBatch(DB, clientTxId, statements) {
+  try {
+    return await DB.batch(statements);
+  } catch (err) {
+    if (clientTxId !== null && /UNIQUE/i.test(String(err?.message))) throw DUPLICATE_TX;
+    throw err;
+  }
+}
+
+export async function ensurePartsTxColumns(db) {
+  await ensureColumns(db, 'parts_transaction_client_tx', [
+    'ALTER TABLE parts_transaction ADD COLUMN client_tx_id TEXT',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_transaction_client_tx ON parts_transaction (client_tx_id) WHERE client_tx_id IS NOT NULL',
+  ]);
+}
 
 export async function onRequestPost({ env, data, params, request, waitUntil }) {
   const denied = requireRole(data.user, 'editor');
@@ -28,6 +52,10 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   const { type, quantity: bodyQty, note } = body;
+  const clientTxId = body.client_tx_id == null || body.client_tx_id === '' ? null : String(body.client_tx_id);
+  if (clientTxId !== null && !CLIENT_TX_RE.test(clientTxId)) {
+    return jsonError(400, 'client_tx_id が不正です。');
+  }
 
   // バリデーション: type
   if (!['in', 'out', 'adjust'].includes(type)) {
@@ -55,54 +83,69 @@ export async function onRequestPost({ env, data, params, request, waitUntil }) {
     return jsonError(400, 'related_id は整数で指定してください。');
   }
 
+  // 同じ識別番号の入出庫が登録済みなら、もう反映済み（再送・押し直し）。何もしないで現在の在庫を返す
+  await ensurePartsTxColumns(DB);
+  if (clientTxId !== null) {
+    const done = await DB.prepare('SELECT id FROM parts_transaction WHERE client_tx_id = ?1').bind(clientTxId).first();
+    if (done) return json({ ok: true, duplicate: true, quantity: part.quantity });
+  }
+
   // 在庫の更新と入出庫履歴の登録は1トランザクション（D1 batch）で行う。別々に実行していると、
   // 履歴の登録に失敗したとき在庫だけ変わって履歴が残らない（履歴の合計と在庫が合わなくなる）。
   let oldQty;
   let newQty;
   let delta;
   const now = nowIso();
-  const historyCols = 'part_id, type, quantity, note, related_table, related_id, created_by, created_at';
+  // client_tx_id は UNIQUE。確認と登録の間に同じ番号が届いても、後の方は履歴の INSERT で失敗し
+  // 同じ batch の在庫更新ごと取り消される（2回反映されない）
+  const historyCols = 'part_id, type, quantity, note, related_table, related_id, created_by, created_at, client_tx_id';
 
-  if (type === 'adjust') {
-    // adjust: body.quantity は新しい絶対値（棚卸）。増減（delta）は「書き込む瞬間の在庫」から
-    // 同じトランザクション内で計算する。事前に読んだ在庫から計算すると、その間の他の人の
-    // 出庫が履歴の delta に反映されず、履歴の合計と在庫が合わなくなる。
-    const [before] = await DB.batch([
-      DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
-      DB.prepare(
-        `INSERT INTO parts_transaction (${historyCols})
-         SELECT ?1, 'adjust', ?2 - quantity, ?3, ?4, ?5, ?6, ?7 FROM parts_inventory WHERE id = ?1`
-      ).bind(id, bodyQty, note ?? null, relatedTable, relatedId, userEmail, now),
-      DB.prepare(
-        `UPDATE parts_inventory SET quantity = ?1, updated_by = ?2, updated_at = ?3 WHERE id = ?4`
-      ).bind(bodyQty, userEmail, now, id),
-    ]);
-    oldQty = before.results?.[0]?.quantity ?? part.quantity;
-    newQty = bodyQty;
-    delta = newQty - oldQty;
-  } else {
-    // 入庫・出庫は相対更新（quantity = quantity + Δ）で行う。
-    // 「読み取り→計算→絶対値で書き込み」だと、2人が同時に±したとき片方の更新が消える。
-    // 出庫の在庫不足ガードも同じUPDATEの条件で行い、同時出庫でもマイナス在庫にならない。
-    // 履歴は「直前の UPDATE が1行更新したときだけ」登録する（changes() = 1。在庫不足なら履歴も作らない）。
-    delta = type === 'in' ? bodyQty : -bodyQty;
-    const [upd, , after] = await DB.batch([
-      DB.prepare(
-        `UPDATE parts_inventory
-            SET quantity = quantity + ?1, updated_by = ?2, updated_at = ?3
-          WHERE id = ?4 AND quantity + ?1 >= 0`
-      ).bind(delta, userEmail, now, id),
-      DB.prepare(
-        `INSERT INTO parts_transaction (${historyCols})
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 WHERE changes() = 1`
-      ).bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now),
-      DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
-    ]);
-    if ((upd.meta?.changes ?? 0) === 0) {
-      return jsonError(400, '在庫不足です。');
+  try {
+    if (type === 'adjust') {
+      // adjust: body.quantity は新しい絶対値（棚卸）。増減（delta）は「書き込む瞬間の在庫」から
+      // 同じトランザクション内で計算する。事前に読んだ在庫から計算すると、その間の他の人の
+      // 出庫が履歴の delta に反映されず、履歴の合計と在庫が合わなくなる。
+      const [before] = await runTxBatch(DB, clientTxId, [
+        DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
+        DB.prepare(
+          `INSERT INTO parts_transaction (${historyCols})
+           SELECT ?1, 'adjust', ?2 - quantity, ?3, ?4, ?5, ?6, ?7, ?8 FROM parts_inventory WHERE id = ?1`
+        ).bind(id, bodyQty, note ?? null, relatedTable, relatedId, userEmail, now, clientTxId),
+        DB.prepare(
+          `UPDATE parts_inventory SET quantity = ?1, updated_by = ?2, updated_at = ?3 WHERE id = ?4`
+        ).bind(bodyQty, userEmail, now, id),
+      ]);
+      oldQty = before.results?.[0]?.quantity ?? part.quantity;
+      newQty = bodyQty;
+      delta = newQty - oldQty;
+    } else {
+      // 入庫・出庫は相対更新（quantity = quantity + Δ）で行う。
+      // 「読み取り→計算→絶対値で書き込み」だと、2人が同時に±したとき片方の更新が消える。
+      // 出庫の在庫不足ガードも同じUPDATEの条件で行い、同時出庫でもマイナス在庫にならない。
+      // 履歴は「直前の UPDATE が1行更新したときだけ」登録する（changes() = 1。在庫不足なら履歴も作らない）。
+      delta = type === 'in' ? bodyQty : -bodyQty;
+      const [upd, , after] = await runTxBatch(DB, clientTxId, [
+        DB.prepare(
+          `UPDATE parts_inventory
+              SET quantity = quantity + ?1, updated_by = ?2, updated_at = ?3
+            WHERE id = ?4 AND quantity + ?1 >= 0`
+        ).bind(delta, userEmail, now, id),
+        DB.prepare(
+          `INSERT INTO parts_transaction (${historyCols})
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9 WHERE changes() = 1`
+        ).bind(id, type, delta, note ?? null, relatedTable, relatedId, userEmail, now, clientTxId),
+        DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id),
+      ]);
+      if ((upd.meta?.changes ?? 0) === 0) {
+        return jsonError(400, '在庫不足です。');
+      }
+      newQty = after.results?.[0]?.quantity ?? part.quantity + delta;
+      oldQty = newQty - delta;
     }
-    newQty = after.results?.[0]?.quantity ?? part.quantity + delta;
-    oldQty = newQty - delta;
+  } catch (err) {
+    if (err !== DUPLICATE_TX) throw err;
+    const cur = await DB.prepare('SELECT quantity FROM parts_inventory WHERE id = ?1').bind(id).first();
+    return json({ ok: true, duplicate: true, quantity: cur?.quantity ?? part.quantity });
   }
 
   // 入庫したら「発注中」バッジを自動解除する（発注→入庫の完了）。
