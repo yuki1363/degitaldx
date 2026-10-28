@@ -27,6 +27,16 @@ function d1(db) {
       };
       return stmt;
     },
+    // D1 の batch と同じく1トランザクションで順に実行し、途中で失敗したら全部戻す
+    async batch(stmts) {
+      db.exec('BEGIN');
+      try {
+        const out = [];
+        for (const st of stmts) out.push(await st.run());
+        db.exec('COMMIT');
+        return out;
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+    },
   };
 }
 
@@ -77,5 +87,82 @@ sqlite.prepare('UPDATE repair_request SET due_date = ? WHERE id = ?').run(addDay
 await check();
 ok('期限が変わって再び超過したら新しく通知する', count('repair_overdue', repairId) === 2, `n=${count('repair_overdue', repairId)}`);
 
-console.log(`\n========== 単体（通知）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
+// ---- 年間計画の会計年度（リセットで年度を進める） ----
+console.log('\n=== 単体: 年間計画の会計年度（最後にリセットした年度＋1） ===');
+const PLANS = pathToFileURL(path.join(ROOT, 'functions/api/plans/index.js')).href;
+const RESET = pathToFileURL(path.join(ROOT, 'functions/api/plans/annual-reset.js')).href;
+const { getAnnualFyState, deriveOverdue } = await import(PLANS);
+const { onRequestPost: resetPost } = await import(RESET);
+const realNow = Date.now;
+// JST のその日の正午に時計を合わせる
+const at = (ymd) => { Date.now = () => new Date(`${ymd}T03:00:00Z`).getTime(); };
+const admin = { user: { email: 'admin@example.com', role: 'admin' } };
+const reset = async (body = {}) => {
+  const res = await resetPost({ request: new Request('http://x/api/plans/annual-reset', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }), env, data: admin });
+  return { status: res.status, json: await res.json().catch(() => null) };
+};
+const annual = (ym) => ({ id: 1, status: 'pending', annual_only: 1, planned_date: `2020-${ym}-01` });
+sqlite.exec('DELETE FROM plan_reset_log');
+
+try {
+  // 履歴なし: 時計の年度。10〜12月のリセットは前年度を締める
+  at('2026-10-27');
+  let st = await getAnnualFyState(env.DB);
+  ok('履歴なし・10月: 今年度は時計の年度（FY2026）', st.current === 2026, JSON.stringify(st));
+  ok('履歴なし・10月: リセットで締めるのは前年度（FY2025）', st.resetTarget === 2025 && st.resetAvailable, JSON.stringify(st));
+  at('2026-05-10');
+  st = await getAnnualFyState(env.DB);
+  ok('履歴なし・5月: 締めるのは今年度（FY2025）だが9月まではリセット不可', st.resetTarget === 2025 && !st.resetAvailable, JSON.stringify(st));
+  const early = await reset();
+  ok('9月より前のリセットは409', early.status === 409, JSON.stringify(early));
+
+  // 10月にリセット → FY2025 を締め、今年度は FY2026。完了状態は戻り、監査と履歴が1トランザクションで残る
+  at('2026-10-27');
+  const doneId = ins(`INSERT INTO maintenance_plan (title, plan_type, planned_date, status, annual_only, created_by, created_at) VALUES ('年間A', 'inspection', '2024-05-01', 'done', 1, 't', '2026-01-01T00:00:00Z')`);
+  const stale = await reset({ fiscal_year: 2026 });
+  ok('締める年度と違う fiscal_year（古い画面の時計で計算）は409', stale.status === 409, JSON.stringify(stale));
+  const r1 = await reset({ fiscal_year: 2025 });
+  ok('10月のリセットは FY2025 を締める', r1.status === 200 && r1.json?.fiscal_year === 2025 && r1.json?.reset_count === 1, JSON.stringify(r1));
+  ok('リセットで完了が未実施に戻る', sqlite.prepare('SELECT status FROM maintenance_plan WHERE id = ?').get(doneId).status === 'pending');
+  const log = sqlite.prepare('SELECT plan_count FROM plan_reset_log WHERE fiscal_year = 2025').get();
+  ok('リセット履歴に戻した件数が残る', log?.plan_count === 1, JSON.stringify(log));
+  const aud = sqlite.prepare(`SELECT diff_json FROM audit_log WHERE record_id = 'annual_reset' ORDER BY id DESC LIMIT 1`).get();
+  const diff = JSON.parse(aud?.diff_json || '{}');
+  ok('監査ログに戻した予定と変更前の状態が残る', diff.fiscal_year === 2025 && diff.reset_plans?.[0]?.id === doneId && diff.reset_plans?.[0]?.from === 'done', aud?.diff_json);
+  const r2 = await reset();
+  ok('リセット直後のもう一度は409（始まったばかりの FY2026 を締めない）', r2.status === 409, JSON.stringify(r2));
+  st = await getAnnualFyState(env.DB);
+  ok('リセット後の今年度は FY2026', st.current === 2026 && st.resetTarget === 2026 && !st.resetAvailable, JSON.stringify(st));
+
+  // 翌年10月にリセットを忘れている: 年度は進まず、FY2026 の未実施（9月分）は期限超過のまま
+  at('2027-10-15');
+  st = await getAnnualFyState(env.DB);
+  ok('リセット忘れ: 時計が FY2027 でも今年度は FY2026 のまま', st.current === 2026 && st.resetAvailable, JSON.stringify(st));
+  ok('リセット忘れ: 前年度9月の未実施は期限超過', deriveOverdue(annual('09'), { fy: st.current }).status === 'overdue');
+  ok('（参考）時計の年度で判定すると9月分は超過にならない＝気づけない', deriveOverdue(annual('09')).status === 'pending');
+  const r3 = await reset();
+  ok('翌年10月のリセットは FY2026 を締める', r3.status === 200 && r3.json?.fiscal_year === 2026, JSON.stringify(r3));
+  st = await getAnnualFyState(env.DB);
+  ok('リセット後は FY2027 に進み、前年度9月の予定は超過にならない', st.current === 2027 && deriveOverdue(annual('09'), { fy: st.current }).status === 'pending', JSON.stringify(st));
+
+  // 9月中の前倒しリセット: 翌年度へ進む（時計＋1まで）
+  at('2028-09-20');
+  const r4 = await reset();
+  st = await getAnnualFyState(env.DB);
+  ok('9月の前倒しリセットで FY2028 へ進む', r4.status === 200 && r4.json?.fiscal_year === 2027 && st.current === 2028, JSON.stringify({ r4, st }));
+  ok('前倒し後は今年度の9月分も超過にならない', deriveOverdue(annual('09'), { fy: st.current }).status === 'pending');
+
+  // 期限超過通知も同じ年度で判定する（リセット忘れの前年度分を通知、本文は年度に当てはめた予定月）
+  sqlite.exec('DELETE FROM plan_reset_log');
+  sqlite.exec(`INSERT INTO plan_reset_log (fiscal_year, reset_by, plan_count) VALUES (2025, 't', 0)`);
+  at('2027-10-15');
+  const forgotId = ins(`INSERT INTO maintenance_plan (title, plan_type, planned_date, status, annual_only, created_by, created_at) VALUES ('年間B', 'inspection', '2020-09-01', 'pending', 1, 't', '2026-01-01T00:00:00Z')`);
+  await check();
+  const n = sqlite.prepare(`SELECT body FROM notifications WHERE type = 'plan_overdue' AND related_id = ?`).all(forgotId);
+  ok('リセット忘れの前年度分は期限超過を通知（予定月 2027-09）', n.length === 1 && n[0].body.includes('2027-09'), JSON.stringify(n));
+} finally {
+  Date.now = realNow;
+}
+
+console.log(`\n========== 単体（通知・年度）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

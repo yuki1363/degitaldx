@@ -5,6 +5,9 @@
 //   ・各予定は 完了切替／点検者変更／別の月へ移動／追加／削除 ができる
 //   ・実施月を決めずに登録した予定は「未定」枠に入り、後から月へ割り当てられる
 //   ・月末が近いと、今月の未完了予定の完了チェックを促すアラートを表示
+//   ・会計年度（10月始まり9月終わり）で表示する（列は 10月〜翌9月）。既定の表示年度は API の
+//     fiscal_year（＝最後に年度リセットした年度＋1。完了状態はこの年度のもの）。
+//     他の年度は点検実績とタスクの配置だけを表示し、完了状態はリセット時のCSVで確認する
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
@@ -17,14 +20,19 @@ import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
 const app = document.getElementById('app');
 let currentUser = null;
 let equipNames = null;
-let year = new Date().getFullYear();
+let fy = null;                               // 表示中の会計年度（開始年。FY2026 = 2026/10〜2027/09）。null = API の今年度
+let currentFy = null;                        // 完了状態が属する年度（API の fiscal_year）
+let resetTargetFy = null;                    // 「🔁 年度リセット」で締める年度（API の reset_target_fy）
+let resetAvailable = false;                  // 年度リセットを実行できるか（締める年度の9月以降。API の reset_available）
+let resetLogFys = new Set();                 // リセット履歴（CSVスナップショット）がある年度
+let rawPlans = [];                           // API から取得したままの予定（年度リセットのCSVはこれから作る）
 let typeFilter = '';                       // '' = 全種別
 let nameFilter = '';                        // 名称あいまい検索
 let statusFilter = '';                      // 状態絞り込み: '' = 全部 | 'pending' = 未実施 | 'done' = 完了
 let sortKey = 'equipment';                  // 並び順: 'equipment'（設備順・既定）| 'inspector'（点検者順）
 let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
-let viewMonth = new Date().getMonth() + 1;  // 月別表示で見ている月
-let plansCache = [];                        // 取得済みの当年の予定（再取得を避ける）
+let viewMonth = Number(jstTodayStr().slice(5, 7)); // 月別表示で見ている月
+let plansCache = [];                        // 表示用の予定（今年度以外は完了状態を外したもの）
 let inspectionSummary = {};                 // 点検実績の突合用: { "line|equip": { "YYYY-MM": { count, equipment_id } } }
 
 const PLAN_TYPES = {
@@ -34,7 +42,9 @@ const PLAN_TYPES = {
   other:        { label: 'その他',  color: '#6b7280', bg: '#f3f4f6' },
 };
 const STATUS_LABELS = { pending: '未実施', done: '完了', overdue: '期限超過' };
-const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+const FISCAL_YEAR_START_MONTH = 10;
+// 会計年度の並び（10月〜翌9月）
+const MONTHS = Array.from({ length: 12 }, (_, i) => ((FISCAL_YEAR_START_MONTH - 1 + i) % 12) + 1);
 const MONTH_END_WINDOW_DAYS = 7; // 月末これ以内になったらアラート
 
 function showError(err) {
@@ -44,6 +54,12 @@ function showError(err) {
 const mm = (m) => String(m).padStart(2, '0');
 const monthOf = (p) => Number((p.planned_date || '').slice(5, 7));
 const typeOf = (pt) => PLAN_TYPES[pt] || PLAN_TYPES.other;
+// 表示中の年度で、その月が属する暦年（10〜12月は開始年、1〜9月は翌年）
+const calYear = (m, f = fy) => (m >= FISCAL_YEAR_START_MONTH ? f : f + 1);
+const fyLabelOf = (f) => `FY${f}（${f}/10〜${f + 1}/09）`;
+// 完了状態を操作できるのは、完了状態が属する年度（今年度）を表示しているときだけ
+const isCurrentView = () => fy === currentFy;
+const canEditView = () => hasRole(currentUser, 'editor') && isCurrentView();
 
 // ---------------- アクションシート（編集用の簡易モーダル） ----------------
 
@@ -87,7 +103,7 @@ function openInputSheet(titleText, { type = 'text', value = '', placeholder = ''
 // 別レコードは作らず同じ予定の planned_date を指定日にして on_calendar を立てるだけなので、
 // 年間計画表にそのまま残りつつ、同じ予定がカレンダーにも出る（完了状態も常に一致する）。
 async function registerToCalendar(plan) {
-  const defaultDate = (plan.planned_date || '').slice(0, 10) || `${year}-01-01`;
+  const defaultDate = (plan.planned_date || '').slice(0, 10) || `${calYear(1)}-01-01`;
   const date = await openInputSheet('カレンダーに表示する日付', { type: 'date', value: defaultDate });
   if (date === null) return;
   const d = String(date).trim();
@@ -145,7 +161,7 @@ function openMoveSheet(plan) {
   const cur = monthOf(plan);
   const actions = MONTHS.filter((m) => plan.unscheduled || m !== cur).map((m) => ({
     label: `${m}月へ`,
-    onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { planned_date: `${year}-${mm(m)}-01`, unscheduled: 0 })),
+    onClick: () => mutate(() => api.put(`/api/plans/${plan.id}`, { planned_date: `${calYear(m)}-${mm(m)}-01`, unscheduled: 0 })),
   }));
   openSheet(`「${plan.title}」を何月に？`, actions);
 }
@@ -156,7 +172,7 @@ function openAddSheet(row, m) {
     { label: `「${row.title}」を ${m}月 に追加`, onClick: () => mutate(() => api.post('/api/plans', {
       title: row.title,
       plan_type: row.plan_type,
-      planned_date: `${year}-${mm(m)}-01`,
+      planned_date: `${calYear(m)}-${mm(m)}-01`,
       line_name: row.line_name || null,
       equipment_name: row.equipment_name || null,
       inspector_name: row.inspector_name || null,
@@ -206,8 +222,8 @@ function buildBulkForm() {
     // 月を選んだ場合は各月1日付で作成（実施日は使わない。月単位で管理）。
     // annual_only=1 でカレンダーには表示しない（年間計画表専用）。
     const items = selectedMonths.length === 0
-      ? [{ ...common, planned_date: `${year}-01-01`, unscheduled: 1, annual_only: 1 }]
-      : selectedMonths.map((m) => ({ ...common, planned_date: `${year}-${mm(m)}-01`, annual_only: 1 }));
+      ? [{ ...common, planned_date: `${calYear(1)}-01-01`, unscheduled: 1, annual_only: 1 }]
+      : selectedMonths.map((m) => ({ ...common, planned_date: `${calYear(m)}-${mm(m)}-01`, annual_only: 1 }));
 
     try {
       const { created } = await api.post('/api/plans/batch', { items });
@@ -319,7 +335,7 @@ function planRow(p, monthLabel) {
   const type = typeOf(p.plan_type);
   const eqLabel = [p.line_name, p.equipment_name].filter(Boolean).join(' ');
   const statusCls = p.status === 'done' ? ' is-done' : (p.status === 'overdue' ? ' is-overdue' : '');
-  const canEdit = hasRole(currentUser, 'editor');
+  const canEdit = canEditView();
   const inner = [
     el('div', { class: 'mplan-body' }, [
       el('div', { class: 'mplan-head' }, [
@@ -376,11 +392,13 @@ function buildMonthView() {
 
 function monthNav() {
   const stepTo = (m) => { viewMonth = m; renderView(); };
+  // 会計年度の並び（10月〜翌9月）で前後へ。年度の端では止める（9月の次は来年度の10月＝別の表示年度）
+  const idx = MONTHS.indexOf(viewMonth);
   return el('div', { class: 'cal-nav no-print', style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' }, [
-    el('button', { class: 'btn btn-sm', onclick: () => stepTo(viewMonth > 1 ? viewMonth - 1 : 12) }, '‹'),
+    el('button', { class: 'btn btn-sm', disabled: idx <= 0, onclick: () => stepTo(MONTHS[idx - 1]) }, '‹'),
     el('select', { onchange: (e) => stepTo(Number(e.target.value)) },
-      MONTHS.map((m) => el('option', { value: m, selected: m === viewMonth }, `${m}月`))),
-    el('button', { class: 'btn btn-sm', onclick: () => stepTo(viewMonth < 12 ? viewMonth + 1 : 1) }, '›'),
+      MONTHS.map((m) => el('option', { value: m, selected: m === viewMonth }, `${calYear(m)}年${m}月`))),
+    el('button', { class: 'btn btn-sm', disabled: idx >= MONTHS.length - 1, onclick: () => stepTo(MONTHS[idx + 1]) }, '›'),
   ]);
 }
 
@@ -393,12 +411,12 @@ function buildYearGrid(rows) {
         ? '条件に一致する予定はありません。'
         : '予定はまだありません。上の「一括登録」から登録してください。');
   }
-  const canEdit = hasRole(currentUser, 'editor');
+  const canEdit = canEditView();
 
   const head = el('tr', {}, [
     el('th', { class: 'annual-task-col' }, 'タスク / 設備 / 点検者'),
     el('th', { class: 'annual-unsched-col' }, '未定'),
-    ...MONTHS.map((m) => el('th', {}, `${m}月`)),
+    ...MONTHS.map((m) => el('th', {}, m === FISCAL_YEAR_START_MONTH || m === 1 ? `${calYear(m)}年${m}月` : `${m}月`)),
   ]);
 
   const body = rows.map((row) => {
@@ -423,18 +441,19 @@ function buildYearGrid(rows) {
       ...MONTHS.map((m) => {
         const s = summarizeMonth(row.months.get(m));
 
-        // 点検種別かつ設備が設定されている場合、当年の実績件数を表示
+        // 点検種別かつ設備が設定されている場合、表示年度のその月の実績件数を表示
         const inspKey = `${row.line_name || ''}|${row.equipment_name || ''}`;
-        const inspMonthKey = `${year}-${mm(m)}`;
+        const y = calYear(m);
+        const inspMonthKey = `${y}-${mm(m)}`;
         const inspData = (row.plan_type === 'inspection' && (row.line_name || row.equipment_name))
           ? inspectionSummary[inspKey]?.[inspMonthKey]
           : null;
-        const lastDay = new Date(year, m, 0).getDate();
+        const lastDay = new Date(y, m, 0).getDate();
         const inspBadge = inspData
           ? el('a', {
               class: 'annual-insp-count',
-              href: `/pages/inspection?equipment_id=${inspData.equipment_id}&from=${year}-${mm(m)}-01&to=${year}-${mm(m)}-${String(lastDay).padStart(2, '0')}`,
-              title: `${year}年${m}月の点検実績: ${inspData.count}件`,
+              href: `/pages/inspection?equipment_id=${inspData.equipment_id}&from=${y}-${mm(m)}-01&to=${y}-${mm(m)}-${String(lastDay).padStart(2, '0')}`,
+              title: `${y}年${m}月の点検実績: ${inspData.count}件`,
               onclick: (e) => e.stopPropagation(),
             }, `✓${inspData.count}件`)
           : null;
@@ -478,10 +497,10 @@ function monthCellText(list) {
   return s.count > 1 ? `${s.count}件(${label})` : label;
 }
 
-// CSVは年間表（行=タスク／列=12ヶ月）を出力。種別フィルターを反映し、各月の完了状態を含める
-function exportCsv(rows, enc) {
-  if (rows.length === 0) { alert('出力対象がありません。'); return; }
-  const columns = [
+// CSVは年間表（行=タスク／列=12ヶ月＝10月〜翌9月）を出力。種別フィルターを反映し、各月の完了状態を含める
+//   （今年度以外の表示では完了状態を持たないため「未実施」になる。過去年度はリセット時のCSVを使う）
+function annualCsvColumns() {
+  return [
     { label: '種別', value: (r) => typeOf(r.plan_type).label },
     { label: 'タスク', value: (r) => r.title },
     { label: '設備', value: (r) => [r.line_name, r.equipment_name].filter(Boolean).join(' ') },
@@ -490,19 +509,22 @@ function exportCsv(rows, enc) {
     { label: '未定', value: (r) => monthCellText(r.unscheduledList) },
     ...MONTHS.map((m) => ({ label: `${m}月`, value: (r) => monthCellText(r.months.get(m)) })),
   ];
-  const text = buildCsvText(rows, columns);
-  downloadCsv(`annual_plan_${year}_${typeFilter || 'all'}.csv`, text, enc);
+}
+function exportCsv(rows, enc, f = fy) {
+  if (rows.length === 0) { alert('出力対象がありません。'); return; }
+  const text = buildCsvText(rows, annualCsvColumns());
+  downloadCsv(`annual_plan_FY${f}_${typeFilter || 'all'}.csv`, text, enc);
 }
 
 // ---------------- 月末アラート ----------------
 
 function monthEndAlert() {
-  const today = new Date();
-  // 月末アラートは「今年」を表示しているときだけ（過去年・来年の表示中は出さない）
-  if (year !== today.getFullYear()) return null;
-  const curMonth = today.getMonth() + 1;
-  const daysInMonth = new Date(today.getFullYear(), curMonth, 0).getDate();
-  const daysLeft = daysInMonth - today.getDate();
+  const [ty, tm, td] = jstTodayStr().split('-').map(Number);
+  // 月末アラートは、今日が表示年度に入っていて、それが完了状態を持つ年度のときだけ
+  if (!isCurrentView() || calYear(tm) !== ty) return null;
+  const curMonth = tm;
+  const daysInMonth = new Date(ty, curMonth, 0).getDate();
+  const daysLeft = daysInMonth - td;
   if (daysLeft > MONTH_END_WINDOW_DAYS) return null;
 
   const pending = plansCache.filter((p) => !p.unscheduled && monthOf(p) === curMonth && p.status !== 'done');
@@ -561,27 +583,52 @@ function toolbar() {
       el('button', { class: 'btn btn-sm', onclick: () => window.print() }, '🖨 印刷'),
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'UTF-8') }, '📥 CSV'),
       el('button', { class: 'btn btn-sm', onclick: () => exportCsv(buildRows(plansCache), 'sjis') }, '📥 CSV(Excel)'),
-      hasRole(currentUser, 'editor')
-        ? el('button', { class: 'btn btn-sm', onclick: () => renderPlanImport(year, () => renderYear()) }, '📤 CSV取込')
+      canEditView()
+        ? el('button', { class: 'btn btn-sm', onclick: () => renderPlanImport((m) => calYear(m), () => renderYear()) }, '📤 CSV取込')
         : null,
+      // 締める年度の9月より前（リセットした直後など）は押せない
       hasRole(currentUser, 'admin')
-        ? el('button', { class: 'btn btn-sm btn-danger', onclick: () => runAnnualReset(currentFiscalYear(), null) }, '🔁 年度リセット')
+        ? el('button', {
+            class: 'btn btn-sm btn-danger',
+            disabled: !resetAvailable,
+            title: resetAvailable ? `FY${resetTargetFy} を締めて未実施に戻します` : `FY${resetTargetFy} の年度リセットは ${resetTargetFy + 1}年9月から実行できます`,
+            onclick: () => runAnnualReset(),
+          }, `🔁 年度リセット（FY${resetTargetFy}）`)
         : null,
     ]),
   ]);
 }
 
-// 年ナビ: タスクは毎年共通だが、完了状況は年ごと。表示年を切り替えられる
+// 年度ナビ: タスクは毎年共通。完了状態は今年度（最後にリセットした年度＋1）のものだけを持つ
 function yearNav() {
-  const thisYear = new Date().getFullYear();
+  const step = (d) => { fy += d; renderYear().catch(showError); };
   return el('div', { class: 'cal-nav no-print', style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' }, [
     el('a', { class: 'btn btn-sm', href: '/pages/plan' }, '‹ カレンダー'),
     el('div', { style: 'flex:1;display:flex;align-items:center;justify-content:center;gap:6px' }, [
-      el('button', { class: 'btn btn-sm', title: '前の年', onclick: () => { year -= 1; renderYear().catch(showError); } }, '‹'),
-      el('span', { style: 'font-weight:600;min-width:96px;text-align:center' },
-        `${year}年${year === thisYear ? '（今年）' : ''}`),
-      el('button', { class: 'btn btn-sm', title: '次の年', onclick: () => { year += 1; renderYear().catch(showError); } }, '›'),
+      el('button', { class: 'btn btn-sm', title: '前の年度', onclick: () => step(-1) }, '‹'),
+      el('span', { class: 'annual-fy-label', style: 'font-weight:600;min-width:96px;text-align:center' },
+        `${fyLabelOf(fy)}${isCurrentView() ? '（今年度）' : ''}`),
+      el('button', { class: 'btn btn-sm', title: '次の年度', onclick: () => step(1) }, '›'),
     ]),
+  ]);
+}
+
+// 今年度以外を表示しているときの案内（完了状態はこの年度のものではない）
+function otherFyNotice() {
+  if (isCurrentView()) return null;
+  const back = el('button', { class: 'btn btn-sm', onclick: () => { fy = currentFy; renderYear().catch(showError); } }, `今年度（FY${currentFy}）に戻る`);
+  if (fy < currentFy) {
+    return el('div', { class: 'notice annual-fy-notice no-print' }, [
+      el('span', {}, `${fyLabelOf(fy)} は過去の年度です。表はタスクの配置と点検実績だけを表示しています（完了状態は表示しません）。`),
+      resetLogFys.has(fy)
+        ? el('a', { class: 'btn btn-sm', href: `/api/plans/annual-reset?fiscal_year=${fy}&csv=1`, download: `annual_plan_FY${fy}.csv` }, `📥 FY${fy} の完了状況（リセット時のCSV）`)
+        : el('span', {}, ' この年度のリセット時のCSVはありません。'),
+      ' ', back,
+    ]);
+  }
+  return el('div', { class: 'notice annual-fy-notice no-print' }, [
+    el('span', {}, `${fyLabelOf(fy)} はまだ始まっていない年度です（完了状態は FY${fy - 1} の年度リセット後に記録します）。`),
+    ' ', back,
   ]);
 }
 
@@ -608,10 +655,11 @@ function renderView() {
   render(app, [
     monthEndAlert(),
     yearNav(),
-    hasRole(currentUser, 'editor') ? buildBulkForm() : null,
+    otherFyNotice(),
+    canEditView() ? buildBulkForm() : null,
     el('div', { class: 'card' }, [
       el('div', { class: 'print-only report-print-header' }, [
-        el('h2', {}, printTitle),
+        el('h2', {}, `${printTitle} ${fyLabelOf(fy)}`),
         el('p', {}, `種別: ${typeLabel()}　出力日: ${jstTodayStr()}`),
       ]),
       toolbar(),
@@ -620,7 +668,7 @@ function renderView() {
           el('span', { class: 'cal-legend-item', style: `background:${bg};color:${color}` }, label))),
       viewBox,
       el('p', { class: 'hint no-print', style: 'margin-top:8px' },
-        hasRole(currentUser, 'editor')
+        canEditView()
           ? 'タップで 完了・点検者変更・移動・削除ができます。全月表示では空欄の＋でその月に追加できます。'
           : 'タップで詳細へ。'),
     ]),
@@ -630,13 +678,23 @@ function renderView() {
 // 年間計画（annual_only）を全件取得して描画（毎年共通のテンプレート）
 // 同時に当年の点検実績も取得し、年間計画グリッドとの突合に使う
 async function renderYear() {
-  const [{ plans }, equipData, inspData] = await Promise.all([
-    api.get('/api/plans?annual_only=1'),
+  const annual = await api.get('/api/plans?annual_only=1');
+  currentFy = annual.fiscal_year;
+  resetTargetFy = annual.reset_target_fy ?? currentFy;
+  resetAvailable = !!annual.reset_available;
+  if (fy === null) fy = currentFy;
+  const [equipData, inspData, resetLogs] = await Promise.all([
     api.get('/api/equipment').catch(() => ({ equipment: [] })),
-    // limit=5000: 既定200件だと古い月の実績が欠ける。失敗しても計画表は実績なしで表示する（.catch）
-    api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31&limit=5000`).catch(() => ({ inspections: [] })),
+    // 表示年度（10月〜翌9月）の点検実績。limit=5000: 既定200件だと古い月の実績が欠ける。
+    // 失敗しても計画表は実績なしで表示する（.catch）
+    api.get(`/api/inspections?from=${fy}-10-01&to=${fy + 1}-09-30&limit=5000`).catch(() => ({ inspections: [] })),
+    // 過去年度の完了状況（リセット時のCSV）の有無
+    fy < currentFy ? api.get('/api/plans/annual-reset').catch(() => ({ logs: [] })) : Promise.resolve(null),
   ]);
-  plansCache = plans || [];
+  rawPlans = annual.plans || [];
+  // 完了状態は今年度のもの。他の年度の表示では「予定」として扱う（前年度の✓が別年度に出ないように）
+  plansCache = isCurrentView() ? rawPlans : rawPlans.map((p) => ({ ...p, status: 'pending' }));
+  if (resetLogs) resetLogFys = new Set((resetLogs.logs || []).map((l) => Number(l.fiscal_year)));
 
   // equipment_id → "line_name|equipment_name" の逆引きマップ（inspections API は equipment_id しか返さない）
   const idToLineEquip = new Map();
@@ -660,42 +718,30 @@ async function renderYear() {
   renderView();
 }
 
-// 会計年度: 10月始まり9月終わり（FY = 当年の10月〜翌年の9月）
-// 例: 2025-10-01〜2026-09-30 → FY2025
-function currentFiscalYear() {
-  const d = new Date();
-  return d.getMonth() >= 9 ? d.getFullYear() : d.getFullYear() - 1;
-}
-
 // 年度末リセット実行: CSV をダウンロードしてからサーバーにリセットを依頼
 //   ※ リセットは管理者が手動で行う（ツールバーの「🔁 年度リセット」ボタン）。
 //      未リセットを促す自動バナーは出さない。
-async function runAnnualReset(fy, noticeEl) {
-  const fyLabel = `FY${fy}（${fy}年10月〜${fy + 1}年9月）`;
+//   締める年度はサーバーが決めた reset_target_fy（通常は最後にリセットした年度＋1）。
+//   CSV は表示中の年度ではなく、API から取得したままの完了状態（rawPlans）から作る。
+async function runAnnualReset() {
+  const target = resetTargetFy;
+  const fyLabel = `FY${target}（${target}年10月〜${target + 1}年9月）`;
   if (!confirm(`${fyLabel} の年間計画をリセットします。\n・現在の完了状態をCSVに保存\n・全タスクを「未実施」に戻す\n\n続けますか？`)) return;
 
-  // CSV を生成してダウンロード（リセット前の状態を保存）
-  if (plansCache.length > 0) exportCsv(buildRows(plansCache), 'UTF-8');
-
-  // CSV テキストを生成してサーバーに送信（サーバー側でも保持）
+  // リセット前の完了状態（全種別）。種別フィルターに関係なく全タスクを残す
+  const saved = [typeFilter, nameFilter];
+  typeFilter = ''; nameFilter = '';
+  const allRows = buildRows(rawPlans);
+  [typeFilter, nameFilter] = saved;
   let csvText = '';
-  try {
-    const columns = [
-      { label: '種別',  value: (r) => PLAN_TYPES[r.plan_type]?.label || r.plan_type },
-      { label: 'タスク', value: (r) => r.title },
-      { label: '設備',  value: (r) => [r.line_name, r.equipment_name].filter(Boolean).join(' ') },
-      { label: '点検者', value: (r) => r.inspector_name || '' },
-      { label: '担当者', value: (r) => r.assignee_name || '' },
-      { label: '未定',  value: (r) => monthCellText(r.unscheduledList) },
-      ...MONTHS.map((m) => ({ label: `${m}月`, value: (r) => monthCellText(r.months.get(m)) })),
-    ];
-    csvText = buildCsvText(buildRows(plansCache), columns);
-  } catch { /* CSV 生成失敗はリセット続行 */ }
+  try { csvText = buildCsvText(allRows, annualCsvColumns()); } catch { /* CSV 生成失敗はリセット続行 */ }
+  // CSV をダウンロード（リセット前の状態を手元にも保存）
+  if (csvText) downloadCsv(`annual_plan_FY${target}_all.csv`, csvText, 'UTF-8');
 
   try {
-    const { reset_count } = await api.post('/api/plans/annual-reset', { fiscal_year: fy, csv_snapshot: csvText || null });
+    const { reset_count } = await api.post('/api/plans/annual-reset', { fiscal_year: target, csv_snapshot: csvText || null });
     alert(`${fyLabel} のリセットが完了しました（${reset_count}件を未実施に戻しました）。`);
-    if (noticeEl) noticeEl.remove();
+    fy = null; // 新しい今年度を表示する
     await renderYear();
   } catch (err) {
     alert(`リセットに失敗しました: ${err.message}`);

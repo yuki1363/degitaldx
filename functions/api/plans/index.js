@@ -15,35 +15,68 @@ const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 // 年間計画（毎月1日に登録＝月単位で管理）は「月単位」で判定する。日単位だと予定月の
 // 2日以降に当月分が誤って超過になるため（home-tabs.js と同じ考え方）。当月中は超過にしない
 // （月末までにやる扱い）。monthly を明示指定できるが、未指定なら plan.annual_only で自動判定。
-//   ※ 呼び出しは必ず (p) => deriveOverdue(p) の形にする。map に直接渡すと第2引数に
-//     配列の index が入り、通常予定まで月単位判定になってしまう。
+//   ※ 呼び出しは必ず (p) => deriveOverdue(p, …) の形にする。map に直接渡すと第2引数に配列の index が入る。
 //   年間計画は「毎年共通のテンプレート」で、planned_date の年は登録した年のまま残る。年込みで
 //   比べると、年度リセットで未実施に戻した直後に前年度の月がすべて超過になる（通知も一斉に出る）
-//   ため、予定の「月」を今の会計年度（10月始まり）に当てはめて判定する（annualMonthInCurrentFy）。
-export function deriveOverdue(plan, monthly) {
+//   ため、予定の「月」を今の年間計画の会計年度（opts.fy）に当てはめて判定する（annualMonthInFy）。
+//   opts.fy は getAnnualFyState(db).current（＝最後に年度リセットした年度＋1）。省略時は時計の年度。
+export function deriveOverdue(plan, opts = {}) {
   if (!plan || plan.status !== 'pending' || plan.unscheduled) return plan;
   const limit = (plan.planned_end_date || plan.planned_date || '').slice(0, 10);
   if (!limit) return plan;
-  const isMonthly = monthly ?? !!plan.annual_only;
+  const isMonthly = opts.monthly ?? !!plan.annual_only;
   const nowJst = new Date(Date.now() + 9 * 3600_000).toISOString();
   if (isMonthly) {
     const nowYm = nowJst.slice(0, 7);
-    return annualMonthInCurrentFy(limit, nowYm) < nowYm ? { ...plan, status: 'overdue' } : plan;
+    const fy = opts.fy ?? clockFiscalYear(nowYm);
+    return annualMonthInFy(limit, fy) < nowYm ? { ...plan, status: 'overdue' } : plan;
   }
   return limit < nowJst.slice(0, 10) ? { ...plan, status: 'overdue' } : plan;
 }
 
-// 会計年度の開始月（10月始まり9月終わり。js/plan-annual.js の currentFiscalYear と同じ）
+// 会計年度の開始月（10月始まり9月終わり。FY2026 = 2026/10〜2027/09）
 export const FISCAL_YEAR_START_MONTH = 10;
 
-// 年間計画の予定日（YYYY-MM-DD）の「月」を、今（nowYm = JSTの YYYY-MM）の会計年度の年月に当てはめる。
-// 例: 今が 2026-11（FY2026＝2026/10〜2027/09）なら、5月の予定は 2027-05、10月の予定は 2026-10。
-export function annualMonthInCurrentFy(dateStr, nowYm) {
+// 年月（YYYY-MM）が属する会計年度（開始年）
+export function clockFiscalYear(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return m >= FISCAL_YEAR_START_MONTH ? y : y - 1;
+}
+
+// 年間計画の予定日（YYYY-MM-DD）の「月」を、会計年度 fy の年月に当てはめる。
+// 例: FY2026（2026/10〜2027/09）なら、5月の予定は 2027-05、10月の予定は 2026-10。
+export function annualMonthInFy(dateStr, fy) {
   const m = Number(String(dateStr).slice(5, 7));
-  const [nowY, nowM] = nowYm.split('-').map(Number);
-  const fyStartYear = nowM >= FISCAL_YEAR_START_MONTH ? nowY : nowY - 1;
-  const year = m >= FISCAL_YEAR_START_MONTH ? fyStartYear : fyStartYear + 1;
+  const year = m >= FISCAL_YEAR_START_MONTH ? fy : fy + 1;
   return `${year}-${String(m).padStart(2, '0')}`;
+}
+
+// 年間計画の会計年度（「年度リセットで年度を進める」方式）
+//   年間計画の完了状態は年度リセットで未実施に戻すまで前年度のもの。時計で年度を切り替えると、
+//   リセット前に前年度の未実施が超過表示から消え、リセットを忘れても気づけなかった。そのため
+//   current（＝完了状態が属する年度・期限超過の判定に使う年度）は「最後にリセットした年度＋1」とする。
+//     ・リセット履歴が無い（導入直後）なら時計の年度
+//     ・時計の年度＋1 より先には進めない（9月中に前倒しでリセットした場合が＋1）
+//   resetTarget は次に「🔁 年度リセット」で締める年度。通常は current と同じ。履歴が無いときだけ、
+//   10〜12月のリセットは「終わったばかりの前年度」を締める扱いにする（10月に実行すると時計の年度＝
+//   始まったばかりの年度を締めた記録になっていた）。
+//   resetAvailable: 締める年度の最終月（9月）以降だけ true。10月にリセットした直後に、もう一度押して
+//   始まったばかりの年度まで締めてしまうのを防ぐ。
+export async function getAnnualFyState(db) {
+  const nowYm = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
+  const clockFy = clockFiscalYear(nowYm);
+  let last = null;
+  try {
+    const row = await db.prepare('SELECT MAX(fiscal_year) AS fy FROM plan_reset_log').first();
+    last = row?.fy == null ? null : Number(row.fy);
+  } catch { /* plan_reset_log が無い旧DBは履歴なし扱い */ }
+  if (last == null) {
+    const m = Number(nowYm.slice(5, 7));
+    const resetTarget = (m >= FISCAL_YEAR_START_MONTH && m <= FISCAL_YEAR_START_MONTH + 2) ? clockFy - 1 : clockFy;
+    return { current: clockFy, resetTarget, lastReset: null, clockFy, resetAvailable: nowYm >= `${resetTarget + 1}-09` };
+  }
+  const current = Math.min(last + 1, clockFy + 1);
+  return { current, resetTarget: current, lastReset: last, clockFy, resetAvailable: nowYm >= `${current + 1}-09` };
 }
 
 // 繰り返し予定を指定範囲内に展開して返す
@@ -248,7 +281,16 @@ export async function onRequestGet({ request, env }) {
     const plans = (rows ?? []).filter((p) => p.annual_only || batchIds.has(String(p.id)));
     // 年間計画表は月単位で超過判定する（毎月1日登録・当月は超過にしない）。
     // batch由来で annual_only 列が無い予定もあるため monthly=true を明示する。
-    return json({ plans: plans.map((p) => deriveOverdue(p, true)) });
+    const fyState = await getAnnualFyState(db);
+    return json({
+      plans: plans.map((p) => deriveOverdue(p, { monthly: true, fy: fyState.current })),
+      // 年間計画表の既定表示年度（完了状態が属する年度）と、年度リセットで締める年度
+      fiscal_year: fyState.current,
+      reset_target_fy: fyState.resetTarget,
+      last_reset_fy: fyState.lastReset,
+      clock_fiscal_year: fyState.clockFy,
+      reset_available: fyState.resetAvailable,
+    });
   }
 
   let rangeStart, rangeEnd;
@@ -317,7 +359,8 @@ export async function onRequestGet({ request, env }) {
   }
 
   // 通常カレンダーは日単位で判定（annual_only の on_calendar 予定だけは月単位に自動フォールバック）
-  return json({ plans: results.map((p) => deriveOverdue(p)) });
+  const fy = results.some((p) => p.annual_only) ? (await getAnnualFyState(db)).current : undefined;
+  return json({ plans: results.map((p) => deriveOverdue(p, { fy })) });
 }
 
 export async function onRequestPost({ request, env, data }) {
