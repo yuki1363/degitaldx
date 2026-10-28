@@ -2,6 +2,8 @@
 //   URL: /pages/labels
 //   設備を選択し、QRコード付きラベルをグリッドでまとめて印刷する。
 //   QRを読み取るとその設備の詳細ページ（/pages/ledger?id=N）が直接開く。
+//   使いかけの台紙に印刷できるよう、印刷の開始位置（上から◯段目・左から◯列目）を選べる。
+//   開始位置より前のマスは空けて（何も印刷せず）位置だけ確保する。2枚目以降の台紙は左上から詰める。
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
@@ -12,6 +14,8 @@ const app = document.getElementById('app');
 
 // 台紙: 40×40mm・24面（4列×6段）A4。1ページ分の枚数（レイアウトは style.css の .label-page）
 const LABELS_PER_PAGE = 24;
+const COLS = 4;
+const ROWS = 6;
 
 // 設備詳細URLを埋め込んだQRコードの dataURL を生成（単票ラベルと同じ仕様）
 // 誤り訂正は Q（汚れ・擦れのある現場向け。H は40mm角では密度が上がり過ぎるため使わない）
@@ -42,6 +46,9 @@ function labelCell(eq) {
 
     // 既定は全選択
     const selected = new Set(equipment.map((e) => e.id));
+    // 印刷の開始位置（1始まり）。使いかけの台紙の、まだ残っている最初のマス
+    const start = { row: 1, col: 1 };
+    const skipCount = () => (start.row - 1) * COLS + (start.col - 1);
 
     // 印刷対象（選択中の設備）のラベルグリッド。画面ではプレビュー、印刷時はこれだけ出る
     const sheet = el('div', { class: 'label-sheet' }, []);
@@ -51,16 +58,59 @@ function labelCell(eq) {
         render(sheet, el('p', { class: 'empty' }, '印刷する設備を選択してください。'));
         return;
       }
-      // 台紙1枚（24面）ごとにページを分け、印刷時はページ単位で改ページする
+      // 開始位置より前は空きマス（印刷しない・グリッドの位置だけ確保）。台紙1枚（24面）ごとにページを分ける
+      const cells = [
+        ...Array.from({ length: skipCount() }, () =>
+          el('div', { class: 'label-cell label-skip', 'aria-hidden': 'true' }, '使用済み')),
+        ...items.map(labelCell),
+      ];
       const pages = [];
-      for (let i = 0; i < items.length; i += LABELS_PER_PAGE) {
-        pages.push(el('div', { class: 'label-page' }, items.slice(i, i + LABELS_PER_PAGE).map(labelCell)));
+      for (let i = 0; i < cells.length; i += LABELS_PER_PAGE) {
+        pages.push(el('div', { class: 'label-page' }, cells.slice(i, i + LABELS_PER_PAGE)));
       }
       render(sheet, pages);
     };
 
     const countLabel = el('span', { class: 'hint' }, '');
-    const updateCount = () => { countLabel.textContent = `${selected.size} / ${equipment.length} 件を印刷`; };
+    const updateCount = () => {
+      const sheets = selected.size ? Math.ceil((skipCount() + selected.size) / LABELS_PER_PAGE) : 0;
+      countLabel.textContent = `${selected.size} / ${equipment.length} 件を印刷（台紙 ${sheets} 枚）`;
+    };
+
+    // 開始位置の選択: 台紙（4列×6段）のミニ図。タップしたマスから印刷する
+    const startBox = el('div', {});
+    const renderStart = () => {
+      const skip = skipCount();
+      const grid = el('div', { class: 'label-start-grid', role: 'group', 'aria-label': '印刷の開始位置' },
+        Array.from({ length: LABELS_PER_PAGE }, (_, i) => {
+          const row = Math.floor(i / COLS) + 1;
+          const col = (i % COLS) + 1;
+          const cls = i < skip ? ' is-used' : i === skip ? ' is-start' : '';
+          return el('button', {
+            type: 'button',
+            class: `label-start-cell${cls}`,
+            title: `上から${row}段目・左から${col}列目から印刷`,
+            'aria-label': `上から${row}段目・左から${col}列目から印刷`,
+            'aria-pressed': i === skip ? 'true' : 'false',
+            onclick: () => { start.row = row; start.col = col; renderStart(); renderSheet(); updateCount(); },
+          }, i === skip ? '▶' : '');
+        }));
+      render(startBox, [
+        el('div', { class: 'label-start-wrap' }, [
+          grid,
+          el('div', {}, [
+            el('p', { class: 'label-start-text' },
+              skip === 0
+                ? '左上（1段目・1列目）から印刷します。'
+                : `上から${start.row}段目・左から${start.col}列目から印刷します（1枚目の台紙は先頭の ${skip} 面を空けます）。`),
+            el('p', { class: 'hint' }, '使いかけの台紙に印刷するときは、まだ残っている最初のマスをタップしてください。灰色のマスには何も印刷しません。2枚目以降の台紙は左上から印刷します。'),
+            skip > 0
+              ? el('button', { class: 'btn btn-sm', type: 'button', onclick: () => { start.row = 1; start.col = 1; renderStart(); renderSheet(); updateCount(); } }, '左上に戻す')
+              : null,
+          ]),
+        ]),
+      ]);
+    };
 
     // 設備ごとの選択チェックボックス
     const rows = equipment.map((eq) => {
@@ -96,6 +146,10 @@ function labelCell(eq) {
         ]),
         el('div', { class: 'label-pick-list' }, rows.map((r) => r.node)),
       ]),
+      el('div', { class: 'card' }, [
+        el('h2', { class: 'card-title' }, '印刷の開始位置（使いかけの台紙）'),
+        startBox,
+      ]),
       el('div', { class: 'action-row' }, [
         el('button', { class: 'btn btn-primary', onclick: () => window.print() }, '🖨 印刷'),
         countLabel,
@@ -107,6 +161,7 @@ function labelCell(eq) {
     ]);
 
     render(app, [controls, sheet]);
+    renderStart();
     renderSheet();
     updateCount();
   } catch (err) {
