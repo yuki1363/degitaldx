@@ -1,5 +1,8 @@
-// 設備台帳ラベルの一括印刷
-//   URL: /pages/labels
+// 設備台帳ラベル・部品ラベルの一括印刷
+//   URL: /pages/labels                     … 設備ラベル（QR → /pages/ledger?id=N）
+//        /pages/labels?type=parts          … 部品ラベル（QR → /pages/parts?id=N。棚・部品箱に貼る）
+//        /pages/labels?type=parts&ids=1,2  … 指定した部品だけを選んだ状態で開く（部品詳細の「ラベルを印刷」）
+//   台紙はどちらも同じ A4・40×40mm・24面
 //   設備を選択し、QRコード付きラベルをグリッドでまとめて印刷する。
 //   QRを読み取るとその設備の詳細ページ（/pages/ledger?id=N）が直接開く。
 //   使いかけの台紙に印刷できるよう、印刷の開始位置（上から◯段目・左から◯列目）を選べる。
@@ -26,26 +29,47 @@ function qrDataUrl(text) {
   return qr.createDataURL(6, 4);
 }
 
-function labelCell(eq) {
-  const url = `${window.location.origin}/pages/ledger?id=${eq.id}`;
+// 設備・部品を「QRのURL・1行目（太字）・2行目」にそろえる
+const params = new URLSearchParams(window.location.search);
+const MODE = params.get('type') === 'parts' ? 'parts' : 'equipment';
+const KIND = MODE === 'parts'
+  ? {
+      noun: '部品', api: '/api/parts', listKey: 'parts',
+      url: (x) => `${window.location.origin}/pages/parts?id=${x.id}`,
+      code: (x) => x.model_no || `部品#${x.id}`,
+      name: (x) => [x.name, x.location].filter(Boolean).join('／'),
+      empty: '部品が登録されていません。先に部品在庫から登録してください。',
+      qrHint: 'QRコードを読み取ると、その部品の画面が開き、その場で出庫・入庫を記録できます。',
+    }
+  : {
+      noun: '設備', api: '/api/equipment', listKey: 'equipment',
+      url: (x) => `${window.location.origin}/pages/ledger?id=${x.id}`,
+      code: (x) => x.code,
+      name: (x) => x.name,
+      empty: '設備が登録されていません。先に設備台帳から登録してください。',
+      qrHint: 'QRコードを読み取ると、その設備の詳細ページが開きます。',
+    };
+
+function labelCell(item) {
   return el('div', { class: 'label-cell' }, [
-    el('img', { src: qrDataUrl(url), alt: `QRコード: ${eq.code}` }),
-    el('div', { class: 'label-code' }, eq.code),
-    el('div', { class: 'label-name' }, eq.name),
+    el('img', { src: qrDataUrl(KIND.url(item)), alt: `QRコード: ${KIND.code(item)}` }),
+    el('div', { class: 'label-code' }, KIND.code(item)),
+    el('div', { class: 'label-name' }, KIND.name(item)),
   ]);
 }
 
 (async () => {
   try {
     await getCurrentUser();
-    const { equipment } = await api.get('/api/equipment');
-    if (!equipment || equipment.length === 0) {
-      render(app, el('p', { class: 'empty' }, '設備が登録されていません。先に設備台帳から登録してください。'));
+    const equipment = (await api.get(KIND.api))[KIND.listKey] || [];
+    if (equipment.length === 0) {
+      render(app, el('p', { class: 'empty' }, KIND.empty));
       return;
     }
 
-    // 既定は全選択
-    const selected = new Set(equipment.map((e) => e.id));
+    // 既定は全選択。ids= があればその部品・設備だけ選ぶ（部品詳細の「ラベルを印刷」から）
+    const onlyIds = new Set((params.get('ids') || '').split(',').map(Number).filter(Boolean));
+    const selected = new Set(equipment.filter((e) => !onlyIds.size || onlyIds.has(e.id)).map((e) => e.id));
     // 印刷の開始位置（1始まり）。使いかけの台紙の、まだ残っている最初のマス
     const start = { row: 1, col: 1 };
     const skipCount = () => (start.row - 1) * COLS + (start.col - 1);
@@ -55,7 +79,7 @@ function labelCell(eq) {
     const renderSheet = () => {
       const items = equipment.filter((e) => selected.has(e.id));
       if (items.length === 0) {
-        render(sheet, el('p', { class: 'empty' }, '印刷する設備を選択してください。'));
+        render(sheet, el('p', { class: 'empty' }, `印刷する${KIND.noun}を選択してください。`));
         return;
       }
       // 開始位置より前は空きマス（印刷しない・グリッドの位置だけ確保）。台紙1枚（24面）ごとにページを分ける
@@ -116,7 +140,7 @@ function labelCell(eq) {
     const rows = equipment.map((eq) => {
       const cb = el('input', {
         type: 'checkbox',
-        checked: true,
+        checked: selected.has(eq.id),
         onchange: (e) => {
           if (e.target.checked) selected.add(eq.id);
           else selected.delete(eq.id);
@@ -124,7 +148,7 @@ function labelCell(eq) {
           updateCount();
         },
       });
-      return { cb, node: el('label', { class: 'label-pick-row' }, [cb, ` ${eq.code}　${eq.name}`]) };
+      return { cb, node: el('label', { class: 'label-pick-row' }, [cb, ` ${KIND.code(eq)}　${KIND.name(eq)}`]) };
     });
 
     const setAll = (val) => {
@@ -138,7 +162,7 @@ function labelCell(eq) {
     const controls = el('div', { class: 'labels-controls' }, [
       el('div', { class: 'card' }, [
         el('div', { class: 'card-title-row' }, [
-          el('h2', { class: 'card-title' }, '印刷する設備を選択'),
+          el('h2', { class: 'card-title' }, `印刷する${KIND.noun}を選択`),
           el('div', { class: 'btn-group' }, [
             el('button', { class: 'btn btn-sm', onclick: () => setAll(true) }, '全選択'),
             el('button', { class: 'btn btn-sm', onclick: () => setAll(false) }, '全解除'),
@@ -155,7 +179,7 @@ function labelCell(eq) {
         countLabel,
       ]),
       el('p', { class: 'hint' },
-        'QRコードを読み取ると、その設備の詳細ページが開きます。台紙は A4・40×40mm・24面（4列×6段）用です。'
+        `${KIND.qrHint}台紙は A4・40×40mm・24面（4列×6段）用です。`
         + '印刷ダイアログは「用紙 A4／倍率 100%（拡大縮小なし）／余白 なし」にしてください。'
         + '最初は普通紙に印刷し、台紙に重ねて位置を確認してからラベル紙に印刷すると失敗しません。下はプレビューです。'),
     ]);

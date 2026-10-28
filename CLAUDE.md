@@ -132,6 +132,10 @@
 **テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, form_values_json, +監査列）、`trouble_category`（ジャンルマスタ）
 ### 05. 部品在庫管理（PowerAppsからのデータ移行あり）
 - 使用部品を記録すると在庫に自動反映。+/−ボタンでワンタップ更新
+- **部品QRとその場で記録（在庫の誤差を減らす）**: 部品詳細に部品QR（`/pages/parts?id=N`）を出し、`/pages/labels?type=parts`（`&ids=` で選択済み）で設備と同じ40mm台紙に型番・部品名・場所付きで印刷できる。QR（スマホのカメラ・一覧の「📷 部品QR」＝`openQrScanner()`）で開くと、詳細の上の「その場で記録」で数量を ± して**出庫・入庫をワンタップ**で記録する（2回タップは無視）
+- **入出庫の識別番号（二重反映の防止）**: 画面は1回の操作ごとに `client_tx_id`（UUID）を作って `POST /api/parts/:id/transaction` に送る。`parts_transaction.client_tx_id` に UNIQUE（部分インデックス）を付け、同じ番号が既にあれば何もせず `duplicate:true`、同時に届いた場合も後の方は履歴 INSERT の UNIQUE で batch ごと取り消す（`ensurePartsTxColumns` で列を自動追加）。押し直し・送信待ちの再送で同じ出庫が2回反映されない
+- **入出庫のオフライン送信待ち**: 電波が無いとき入庫・出庫は送信待ち（`js/offline-queue.js` の `parts_tx`）に保存し、復帰時に同じ識別番号で自動送信する。**棚卸調整（絶対値）は送信待ちにしない**（後から送ると間の出庫を消すため）。詳細画面に「📤 送信待ち」を表示する。電波の無い倉庫で部品QRを開いたときは、この端末で最後に見た名前・在庫の目安（localStorage `parts:snap:<id>`）とその場で記録を出す（`renderOfflineDetail`。権限は送信時にサーバーが確認）
+- **自動更新**: 部品一覧・詳細は画面を開いている間20秒ごとに取り直し、「◯時点（自動更新）」を表示する（他の人の入出庫を反映）。裏に回っている間・オフライン・棚卸中・入力中・ダイアログ表示中は更新しない
 - 発注アラート（安全在庫割れで通知）、発注 → 入庫 → 利用の一元管理
 - **棚卸モード**: 一覧の「📋 棚卸」で行が「帳簿数 → 実数入力」に切り替わり、差異のある行だけ赤表示。「差異N件を一括確定」で棚卸調整（`type=adjust`・note=棚卸）として入出庫履歴に記録（editor以上。入力値はフィルタ変更をまたいで保持）
 - **発注状態管理**: 発注メール作成時に「📨 発注中」バッジを付与（`parts_inventory.ordered_at/ordered_by`・API `/api/parts/:id/order`）。入庫（type=in）で自動解除。二重発注・発注漏れの防止。詳細画面から手動解除も可
@@ -143,7 +147,7 @@
   - 取込前にプレビュー表示、重複部品番号の検出、取込結果レポート表示
   - **差分マージ（`mode=merge`）は CSV で対応付けた列だけを更新する**（対応付けていない列はキーごと送られないので既存値を保つ。全列更新だと型番と部品名だけのマージで在庫数・場所等が0／空になった。`functions/api/parts/import.js` の `MERGE_UPDATABLE`）。**在庫数が変わる分は入出庫履歴に「調整（CSV取込（差分マージ））」として残し、監査ログに `quantity_changes:[{id,from,to}]` を残す**（取り込み・履歴・監査は1つの batch）
   - 移行後は本アプリを正とし、PowerApps側は参照のみ → 廃止
-**テーブル**: `parts_inventory`（+監査列）、`parts_transaction`（入出庫履歴）
+**テーブル**: `parts_inventory`（+監査列）、`parts_transaction`（入出庫履歴、client_tx_id＝識別番号）
 ### 06. 設備台帳
 - 設備の基本情報、関連資料、トラブル・点検・修理履歴を一元管理
 - **QRコード読み取り**で即座に該当設備ページへ。QR生成・ラベル印刷機能
@@ -358,7 +362,7 @@
 - 一括処理が一部失敗したときは、失敗した分の入力を残す（例: 棚卸の一括確定は失敗した行の実数入力を残して棚卸モードを続ける）
 - CSV入出力は UTF-8 / Shift_JIS 両対応（Excel互換のため出力デフォルトは BOM付きUTF-8 か Shift_JIS を選択可に）
 - CSV出力は必ず `js/csv.js` の `buildCsvText`/`escCsv` を通す（CSVインジェクション対策＝`=`/`+`/`-`/`@`/タブ/CR で始まる値は先頭に `'` を付けて Excel に数式として実行させない。数値・単独の「-」・`excelText()` の `="…"` は対象外）
-- QR読み取りは `jsQR`、QR生成は `qrcode.js`、PDF生成は印刷用CSS + 必要に応じ jsPDF（日本語フォント埋め込み）
+- QR読み取りは `jsQR`（`js/qr-scan.js`。コールバックは関数のときだけ使う＝ボタンの onclick に直接渡したときのクリックイベントを無視。設備QR・部品QRを受け付け、設備を選ぶ用途では部品QRは対象外）、QR生成は `qrcode.js`、PDF生成は印刷用CSS + 必要に応じ jsPDF（日本語フォント埋め込み）
 - カレンダーは自作 or `FullCalendar`（CDN）。軽量性優先なら自作
 - 日時は UTC の ISO 8601 で保存し、表示時に JST へ変換（保存形式は秒精度・末尾Z。トラブルの `occurred_at` はサーバーで `normalizeUtcIso`（`_lib/util.js`）に通し、タイムゾーン付きの日時以外は400。AIに渡す過去事例の日付も `toJstDate` で JST にする）
 - **期間指定・日付の切り出し・「今日」はすべて JST で扱う**（JST 0:00〜8:59 の記録が前日・前月にずれるのを防ぐ）

@@ -3,12 +3,15 @@
 //   openQrScanner(onEquipment):
 //     onEquipment(equipmentId) を渡すと、読み取った設備IDをコールバックで返す
 //     （点検・トラブル・業務依頼の入力フォームで設備を選ぶ用途）。
-//     省略時は従来どおりその設備の詳細ページへ遷移する。
+//     省略時は従来どおりその設備の詳細ページへ遷移する。部品QR（/pages/parts?id=N）も
+//     省略時だけ受け付け、その部品の画面（その場で入出庫を記録できる）へ遷移する。
+//     ※ ボタンの onclick に直接渡すとクリックイベントが入るため、関数のときだけコールバックとして使う
 //   ※ jsQR（window.jsQR）を読み込んだページでのみ動作する。
 
 import { el } from '/js/util.js';
 
-export function openQrScanner(onEquipment) {
+export function openQrScanner(onEquipmentArg) {
+  const onEquipment = typeof onEquipmentArg === 'function' ? onEquipmentArg : null;
   let stream = null;
   let running = false;
 
@@ -44,6 +47,12 @@ export function openQrScanner(onEquipment) {
           else window.location.href = text;
           return true;
         }
+      }
+      // 部品QR: 設備を選ぶ用途（コールバックあり）では対象外
+      if (!onEquipment && url.origin === window.location.origin && url.pathname === '/pages/parts' && Number(url.searchParams.get('id'))) {
+        stop();
+        window.location.href = text;
+        return true;
       }
     } catch { /* URL以外は無視 */ }
     return false;

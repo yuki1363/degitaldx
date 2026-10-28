@@ -2091,6 +2091,92 @@ check('ラベル: 印刷では空きマスを表示せず、操作パネルも�
 await page.click('.label-start-wrap button:has-text("左上に戻す")');
 check('ラベル: 「左上に戻す」で空きマスが無くなる', await page.evaluate(() => document.querySelectorAll('.label-page .label-skip').length === 0));
 
+// ---------- 9.19 在庫: その場で記録・送信待ち・二重反映防止・自動更新 ----------
+section('9.19 在庫のリアルタイム化（部品QR・その場で記録・送信待ち・二重反映防止・自動更新）');
+const rtPart = await api('/api/parts', { method: 'POST', body: { name: 'E2Eリアルタイム部品', model_no: 'E2E-RT-1', location: '棚A-1', quantity: 10, safety_stock: 1 } });
+const rtId = rtPart.json?.id;
+const rtTx = (body) => api(`/api/parts/${rtId}/transaction`, { method: 'POST', body });
+const rtQty = async () => (await api(`/api/parts/${rtId}`)).json?.part?.quantity;
+const rt1 = await rtTx({ type: 'out', quantity: 2, client_tx_id: 'e2e-rt-tx-0001' });
+const rt2 = await rtTx({ type: 'out', quantity: 2, client_tx_id: 'e2e-rt-tx-0001' });
+check('入出庫: 同じ識別番号を2回送っても在庫は1回だけ減る（再送・押し直し）',
+  rt1.status === 200 && rt2.status === 200 && rt2.json?.duplicate === true && (await rtQty()) === 8, JSON.stringify([rt1.json, rt2.json]));
+const [rc1, rc2] = await Promise.all([1, 2].map(() => rtTx({ type: 'in', quantity: 5, client_tx_id: 'e2e-rt-tx-0002' })));
+check('入出庫: 同じ識別番号が同時に届いても1回だけ反映', [rc1.status, rc2.status].every((x) => x === 200) && (await rtQty()) === 13,
+  JSON.stringify([rc1.json, rc2.json]));
+const rtBad = await rtTx({ type: 'out', quantity: 1, client_tx_id: 'x"; DROP' });
+check('入出庫: 識別番号の形式が不正なら400', rtBad.status === 400, `status=${rtBad.status}`);
+const rtNoId = await rtTx({ type: 'out', quantity: 1 });
+check('入出庫: 識別番号なし（従来の呼び出し）も動く', rtNoId.status === 200 && (await rtQty()) === 12);
+
+// 部品詳細: 部品QR・その場で記録（数量を ＋ して出庫）
+await page.goto(`${BASE}/pages/parts?id=${rtId}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.quick-record', { timeout: 10000 });
+check('部品詳細: 部品QRコードとラベル印刷のリンクがある',
+  await page.evaluate(() => !!document.querySelector('img.qr-img[alt^="部品QRコード"]') && !!document.querySelector('a[href*="/pages/labels?type=parts&ids="]')));
+await page.click('.quick-record button[aria-label="数量を増やす"]');
+await page.click('.quick-record button[aria-label="数量を増やす"]');
+// 2回タップしても1回だけ記録される
+await page.evaluate(() => { const b = [...document.querySelectorAll('.quick-record .quick-btn')].find((x) => x.textContent.includes('出庫')); b.click(); b.click(); });
+await page.waitForTimeout(1200);
+check('その場で記録: 数量3で出庫（2回タップしても1回だけ）', (await rtQty()) === 9, `qty=${await rtQty()}`);
+check('その場で記録: 画面の在庫数が更新される', await page.evaluate(() => [...document.querySelectorAll('.info-row')].some((r) => r.textContent.includes('在庫数') && r.textContent.includes('9'))));
+
+// オフライン（電波の無い倉庫）: QR で開いても名前・在庫の目安を出し、出庫を送信待ちに保存 → 復帰で自動送信
+await context.setOffline(true);
+await page.goto(`${BASE}/pages/parts?id=${rtId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForSelector('.quick-record', { timeout: 10000 }).catch(() => {});
+const rtOff = await page.evaluate(() => document.querySelector('#app')?.innerText || '');
+check('オフライン: 部品画面が開き、前回見た名前・在庫の目安を表示', rtOff.includes('オフライン') && rtOff.includes('E2Eリアルタイム部品') && rtOff.includes('在庫数（目安）'), rtOff.slice(0, 200));
+const rtDlg = dialogs.length;
+await page.click('.quick-record .quick-btn:has-text("出庫")');
+await page.waitForTimeout(800);
+check('オフライン: 出庫を送信待ちに保存する', dialogs.slice(rtDlg).some((d) => d.includes('送信待ち')) &&
+  await page.evaluate(() => (document.querySelector('.offline-queued')?.textContent || '').includes('出庫 −1')), dialogs.slice(rtDlg).join(' / '));
+await context.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+await page.waitForTimeout(2500);
+check('オフライン: 電波が戻ると自動で送信され、在庫が1減る', (await rtQty()) === 8, `qty=${await rtQty()}`);
+// 同じ送信待ちを（別タブ等で）もう一度送っても二重に反映されない
+const rtQueuedId = (await api(`/api/parts/${rtId}`)).json?.transactions?.find((t) => t.note === 'その場で記録' && t.quantity === -1)?.client_tx_id;
+const rtReplay = rtQueuedId ? await rtTx({ type: 'out', quantity: 1, client_tx_id: rtQueuedId }) : null;
+check('オフライン: 送信待ちの再送は二重に反映されない', !!rtQueuedId && rtReplay?.json?.duplicate === true && (await rtQty()) === 8, String(rtQueuedId));
+
+// 自動更新: 他の人の出庫が、画面を開いたまま反映される（テストでは間隔を短くする）
+await page.addInitScript(() => { window.__PARTS_REFRESH_MS__ = 1500; });
+await page.goto(`${BASE}/pages/parts?id=${rtId}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.quick-record', { timeout: 10000 });
+await rtTx({ type: 'out', quantity: 3 });
+await page.waitForFunction(() => [...document.querySelectorAll('.info-row')].some((r) => r.textContent.includes('在庫数') && /在庫数\s*5/.test(r.textContent)), { timeout: 8000 }).catch(() => {});
+check('自動更新: 部品詳細に他の人の出庫が反映される', await page.evaluate(() => [...document.querySelectorAll('.info-row')].some((r) => /在庫数\s*5/.test(r.textContent))));
+await page.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
+await page.selectOption('select.parts-line-select >> nth=0', '__ALL__').catch(() => {});
+await page.waitForTimeout(300);
+const rtRowQty = () => page.evaluate(() => {
+  const row = [...document.querySelectorAll('#app .list-item')].find((r) => r.textContent.includes('E2Eリアルタイム部品'));
+  return row?.querySelector('.parts-qty-num')?.textContent ?? null;
+});
+const rtListBefore = await rtRowQty();
+await rtTx({ type: 'in', quantity: 1 });
+await page.waitForFunction(() => {
+  const row = [...document.querySelectorAll('#app .list-item')].find((r) => r.textContent.includes('E2Eリアルタイム部品'));
+  return row?.querySelector('.parts-qty-num')?.textContent === '6';
+}, { timeout: 8000 }).catch(() => {});
+const rtListAfter = await rtRowQty();
+check('自動更新: 部品一覧も一定間隔で取り直し、他の人の入庫が反映される', rtListBefore === '5' && rtListAfter === '6', `${rtListBefore} → ${rtListAfter}`);
+await page.evaluate(() => { delete window.__PARTS_REFRESH_MS__; });
+
+// 部品ラベル: 同じ40mm台紙。部品詳細から開くとその部品だけが選ばれている
+await page.goto(`${BASE}/pages/labels?type=parts&ids=${rtId}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.label-page .label-cell', { timeout: 10000 });
+const rtLabel = await page.evaluate(() => ({
+  cells: [...document.querySelectorAll('.label-page .label-cell:not(.label-skip)')].map((c) => c.innerText.replace(/\s+/g, ' ')),
+  title: document.querySelector('.labels-controls .card-title')?.textContent || '',
+}));
+check('部品ラベル: 指定した部品だけを型番・部品名・場所で印刷', rtLabel.cells.length === 1 && rtLabel.cells[0].includes('E2E-RT-1') && rtLabel.cells[0].includes('棚A-1') && rtLabel.title.includes('部品'),
+  JSON.stringify(rtLabel));
+await api(`/api/parts/${rtId}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
