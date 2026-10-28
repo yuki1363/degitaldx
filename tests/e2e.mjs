@@ -1787,6 +1787,48 @@ const elUnsyncedAfter = await page.evaluate(() => !!localStorage.getItem('elec_u
 check('電気設定: 次回起動時に再送され、サーバーに保存される', elCfgAfter?.[0]?.title === 'E2E再送設定' && !elUnsyncedAfter,
   JSON.stringify({ title: elCfgAfter?.[0]?.title, left: elUnsyncedAfter }));
 
+
+// ---------- 9.15 再点検で見つかった不具合の回帰テスト ----------
+section('9.15 年間計画表の表示・電気設備点検の連打');
+// 年間計画表: 点検実績の取得に失敗しても、計画表は実績なしで表示される（.catch がコメントに入っていた）
+// GET /api/* は Service Worker 経由で送られ、page.route では差し替えられない。画面側の fetch を、
+// sessionStorage のフラグが立っているときだけ「点検APIは500」を返すように包む（フラグなしでは何もしない）
+await page.addInitScript(() => {
+  if (!sessionStorage.getItem('e2eFailInspections')) return;
+  const orig = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const u = new URL(typeof input === 'string' ? input : input.url, location.origin);
+    if (u.pathname === '/api/inspections') {
+      return Promise.resolve(new Response('{"error":{"message":"点検取得失敗E2E"}}', { status: 500, headers: { 'Content-Type': 'application/json' } }));
+    }
+    return orig(input, init);
+  };
+});
+await page.evaluate(() => sessionStorage.setItem('e2eFailInspections', '1'));
+const annErrBefore = pageErrors.length;
+await page.goto(`${BASE}/pages/plan-annual`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(600);
+check('年間計画表: 点検実績の取得に失敗しても表は表示される',
+  // 年ナビ（.cal-nav）が描かれ、エラー表示（showError の .notice.is-error）になっていないこと
+  await page.evaluate(() => !!document.querySelector('.cal-nav') && !document.querySelector('#app > .notice.is-error')),
+  await page.evaluate(() => document.querySelector('#app')?.innerText.slice(0, 200)));
+await page.evaluate(() => sessionStorage.removeItem('e2eFailInspections'));
+check('年間計画表: pageerror が出ない', pageErrors.length === annErrBefore, pageErrors.slice(annErrBefore).join(' / '));
+
+// 電気設備点検: 保存を連打しても同じ日の記録は1件（サーバー先行の保存のため、送信中の2回目で2件できていた）
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+const elDblDate = '2026-01-20';
+await page.evaluate(async (d) => {
+  showTab('entry');
+  document.getElementById('date').value = d;
+  document.getElementById('inspector').value = 'E2E連打';
+  await Promise.all([saveRecord(), saveRecord()]);
+}, elDblDate);
+const elDblRecs = Object.values((await api('/api/electrical-inspections?equipment_type=main')).json?.records || [])
+  .filter((r) => r.date === elDblDate && r.inspector === 'E2E連打');
+check('電気点検: 保存を連打しても同じ日の記録は1件', elDblRecs.length === 1, `件数=${elDblRecs.length}`);
+for (const r of elDblRecs) await api(`/api/electrical-inspections/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

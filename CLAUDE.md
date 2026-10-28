@@ -39,7 +39,7 @@
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
 - **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期（**送信は Web Locks（`mainte-outbox-flush`）で端末内の1タブに絞る**＝PWAの窓とブラウザのタブなど複数開いた状態で復帰しても二重登録しない。`js/offline-queue.js`）。**ページ遷移はクエリを無視してキャッシュと照合する**（`sw.js` の `ignoreSearch`。`/pages/ledger?id=` 等のクエリ付きページもオフラインで開ける）。未キャッシュ時の代替表示は `/`（`/index.html` は Pages が `/` へリダイレクトするため、リダイレクト済み応答はページ遷移に使えない）
 - **ログイン切れ時の「再ログイン」ボタン**: Access セッション切れで API に届かないとき、`js/api.js` が自動で再認証へ誘導する（1回のみ・15秒ガード）。それでも届かない（メールアプリ内ブラウザ・PCのPWA窓など）かつオンラインなら、画面上部に「🔑 再ログインする」バナーを出す（`showReloginBanner`）。押すと `/cdn-cgi/access/logout?returnTo=現在のURL` へ移動して Access を再認証させる。本当のオフライン（`navigator.onLine === false`）では出さない
-- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）
+- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）。**重複の判定は「未確認の通知がある」または「同じ対象・同じ本文の通知がある（確認済みも含む）」**（`hasNotificationFor`。本文に期限＝予定日・対応期限・年度に当てはめた予定月が入るので、期限が変われば新しい通知になる。未確認だけで判定すると、誰かが確認した直後から期限超過が続く限り毎時通知とプッシュが出続けた）。未印刷リマインドは本文の「あと◯日」が変わる1日1回だけ改めて出る。**繰り返し予定（`recurrence_rule`）は期限超過の通知の対象外**（展開しないと開始日基準で超過になるため）。単体テストは `tests/unit-overdue.mjs`（schema.sql を node:sqlite に流し込んでチェックを2回呼ぶ。`npm test` に含む）
 - **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する。**送信先は有効なユーザー（`users` に存在し `deleted_at IS NULL`）の購読に限り、ユーザー削除時は購読も物理削除する**（退職者等の端末へ業務内容が届き続けないように）。**購読の endpoint は各社のプッシュサービス（fcm.googleapis.com／push.services.mozilla.com／notify.windows.com／push.apple.com）の https URL に限定**する（任意URLを登録されるとサーバーがそこへPOSTする＝SSRFのため。`isAllowedPushEndpoint`。登録時に400、送信時もスキップ）
 ### バージョン復元（3層の安全網）— 必須要件
 「編集してアプリが動かなくなる」事故に備え、以下を必ず運用・実装する。
@@ -208,7 +208,7 @@
 - **既定の点検設定は実運用データ（`点検設定_20260903.json`）に合わせてある**（`DEFAULT_CONFIG`/`_BATTERY`/`_GENERATOR`。乗数・未満以上を含む）。空D1時は `getConfig` がこれをフォールバック使用。
 - **設定・既定のサーバー保存に失敗したときは「未送信」として端末に残し（`elec_unsynced_*`）、次回起動時に D1 の内容で上書きせず再送する**（`resendUnsyncedSettings`。設定画面の多数の操作が同期的に `saveConfig` を呼ぶため、記録の保存のような「サーバー先行」にはしていない）
 - **下書き（autosave）・基本情報の記憶は端末ローカル(localStorage)のまま**（一時データ／この端末の入力補助）。**書き込みキューは未実装（online書き込み前提。オフライン時は充填済みlocalStorageで閲覧のみ可）**。
-- **保存・削除は D1 が先**: `saveRecord`／`deleteRecord`／`deleteRecordById` は D1 への送信が成功してから localStorage を更新する。逆順だと送信失敗時に「端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の `loadServerData`（D1→localStorage 充填）で黙って消えた（削除なら復活した）。失敗時は端末側・編集状態（`editingRecordId`）・下書きを変えず、そのまま押し直せる
+- **保存・削除は D1 が先**: `saveRecord`／`deleteRecord`／`deleteRecordById` は D1 への送信が成功してから localStorage を更新する。**保存中の2回目のタップは無視する**（`savingRecord`。送信中は端末側に記録が無いため、連打すると同じ日の記録が別IDで2件できた）。逆順だと送信失敗時に「端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の `loadServerData`（D1→localStorage 充填）で黙って消えた（削除なら復活した）。失敗時は端末側・編集状態（`editingRecordId`）・下書きを変えず、そのまま押し直せる
 - **JSON インポート/エクスポートは廃止**（記録・設定は D1 で自動共有されるため端末間移行が不要。UI・関数とも削除済み）。
 - **前回値コピー**: 新規入力時に前回記録の値を各欄へコピーできる。多相（電圧/電流の3相等）のコピーは `onclick` 内の JSON を `&quot;` エスケープして属性破壊を防いでいる（未エスケープだと `JSON.stringify` の `"` が二重引用符 `onclick` 属性を閉じてボタンが無効化する）。
 - **権限**: 記録の保存/削除=editor、**設定編集=admin**（非adminは設定タブ非表示）、閲覧=全員。点検者名は `/api/me` の氏名を既定。設定の変更は `audit_log` にも記録する
@@ -352,7 +352,7 @@
 - 現場周知: 写真への人の顔・社外秘文書の写り込み禁止、チャットへの個人情報入力禁止
 ### その他
 - 写真はアップロード前に Canvas でリサイズ（長辺1280px、JPEG品質0.7目安）
-- **保存・更新ボタンは処理中に無効化する**（遅い回線での2回タップによる二重登録・在庫の二重反映を防ぐ。業務依頼・日報・部品の入出庫・点検・トラブル・ユーティリティ）。写真は送信済みのIDを覚えておき、保存が失敗して押し直しても再アップロードしない
+- **保存・更新ボタンは処理中に無効化し、失敗したときだけ戻す**（成功時は画面が切り替わるまで無効のまま。遅い回線での2回タップによる二重登録・在庫の二重反映を防ぐ。業務依頼・日報・部品の入出庫・点検・トラブル・ユーティリティ・電気設備点検）。写真は送信済みのIDを覚えておき、保存が失敗して押し直しても再アップロードしない
 - 一括処理が一部失敗したときは、失敗した分の入力を残す（例: 棚卸の一括確定は失敗した行の実数入力を残して棚卸モードを続ける）
 - CSV入出力は UTF-8 / Shift_JIS 両対応（Excel互換のため出力デフォルトは BOM付きUTF-8 か Shift_JIS を選択可に）
 - CSV出力は必ず `js/csv.js` の `buildCsvText`/`escCsv` を通す（CSVインジェクション対策＝`=`/`+`/`-`/`@`/タブ/CR で始まる値は先頭に `'` を付けて Excel に数式として実行させない。数値・単独の「-」・`excelText()` の `="…"` は対象外）

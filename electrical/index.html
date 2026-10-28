@@ -871,7 +871,23 @@ function showTab(tab) {
 }
 
 // ===================== 保存 =====================
+// 保存中の2回目のタップは無視する。保存は D1 が先（送信が終わるまで端末側に記録が無い）ため、
+// 送信中にもう一度押すと同じ日の記録が別IDで2件できていた（写真も二重に送っていた）
+let savingRecord = false;
 async function saveRecord() {
+  if (savingRecord) return;
+  savingRecord = true;
+  const btn = document.querySelector('button[onclick="saveRecord()"]');
+  if (btn) btn.disabled = true;
+  try {
+    await saveRecordInner();
+  } finally {
+    savingRecord = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function saveRecordInner() {
   if (!document.getElementById('date').value)      { alert('点検日を入力してください'); return; }
   if (!document.getElementById('inspector').value) { alert('点検者名を入力してください'); return; }
   // 写真・動画を先に送る（画像はリサイズ＝EXIF除去）。送信できたものだけ記録に載せる。

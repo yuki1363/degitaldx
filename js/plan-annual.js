@@ -9,7 +9,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
-import { el, render, jstTodayStr } from '/js/util.js';
+import { el, render, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
 import { renderPlanImport } from '/js/plan-import.js';
 import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
@@ -633,7 +633,8 @@ async function renderYear() {
   const [{ plans }, equipData, inspData] = await Promise.all([
     api.get('/api/plans?annual_only=1'),
     api.get('/api/equipment').catch(() => ({ equipment: [] })),
-    api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31&limit=5000`) // 既定200件だと古い月の実績が欠ける.catch(() => ({ inspections: [] })),
+    // limit=5000: 既定200件だと古い月の実績が欠ける。失敗しても計画表は実績なしで表示する（.catch）
+    api.get(`/api/inspections?from=${year}-01-01&to=${year}-12-31&limit=5000`).catch(() => ({ inspections: [] })),
   ]);
   plansCache = plans || [];
 
@@ -648,7 +649,7 @@ async function renderYear() {
   for (const ins of inspData.inspections || []) {
     const lineEquipKey = idToLineEquip.get(ins.equipment_id);
     if (!lineEquipKey) continue;
-    const month = (ins.inspected_at || '').slice(0, 7); // YYYY-MM
+    const month = toJstDateStr(ins.inspected_at).slice(0, 7); // YYYY-MM（JST。UTCだと毎月1日の0〜9時が前月になる）
     if (!inspectionSummary[lineEquipKey]) inspectionSummary[lineEquipKey] = {};
     if (!inspectionSummary[lineEquipKey][month]) {
       inspectionSummary[lineEquipKey][month] = { count: 0, equipment_id: ins.equipment_id };

@@ -11,12 +11,30 @@
 //   （例: 業務依頼を再受付して再び期限を過ぎた場合）。
 
 import { notifyTeam } from './notify.js';
-import { deriveOverdue } from '../plans/index.js';
+import { deriveOverdue, annualMonthInCurrentFy } from '../plans/index.js';
 import { ensureRepairSchema, isOverdueRepair } from '../repairs/index.js';
 import { ensureColumns } from './db-compat.js';
 
 let lastCheckAt = 0;
 const CHECK_INTERVAL_MS = 3600_000; // 1時間
+
+// 同じ対象・同じ内容の通知を既に出したか（確認済みも含む）。期限（予定日・対応期限・予定月）は本文に
+// 入れているので、本文の一致で「同じ期限についての通知」とみなす。未確認かどうかだけで判定すると、
+// 誰かが確認した直後の1時間ごとのチェックで、期限超過が続く限り同じ通知とプッシュが出続けていた。
+// 期限が変わる（予定日の変更・年間計画の年度が変わる）と本文が変わるので、新しい通知として出る。
+async function hasNotificationFor(db, relatedTable, relatedId, type, body) {
+  if (await hasUnacknowledgedNotification(db, relatedTable, relatedId, type)) return true;
+  const row = await db
+    .prepare(
+      `SELECT 1 AS x FROM notifications
+        WHERE related_table = ?1 AND related_id = ?2 AND type = ?3 AND body = ?4
+          AND deleted_at IS NULL
+        LIMIT 1`
+    )
+    .bind(relatedTable, relatedId, type, body)
+    .first();
+  return !!row;
+}
 
 async function hasUnacknowledgedNotification(db, relatedTable, relatedId, type) {
   const row = await db
@@ -35,22 +53,32 @@ async function notifyOverduePlans(env) {
   const db = env.DB;
   const { results } = await db
     .prepare(
+      // 繰り返し予定は planned_date が開始日のままで status も常に pending のため、展開せずに判定すると
+      // 開始日を基準に「期限超過」が出続ける（カレンダーは展開後に判定している）。通知の対象から外す
       `SELECT id, title, planned_date, planned_end_date, status, unscheduled, annual_only
-         FROM maintenance_plan WHERE deleted_at IS NULL AND status = 'pending'`
+         FROM maintenance_plan
+        WHERE deleted_at IS NULL AND status = 'pending'
+          AND (recurrence_rule IS NULL OR recurrence_rule = '')`
     )
     .all();
   for (const p of results ?? []) {
     const derived = deriveOverdue(p); // annual_only は自動で月単位判定（deriveOverdueの既定動作）
     if (derived.status !== 'overdue') continue;
-    if (await hasUnacknowledgedNotification(db, 'maintenance_plan', p.id, 'plan_overdue')) continue;
     const limit = (p.planned_end_date || p.planned_date || '').slice(0, 10);
+    // 年間計画（毎年共通のテンプレート）は登録年の日付ではなく、今の年度に当てはめた予定月で書く
+    // （年度が変わると本文が変わる＝翌年度の超過は新しい通知になる）
+    const nowJstYm = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
+    const body = p.annual_only
+      ? `予定月（${annualMonthInCurrentFy(limit, nowJstYm)}）を過ぎても未実施です`
+      : `予定日（${limit}）を過ぎても未実施です`;
+    if (await hasNotificationFor(db, 'maintenance_plan', p.id, 'plan_overdue', body)) continue;
     // waitUntil は渡さない（この関数自体が既に notifications GET の waitUntil 配下で動く
     // ため、ここでのPush送信はそのまま await して完了を待ってよい）
     await notifyTeam(env, null, {
       type: 'plan_overdue',
       level: 'warning',
       title: `期限超過: ${p.title}`,
-      body: `予定日（${limit}）を過ぎても未実施です`,
+      body,
       relatedTable: 'maintenance_plan',
       relatedId: p.id,
       linkUrl: `/pages/plan?id=${p.id}`,
@@ -72,12 +100,13 @@ async function notifyOverdueRepairs(env) {
     .all();
   for (const r of results ?? []) {
     if (!isOverdueRepair(r)) continue; // 二重チェック（status='done'に変わっていた場合等）
-    if (await hasUnacknowledgedNotification(db, 'repair_request', r.id, 'repair_overdue')) continue;
+    const body = `対応期限（${r.due_date}）を過ぎています`;
+    if (await hasNotificationFor(db, 'repair_request', r.id, 'repair_overdue', body)) continue;
     await notifyTeam(env, null, {
       type: 'repair_overdue',
       level: 'warning',
       title: `対応期限超過: ${r.title}`,
-      body: `対応期限（${r.due_date}）を過ぎています`,
+      body,
       relatedTable: 'repair_request',
       relatedId: r.id,
       linkUrl: `/pages/repair?id=${r.id}`,
@@ -90,8 +119,8 @@ async function notifyOverdueRepairs(env) {
 // まだ帳票（工事連絡書）を印刷（出力）していない計画を検知して通知する。
 //   ・対象: 未実施(status='pending')・日付未定でない・printed_at が未設定の工事予定で、
 //           予定日（開始日）が「今日〜3日後」の範囲（JST基準）
-//   ・重複防止: 同じ計画に未確認の plan_print_reminder が既にあれば作り直さない
-//              （印刷すれば printed_at が入り、以降は対象外になる）
+//   ・重複防止: 同じ計画に未確認の通知か、同じ本文（同じ「あと◯日」）の通知があれば作らない
+//              （確認しても1日1回だけ改めて知らせる。印刷すれば printed_at が入り、以降は対象外になる）
 async function notifyUnprintedConstruction(env) {
   const db = env.DB;
   // printed_at/printed_by 列が無い旧DBでもクエリが落ちないよう自己修復する
@@ -116,17 +145,19 @@ async function notifyUnprintedConstruction(env) {
     .bind(todayJst, limitJst)
     .all();
   for (const p of results ?? []) {
-    if (await hasUnacknowledgedNotification(db, 'maintenance_plan', p.id, 'plan_print_reminder')) continue;
     const dateStr = (p.planned_date || '').slice(0, 10);
     const days = Math.round(
       (new Date(dateStr + 'T00:00:00Z') - new Date(todayJst + 'T00:00:00Z')) / 86400_000
     );
     const whenText = days <= 0 ? '本日' : `あと${days}日`;
+    // 本文に「あと◯日」が入るので、確認しても1日1回（日が変わったとき）だけ改めて知らせる
+    const body = `工事予定日（${dateStr}）まで${whenText}です。工事連絡書がまだ印刷されていません`;
+    if (await hasNotificationFor(db, 'maintenance_plan', p.id, 'plan_print_reminder', body)) continue;
     await notifyTeam(env, null, {
       type: 'plan_print_reminder',
       level: 'warning',
       title: `工事連絡書 未印刷: ${p.title}`,
-      body: `工事予定日（${dateStr}）まで${whenText}です。工事連絡書がまだ印刷されていません`,
+      body,
       relatedTable: 'maintenance_plan',
       relatedId: p.id,
       linkUrl: `/pages/plan?id=${p.id}`,

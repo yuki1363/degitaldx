@@ -247,9 +247,10 @@ async function renderCustom(fromStr, toStr) {
       }));
     }
     if (dataType === 'inspection') {
-      const p = new URLSearchParams();
+      // 期間で絞って取得する（limit=5000）。期間なし・既定200件だと、6ヶ月で200件を超えたとき古い月が黙って欠けていた
+      const p = new URLSearchParams({ from: fromStr, to: toStr, limit: '5000' });
       if (equipId) p.set('equipment_id', equipId);
-      const { inspections } = await api.get(`/api/inspections${p.size ? '?' + p : ''}`);
+      const { inspections } = await api.get(`/api/inspections?${p}`);
       return (inspections || [])
         .filter((i) => { const d = toJstDateStr(i.inspected_at); return d >= fromStr && d <= toStr; })
         .map((i) => ({
