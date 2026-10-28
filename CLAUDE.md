@@ -37,7 +37,7 @@
 - **アクセス制御**: Cloudflare Access のワンタイムコード認証（会社メールの許可リスト方式）。アプリ側にログイン画面は実装しない。ログインユーザーの識別は Access が付与するヘッダー `Cf-Access-Authenticated-User-Email` を Functions 側で読み取り、`users` テーブルと突合する。環境変数 `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` を設定すると、ヘッダーの代わりに Access の署名付きJWT（`Cf-Access-Jwt-Assertion`／Cookie `CF_Authorization`）を Web Crypto で検証して email を取り出す（`functions/api/_lib/access-jwt.js`。署名鍵は `https://<チーム>/cdn-cgi/access/certs` から取得し1時間キャッシュ）。設定時はメールヘッダーと `DEV_USER_EMAIL` を無視する＝保護漏れのURL（プレビューURL等）でもヘッダー偽装でなりすませない。未設定なら従来どおりヘッダーで識別
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
-- **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期（**送信は Web Locks（`mainte-outbox-flush`）で端末内の1タブに絞る**＝PWAの窓とブラウザのタブなど複数開いた状態で復帰しても二重登録しない。`js/offline-queue.js`）。**ページ遷移はクエリを無視してキャッシュと照合する**（`sw.js` の `ignoreSearch`。`/pages/ledger?id=` 等のクエリ付きページもオフラインで開ける）。未キャッシュ時の代替表示は `/`（`/index.html` は Pages が `/` へリダイレクトするため、リダイレクト済み応答はページ遷移に使えない）
+- **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期（**送信は Web Locks（`mainte-outbox-flush`）で端末内の1タブに絞る**＝PWAの窓とブラウザのタブなど複数開いた状態で復帰しても二重登録しない。送信しなかった側のタブはロックが空くのを待ってから送信待ちバーを更新する＝古い件数が残らない。`js/offline-queue.js`）。**ページ遷移はクエリを無視してキャッシュと照合する**（`sw.js` の `ignoreSearch`。`/pages/ledger?id=` 等のクエリ付きページもオフラインで開ける）。未キャッシュ時の代替表示は `/`（`/index.html` は Pages が `/` へリダイレクトするため、リダイレクト済み応答はページ遷移に使えない）
 - **ログイン切れ時の「再ログイン」ボタン**: Access セッション切れで API に届かないとき、`js/api.js` が自動で再認証へ誘導する（1回のみ・15秒ガード）。それでも届かない（メールアプリ内ブラウザ・PCのPWA窓など）かつオンラインなら、画面上部に「🔑 再ログインする」バナーを出す（`showReloginBanner`）。押すと `/cdn-cgi/access/logout?returnTo=現在のURL` へ移動して Access を再認証させる。本当のオフライン（`navigator.onLine === false`）では出さない
 - **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）。**重複の判定は「未確認の通知がある」または「同じ対象・同じ本文の通知がある（確認済みも含む）」**（`hasNotificationFor`。本文に期限＝予定日・対応期限・年度に当てはめた予定月が入るので、期限が変われば新しい通知になる。未確認だけで判定すると、誰かが確認した直後から期限超過が続く限り毎時通知とプッシュが出続けた）。未印刷リマインドは本文の「あと◯日」が変わる1日1回だけ改めて出る。**繰り返し予定（`recurrence_rule`）は期限超過の通知の対象外**（展開しないと開始日基準で超過になるため）。単体テストは `tests/unit-overdue.mjs`（schema.sql を node:sqlite に流し込んでチェックを2回呼ぶ。`npm test` に含む）。年間計画の期限超過は 01 と同じ年度（最後にリセットした年度＋1）で判定する
 - **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する。**送信先は有効なユーザー（`users` に存在し `deleted_at IS NULL`）の購読に限り、ユーザー削除時は購読も物理削除する**（退職者等の端末へ業務内容が届き続けないように）。**購読の endpoint は各社のプッシュサービス（fcm.googleapis.com／push.services.mozilla.com／notify.windows.com／push.apple.com）の https URL に限定**する（任意URLを登録されるとサーバーがそこへPOSTする＝SSRFのため。`isAllowedPushEndpoint`。登録時に400、送信時もスキップ）
@@ -96,7 +96,7 @@
 - 予定の登録・編集・削除が可能。**担当者・登録者・削除者を記録**（共通監査設計）
 - **複数日にまたがる期間予定の削除は2通り**: カレンダーの日付タップ→日程シートの🗑で**その日だけ削除**（前後の日程は残る。先頭/末尾日なら開始日・終了日を詰め、途中の日なら前後で2件に分割する）／計画詳細の「🗑 全期間を削除」で**全期間を一括削除**。単日予定はどちらも同じ（`POST /api/plans/:id/delete-day`、`js/plan.js`）
 - **複数日にまたがる期間予定の完了も2通り**: カレンダーの日付タップ→日程シートの✓で**その日だけ完了**（その日を完了済みの単日レコードとして切り出し、残りの日程は未完了のまま残る。先頭/末尾/途中の日いずれも delete-day と同じ分割方式）／計画詳細の「🏁 全期間を完了にする」で**全期間を一括完了**。単日予定はどちらも同じ（`POST /api/plans/:id/complete-day`、`js/plan.js`）
-- 予定から点検実施画面（02）へワンタップで遷移
+- 予定から点検実施画面（02）へワンタップで遷移（点検を保存すると予定が完了になる。**カレンダーの日程シート（期間予定の1日）から開いた点検は `plan_day` を付け、その日だけを完了にする**＝complete-day。計画詳細から開いたときは全体を完了。`js/plan-inspection-link.js` の `completePlanAfterInspection`。オフライン送信キューも同じ）
 - **年度リセット（`POST /api/plans/annual-reset`）は管理者のみ**。**締める年度はサーバーが決める**（`reset_target_fy`＝今年度。履歴が無いときだけ10〜12月は前年度。画面の時計で決めると10月の実行で始まったばかりの年度を締めた記録になった）。送られた `fiscal_year` が違えば409、**締める年度の9月より前は409**（`reset_available`。10月にリセットした直後の2回目で新年度まで締めない）。監査ログ（戻した予定のIDと変更前の状態＝`reset_plans:[{id,from}]`）・未実施への更新・`plan_reset_log` の登録を1つの batch で行う（同じ年度の二重実行は UNIQUE で丸ごと失敗）。CSVスナップショットは種別・名称の絞り込みに関係なく全タスクを保存する
 - **年間計画表は会計年度で表示**（`FY2026（2026/10〜2027/09）`、列は10月〜翌9月、`js/plan-annual.js`）。既定は API（`GET /api/plans?annual_only=1` の `fiscal_year`）の今年度。点検実績はその年度の10/1〜9/30を数える。**完了状態は今年度のものだけ**なので、他の年度の表示では完了状態を出さず編集もできない（過去年度はリセット時のCSVをダウンロードして確認。`GET /api/plans/annual-reset?fiscal_year=&csv=1`）。単体テストは `tests/unit-overdue.mjs`（時計を差し替えて、リセット忘れ・前倒し・二重実行を確認）
 - **年間計画表のCSV取込・出力**: 行=タスク／列=12ヶ月（10月〜翌9月）の表形式でCSV入出力（ファイル名 `annual_plan_FY◯◯◯◯_…`）。出力は各月の完了状態（完了／未実施／期限超過）を含む。取込は同形式（列は「N月」の見出しで判定）を `/api/plans/batch` で一括登録（`js/plan-import.js`。予定日の年は表示年度に合わせる）
@@ -141,7 +141,7 @@
   - SharePoint リストを CSV エクスポート → 管理画面の「CSVインポート」で取り込み。**全置き換え（`mode=replace`）は管理者のみ**（全部品を作り直すため）、差分マージは入力可（editor）でも実行できる
   - インポート画面で CSV列 ↔ アプリ項目の**列マッピングUI**を提供（文字コードは UTF-8 / Shift_JIS 両対応）
   - 取込前にプレビュー表示、重複部品番号の検出、取込結果レポート表示
-  - **差分マージ（`mode=merge`）は CSV で対応付けた列だけを更新する**（対応付けていない列はキーごと送られないので既存値を保つ。全列更新だと型番と部品名だけのマージで在庫数・場所等が0／空になった。`functions/api/parts/import.js` の `MERGE_UPDATABLE`）
+  - **差分マージ（`mode=merge`）は CSV で対応付けた列だけを更新する**（対応付けていない列はキーごと送られないので既存値を保つ。全列更新だと型番と部品名だけのマージで在庫数・場所等が0／空になった。`functions/api/parts/import.js` の `MERGE_UPDATABLE`）。**在庫数が変わる分は入出庫履歴に「調整（CSV取込（差分マージ））」として残し、監査ログに `quantity_changes:[{id,from,to}]` を残す**（取り込み・履歴・監査は1つの batch）
   - 移行後は本アプリを正とし、PowerApps側は参照のみ → 廃止
 **テーブル**: `parts_inventory`（+監査列）、`parts_transaction`（入出庫履歴）
 ### 06. 設備台帳
@@ -171,7 +171,7 @@
 - マスタ管理画面: 点検項目・設備・部品・トラブルジャンル・ユーザーの各マスタを画面から**追加・削除可能**
 - マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**。電気設備点検の設定（`electrical_config`。設備種別単位で id 列が無いため `restoreElectricalConfig` で別扱い）と帳票テンプレート（更新前の定義＝入力項目 `fields_json` を含めて退避）も戻せる
 - `audit_log` の閲覧画面（誰がいつ何を追加・編集・削除したかを検索）
-- 削除済みデータの閲覧・復元（論理削除の復元）。対象はトラブル・業務依頼・部品・点検・日報・保全計画・設備・ユーティリティ日報・電気設備点検・帳票テンプレート（`admin/restore/index.js` の `ALLOWED_TABLES`）。**200件ずつページ送り**（`offset`。大量削除時も全件を復元できる）。ユーティリティ日報は同じ日の記録があると 409（1日1件）
+- 削除済みデータの閲覧・復元（論理削除の復元）。対象はトラブル・業務依頼・部品・点検・日報・保全計画・設備・ユーティリティ日報・電気設備点検・帳票テンプレート（`admin/restore/index.js` の `ALLOWED_TABLES`）。**200件ずつページ送り**（`offset`。大量削除時も全件を復元できる）。ユーティリティ日報は同じ日の記録があると 409（1日1件）。**部品は同じ型番・部品名の部品が既にあると 409**（CSVの全置き換えで作り直された部品の旧版を戻すと重複するため）。重複の確認・復元・監査は1つの batch の条件付き UPDATE（同時操作でもすり抜けない）。最後のページの最後の1件を復元したら前のページを表示する
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）。**タグ確認機能**: テンプレ編集画面の「🔍 Excelのタグを確認」で、アップロード済みExcelの `{{タグ}}` を抽出し、差込対象と突合して「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの（＝出力されない）」を表示（休止時間が出ない・○が付かない等のタグ名不一致を管理者が自力で発見できる。`js/excel-fill.js` の `extractTemplateTags`）
 **テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
 ### 10. チャット
@@ -183,7 +183,7 @@
 - **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり（メッセージを削除するとピン留めも外れる＝削除済みが永久に残らない）、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
 - **既読数・👍・📌はライブ更新**: `GET /api/chat` が直近20件の meta（既読数・リアクション）と pinned 一覧を返し、5秒ポーリングでリロードなしに反映される
 - **添付ファイルは本人がアップロードした未紐づけファイルのみ**（`POST /api/chat` の `file_ids`。それ以外は400）。投稿時に `attachFiles` で `related_table='chat_messages'` に紐づける。自動削除がR2から消すのも「そのメッセージに紐づくファイル」と紐づけ導入前の「投稿者本人の未紐づけファイル」だけ（他の記録のファイルIDを指定されて、そのファイルが消えるのを防ぐ）
-- **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）
+- **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。1件ずつ「ピン留めされていなければ本体を削除」し、消せたものだけ添付・リアクションを片付ける＝一覧を読んだ後にピン留めされても画像が消えない。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）
 - **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?new=1&body=`。日報は `new=1` が無いと一覧が開き本文が引き継がれない）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
 - **申し送りテンプレート**: 定型文（【引き継ぎ】【対応中】【要確認】【完了報告】【部品発注】）をタップで入力欄へ挿入（現場スマホの入力を軽く・書き方を統一。`js/chat.js` の `HANDOFF_TEMPLATES`）
 - **個人情報の入力防止**:
@@ -207,7 +207,7 @@
 - **配信**: `electrical/index.html` を独立ページ `/electrical/` で配信（元アプリはグローバルCSS/固定ID/インライン`onclick`でページ全体を所有する前提のため、iframeやインライン化はせず**別ドキュメント**で完全隔離）。ホームのタイル `⚡ 電気設備点検` から遷移。Access は全パスを保護済み。
 - **保存（D1同期ハイブリッド）**: 元アプリは localStorage 保存だが、**記録・設定は D1 に置換**してチーム共有・監査・端末紛失対応にした。`main` 版はレコード読み取り箇所が多いため、**localStorage を作業ストアにしたまま、起動時に D1→localStorage へ充填（D1が真実）し、書き込み点だけ D1 にも反映（write-through）** する方式（多数の読み取り/描画コードは無改修）。詳細は `electrical/index.html` の「サーバー同期」節（`loadServerData`／`pushRecordToServer`／`deleteRecordFromServer`／`pushConfigToServer`／`pushDefaultToServer`）。
 - **既定の点検設定は実運用データ（`点検設定_20260903.json`）に合わせてある**（`DEFAULT_CONFIG`/`_BATTERY`/`_GENERATOR`。乗数・未満以上を含む）。空D1時は `getConfig` がこれをフォールバック使用。
-- **設定・既定のサーバー保存に失敗したときは「未送信」として端末に残し（`elec_unsynced_*`）、次回起動時に D1 の内容で上書きせず再送する**（`resendUnsyncedSettings`。設定画面の多数の操作が同期的に `saveConfig` を呼ぶため、記録の保存のような「サーバー先行」にはしていない）
+- **設定・既定のサーバー保存に失敗したときは「未送信」として端末に残し（`elec_unsynced_*`）、次回起動時に D1 の内容で上書きせず再送する**（`resendUnsyncedSettings`。設定画面の多数の操作が同期的に `saveConfig` を呼ぶため、記録の保存のような「サーバー先行」にはしていない）。**未送信分には残した時点のサーバーの更新日時（`base`）を持たせ、再送時に `expected_updated_at` として送る**。その後に他の管理者が保存していれば API が 409 を返し、画面で「この端末の内容で上書き／サーバーの内容を使う」を確認する（黙って新しい設定を上書きしない）
 - **下書き（autosave）・基本情報の記憶は端末ローカル(localStorage)のまま**（一時データ／この端末の入力補助）。**書き込みキューは未実装（online書き込み前提。オフライン時は充填済みlocalStorageで閲覧のみ可）**。
 - **保存・削除は D1 が先**: `saveRecord`／`deleteRecord`／`deleteRecordById` は D1 への送信が成功してから localStorage を更新する。**保存中の2回目のタップは無視する**（`savingRecord`。送信中は端末側に記録が無いため、連打すると同じ日の記録が別IDで2件できた）。逆順だと送信失敗時に「端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の `loadServerData`（D1→localStorage 充填）で黙って消えた（削除なら復活した）。失敗時は端末側・編集状態（`editingRecordId`）・下書きを変えず、そのまま押し直せる
 - **JSON インポート/エクスポートは廃止**（記録・設定は D1 で自動共有されるため端末間移行が不要。UI・関数とも削除済み）。
@@ -228,7 +228,7 @@
 - **数値欄は `type="text" + inputmode="decimal"`**（`type="number"` は使わない）。スピナー（上下ボタン）を誤タップして `-1` が入る・日本語入力(IME)がONだと文字が弾かれる・不正な内容だと `value` が空になり入力が黙って消える、を避けるため。全角数字「１２３」や桁区切りカンマは入力時に半角へ寄せる（`normalizeNumberText`／サーバー側 `_values.js` にも同じ保険）。スマホの数字キーパッドは `inputmode` で維持される。**02 点検実施と共有**（`js/inspection-items.js`）
 - **入力方式**: 数値 / 選択式（1つ） / **複数選択**（例: 空気圧縮機の運転号機 1〜3号機をチップでトグル） / **時刻（HH:MM）** / 自由記述。入力UIは 02 点検の `buildItemInput`（`js/inspection-items.js`）を共有する（`multi`・`time` を追加。02 側のマスタは `ok_ng/number/select/text` のままなので動作は変わらない）
 - **前回値の表示・異常値アラート**: 入力欄の下に前回値を表示する（`GET /api/utility-reports/latest`。取得失敗時は表示なしで入力継続）。数値項目は「前回○○（日付）＋差分（↑↓→）」、選択式・複数選択・時刻は「前回○○（日付）」。上下限を外れた数値と、`alert_options`（例 油面確認の「要補充」「異常」）を選んだ選択式はその場で警告し、サーバー側でも `has_abnormal` を算出して一覧に「⚠異常あり」を出す
-- **1日1件ガード**: 同じ日の未削除レコードがあると登録APIが 409（`error.detail.existing_id`）を返し、画面は既存記録の編集へ誘導する。一覧のボタンも当日分があれば「✅ 本日入力済み（編集する）」に変わる。論理削除した日は再登録できる（`report_date` に UNIQUE 制約は付けていない）
+- **1日1件ガード**: 同じ日の未削除レコードがあると登録APIが 409（`error.detail.existing_id`）を返し、画面は既存記録の編集へ誘導する。一覧のボタンも当日分があれば「✅ 本日入力済み（編集する）」に変わる。論理削除した日は再登録できる（`report_date` に UNIQUE 制約は付けていない）。**確認だけでなく INSERT／UPDATE の条件（`NOT EXISTS`）でも守る**（2台で同時に登録しても1件だけ）
 - **CSV出力**: 一覧から期間指定でCSV出力（UTF-8/BOM・Shift_JIS を選択可）。列は項目マスタから組み立てる
 - **横断検索(11)**: 種別 `utility` として `values_json`・特記事項・入力者名を検索対象にする
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから複数枚添付できる（editor以上）。02 点検実施と同じ流儀＝保存時に `js/files.js` の `uploadFile`（長辺1280pxへ縮小・EXIF除去・R2容量ガード）で送ってから `file_ids` を本文に載せ、サーバーは `attachFiles` で `related_table='utility_report'` に紐づける。詳細画面（`GET /api/utility-reports/:id` の `files`）と編集画面にサムネイルを表示する。送信済みのファイルは再送しないので、保存が409等で失敗して押し直しても二重登録にならない。**添付は詳細・編集画面の × から削除できる**（editor以上・`DELETE /api/files/:id` の論理削除。06 設備台帳と同じ `thumb-cell`/`thumb-del`。R2の容量を実際に空けるのは管理画面「ファイル容量」の物理削除）
@@ -330,7 +330,7 @@
 - **SQLインジェクション対策**: D1 へのクエリは必ずプリペアドステートメント。SQL文字列連結禁止
 - **一覧APIの `limit` は下限1・上限ありで丸める**（`Math.min(Math.max(1, Math.trunc(Number(v)) || 既定), 上限)`。`limit=-1` が `LIMIT -1`＝無制限になり、全件読み取りで D1 の読み取り枠を消費されるのを防ぐ）
 - **権限チェックはサーバー側（Functions）で必ず実施**。フロントの出し分けはUX目的のみ
-- **複数の書き込みを伴う処理は D1 の batch（1トランザクション）で行う**（途中で失敗しても一部だけ残らない）。監査ログも同じ batch に入れる（`functions/api/_lib/audit.js` の `auditStatement`。INSERT 直後の監査は `recordId: LAST_INSERT_ID`＝`last_insert_rowid()`）。対象: 予定の一括登録（`plans/batch.js`）・1日削除/1日完了（`plans/[id]/delete-day.js`・`complete-day.js`。未マイグレーション列は `runPlanBatch` が外して batch ごと再試行）・点検まとめ入力（`inspections/batch.js`）・設備番号の振り直し（`equipment/renumber.js`）・部品の入出庫と履歴（`parts/[id]/transaction.js`。在庫不足時は `WHERE changes() = 1` で履歴も作らない。棚卸調整の増減は書き込む瞬間の在庫から計算）
+- **複数の書き込みを伴う処理は D1 の batch（1トランザクション）で行う**（途中で失敗しても一部だけ残らない）。監査ログも同じ batch に入れる（`functions/api/_lib/audit.js` の `auditStatement`。INSERT 直後の監査は `recordId: LAST_INSERT_ID`＝`last_insert_rowid()`）。対象: 予定の一括登録（`plans/batch.js`）・1日削除/1日完了（`plans/[id]/delete-day.js`・`complete-day.js`。未マイグレーション列は `runPlanBatch` が外して batch ごと再試行）・点検まとめ入力（`inspections/batch.js`）・設備番号の振り直し（`equipment/renumber.js`）・部品の入出庫と履歴（`parts/[id]/transaction.js`。在庫不足時は `WHERE changes() = 1` で履歴も作らない。棚卸調整の増減は書き込む瞬間の在庫から計算）・部品CSVの差分マージ（`parts/import.js`）・業務依頼の更新とステータス履歴（`repairs/[id].js`）・トラブル記録の登録と監査（`troubles/index.js` の `insertTroubleRecord` の `after`）・年度リセット（`plans/annual-reset.js`）・削除済みの復元（`admin/restore`）
 - **期間予定の分割（1日削除・1日完了）は同時操作を 409 で止める**（batch の先頭を `guardedPlanUpdate`＝読んだ時点の日程・状態のままのときだけ元の予定を書き換える条件付き UPDATE にし、後続の INSERT・監査は `ifPrevChanged`（`WHERE changes() = 1`）で連鎖させる。競合した側は何も作らない。2回押しで完了済みの単日レコードが2件できるのを防ぐ。updated_at は秒精度で同じ秒の2回押しを区別できないため使わない）。分割した予定には工事連絡書の印刷日（`printed_at`/`printed_by`）も引き継ぐ
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
 ### AI機能（Workers AI）の出し分け
@@ -359,7 +359,7 @@
 - CSV出力は必ず `js/csv.js` の `buildCsvText`/`escCsv` を通す（CSVインジェクション対策＝`=`/`+`/`-`/`@`/タブ/CR で始まる値は先頭に `'` を付けて Excel に数式として実行させない。数値・単独の「-」・`excelText()` の `="…"` は対象外）
 - QR読み取りは `jsQR`、QR生成は `qrcode.js`、PDF生成は印刷用CSS + 必要に応じ jsPDF（日本語フォント埋め込み）
 - カレンダーは自作 or `FullCalendar`（CDN）。軽量性優先なら自作
-- 日時は UTC の ISO 8601 で保存し、表示時に JST へ変換
+- 日時は UTC の ISO 8601 で保存し、表示時に JST へ変換（保存形式は秒精度・末尾Z。トラブルの `occurred_at` はサーバーで `normalizeUtcIso`（`_lib/util.js`）に通し、タイムゾーン付きの日時以外は400。AIに渡す過去事例の日付も `toJstDate` で JST にする）
 - **期間指定・日付の切り出し・「今日」はすべて JST で扱う**（JST 0:00〜8:59 の記録が前日・前月にずれるのを防ぐ）
   - API: 日時列（occurred_at / inspected_at / created_at / changed_at）の期間絞り込みは `functions/api/_lib/util.js` の `jstDayStartUtc`（>=）／`jstNextDayStartUtc`（< 翌日0:00 JST）で境界を変換する。`T00:00:00Z`／`T23:59:59Z` を付けて比べない。月集計は `strftime('%Y-%m', 列, '+9 hours')`。応答で日付だけを返すときは `toJstDate`。日付だけの列（report_date / planned_date）は変換不要
   - 画面: `js/util.js` の `toJstDateStr`（ISO→JSTの 'YYYY-MM-DD'）・`jstTodayStr`（JSTの今日）を使う。`toISOString().slice(0, 10)` や端末依存の `toLocaleDateString('sv-SE')` で日付を作らない。表示は `formatDate`／`formatDateTime`

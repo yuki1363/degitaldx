@@ -1,5 +1,5 @@
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { writeAuditLog, auditStatement } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
@@ -130,24 +130,6 @@ export async function onRequestPut({ request, params, env, data }) {
     binds.push(storedValue);
   }
 
-  // ステータス変更があればrepair_historyに記録
-  if (diff.status) {
-    await db
-      .prepare(
-        `INSERT INTO repair_history (request_id, old_status, new_status, comment, changed_by, changed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
-      )
-      .bind(
-        id,
-        diff.status.from,
-        diff.status.to,
-        body.comment ?? null,
-        userEmail,
-        now
-      )
-      .run();
-  }
-
   // ファイル添付
   if (Array.isArray(body.file_ids) && body.file_ids.length > 0) {
     await attachFiles(env, {
@@ -159,25 +141,31 @@ export async function onRequestPut({ request, params, env, data }) {
     });
   }
 
+  // 依頼の更新・ステータス履歴・監査ログは1つの batch（1トランザクション）で行う
+  // （途中で失敗して「ステータスは変わったのに履歴が無い／履歴だけある」状態を残さない）
+  const statements = [];
   if (setClauses.length > 0) {
     setClauses.push('updated_by = ?', 'updated_at = ?');
     binds.push(userEmail, now, id);
-
-    await db
-      .prepare(`UPDATE repair_request SET ${setClauses.join(', ')} WHERE id = ?`)
-      .bind(...binds)
-      .run();
+    statements.push(db.prepare(`UPDATE repair_request SET ${setClauses.join(', ')} WHERE id = ?`).bind(...binds));
   }
-
+  // ステータス変更があればrepair_historyに記録
+  if (diff.status) {
+    statements.push(db.prepare(
+      `INSERT INTO repair_history (request_id, old_status, new_status, comment, changed_by, changed_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+    ).bind(id, diff.status.from, diff.status.to, body.comment ?? null, userEmail, now));
+  }
   if (Object.keys(diff).length > 0) {
-    await writeAuditLog(db, {
+    statements.push(auditStatement(db, {
       tableName: 'repair_request',
       recordId: String(id),
       action: 'update',
       changedBy: userEmail,
       diff,
-    });
+    }));
   }
+  if (statements.length > 0) await db.batch(statements);
 
   return json({ ok: true });
 }

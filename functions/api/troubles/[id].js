@@ -1,7 +1,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, normalizeUtcIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 import { ensureTroubleColumns } from './index.js';
 
@@ -99,6 +99,10 @@ export async function onRequestPut({ request, params, env, data }) {
     }
     if (field === 'occurred_at' && !value) {
       return jsonError(400, 'occurred_at は必須です');
+    }
+    if (field === 'occurred_at') {
+      value = normalizeUtcIso(value);
+      if (!value) return jsonError(400, 'occurred_at は日時（ISO 8601・タイムゾーン付き。例 2026-10-27T01:30:00Z）で指定してください');
     }
 
     let storedValue;

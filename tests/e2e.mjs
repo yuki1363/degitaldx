@@ -360,6 +360,9 @@ await Promise.all([page, page2].map((pg) => pg.evaluate(() => window.dispatchEve
 await page.waitForTimeout(3000);
 const dupCount = ((await api('/api/troubles')).json?.troubles || []).filter((t) => t.phenomenon === 'E2E二重送信防止').length;
 check('送信キュー: 2つのタブで同時に復帰しても1件だけ送信される', dupCount === 1, `件数=${dupCount}`);
+// 送信しなかった側のタブも、送信が終わったら送信待ちバーを消す（古い件数が残り続けない）
+const staleBars = await Promise.all([page, page2].map((pg) => pg.evaluate(() => !!document.getElementById('offline-queue-bar'))));
+check('送信キュー: 送信後はどちらのタブにも送信待ちバーが残らない', staleBars.every((b) => !b), JSON.stringify(staleBars));
 await page2.close();
 
 // 保存ボタンの連打で二重登録しない（保存中はボタンを無効化）
@@ -1877,6 +1880,91 @@ const elDblRecs = Object.values((await api('/api/electrical-inspections?equipmen
   .filter((r) => r.date === elDblDate && r.inspector === 'E2E連打');
 check('電気点検: 保存を連打しても同じ日の記録は1件', elDblRecs.length === 1, `件数=${elDblRecs.length}`);
 for (const r of elDblRecs) await api(`/api/electrical-inspections/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
+
+// ---------- 9.16 再点検の残り（期間予定の1日点検・部品・復元・同時登録・日時の検証・設定の再送） ----------
+section('9.16 期間予定の1日点検・部品マージ履歴・復元の重複・同時登録・日時検証・設定の競合');
+// 期間予定の1日（カレンダーの日程シート）から始めた点検は、その日だけを完了にする
+const pdPlan = await api('/api/plans', { method: 'POST', body: { title: 'E2E期間点検1日', plan_type: 'inspection', planned_date: '2033-03-10', planned_end_date: '2033-03-12' } });
+const pdUrl = await page.evaluate(async (id) => {
+  const m = await import('/js/plan-inspection-link.js');
+  return m.buildInspectionStartUrl({ id, planned_date: '2033-03-10' }, '2033-03-11');
+}, pdPlan.json?.id);
+check('点検開始URL: 日程シートから開くと plan_day が付く', /[?&]plan_day=2033-03-11(&|$)/.test(pdUrl), pdUrl);
+await page.evaluate(async (id) => {
+  const m = await import('/js/plan-inspection-link.js');
+  await m.completePlanAfterInspection(id, '2033-03-11');
+}, pdPlan.json?.id);
+const pdRows = ((await api('/api/plans?from=2033-03-01&to=2033-04-01')).json?.plans || []).filter((p) => p.title === 'E2E期間点検1日');
+const pdDone = pdRows.filter((p) => p.status === 'done').map((p) => `${p.planned_date}~${p.planned_end_date || ''}`);
+const pdLeft = pdRows.filter((p) => p.status !== 'done').length;
+check('点検の保存で、期間予定はその日だけ完了・残りの日程は未完了のまま',
+  pdDone.length === 1 && pdDone[0].startsWith('2033-03-11') && pdLeft === 2, JSON.stringify(pdRows.map((p) => [p.planned_date, p.planned_end_date, p.status])));
+for (const p of pdRows) await api(`/api/plans/${p.id}`, { method: 'DELETE' });
+
+// 部品CSVの差分マージで在庫数が変わったら、入出庫履歴（調整）と監査ログに残す
+const mqPart = await api('/api/parts', { method: 'POST', body: { name: 'E2Eマージ数量', model_no: 'E2EMQ-1', quantity: 5 } });
+const mqRes = await api('/api/parts/import', { method: 'POST', body: { mode: 'merge', rows: [{ model_no: 'E2EMQ-1', name: 'E2Eマージ数量', quantity: 8 }] } });
+const mqDetail = (await api(`/api/parts/${mqPart.json?.id}`)).json || {};
+const mqTx = (mqDetail.transactions || []).find((t) => t.type === 'adjust' && t.note === 'CSV取込（差分マージ）');
+check('部品マージ: 在庫数の変更が入出庫履歴に「調整 +3」で残る', mqRes.status === 200 && mqDetail.part?.quantity === 8 && mqTx?.quantity === 3,
+  JSON.stringify({ st: mqRes.status, q: mqDetail.part?.quantity, tx: mqTx }));
+const mqAudit = ((await api('/api/admin/audit?table=parts_inventory&limit=20')).json?.logs || [])
+  .map((l) => { try { return JSON.parse(l.diff_json || 'null'); } catch { return null; } })
+  .find((d) => d?.mode === 'merge' && (d.quantity_changes || []).some((c) => c.id === mqPart.json?.id));
+check('部品マージ: 監査ログに在庫数の変更（いくつ→いくつ）が残る',
+  mqAudit?.quantity_changes?.some((c) => c.id === mqPart.json?.id && c.from === 5 && c.to === 8), JSON.stringify(mqAudit));
+const mqRes2 = await api('/api/parts/import', { method: 'POST', body: { mode: 'merge', rows: [{ model_no: 'E2EMQ-1', name: 'E2Eマージ数量', quantity: 8 }] } });
+const mqTx2 = ((await api(`/api/parts/${mqPart.json?.id}`)).json?.transactions || []).filter((t) => t.note === 'CSV取込（差分マージ）');
+check('部品マージ: 在庫数が変わらなければ履歴を作らない', mqRes2.status === 200 && mqTx2.length === 1, `件数=${mqTx2.length}`);
+await api(`/api/parts/${mqPart.json?.id}`, { method: 'DELETE' });
+
+// 全置き換え等で作り直された部品がある場合、同じ型番・部品名の旧部品は復元できない（重複を作らない）
+const rdOld = await api('/api/parts', { method: 'POST', body: { name: 'E2E復元重複', model_no: 'E2ERD-1' } });
+await api(`/api/parts/${rdOld.json?.id}`, { method: 'DELETE' });
+const rdNew = await api('/api/parts', { method: 'POST', body: { name: 'E2E復元重複', model_no: 'E2ERD-1' } });
+const rdRes = await api('/api/admin/restore', { method: 'POST', body: { table: 'parts_inventory', id: rdOld.json?.id } });
+check('復元: 同じ型番・部品名の部品があれば409（重複を作らない）', rdRes.status === 409, `status=${rdRes.status}`);
+await api(`/api/parts/${rdNew.json?.id}`, { method: 'DELETE' });
+const rdRes2 = await api('/api/admin/restore', { method: 'POST', body: { table: 'parts_inventory', id: rdOld.json?.id } });
+const rdRes3 = await api('/api/admin/restore', { method: 'POST', body: { table: 'parts_inventory', id: rdOld.json?.id } });
+check('復元: 重複が無ければ復元でき、2回目は404/409', rdRes2.status === 200 && (rdRes3.status === 404 || rdRes3.status === 409),
+  `1回目=${rdRes2.status} 2回目=${rdRes3.status}`);
+await api(`/api/parts/${rdOld.json?.id}`, { method: 'DELETE' });
+
+// ユーティリティ日報: 同じ日を2台で同時に登録しても1件だけ（確認と登録の間をすり抜けない）
+const ucDate = '2033-04-01';
+const [uc1, uc2] = await Promise.all([1, 2].map(() => api('/api/utility-reports', { method: 'POST', body: { report_date: ucDate, values: {} } })));
+const ucStatuses = [uc1.status, uc2.status].sort();
+const ucList = ((await api(`/api/utility-reports?from=${ucDate}&to=${ucDate}`)).json?.reports || []);
+check('ユーティリティ: 同じ日の同時登録は1件が201・もう1件は409', ucStatuses[0] === 201 && ucStatuses[1] === 409 && ucList.length === 1,
+  JSON.stringify({ ucStatuses, n: ucList.length }));
+for (const r of ucList) await api(`/api/utility-reports/${r.id}`, { method: 'DELETE' });
+
+// トラブル記録の発生日時はサーバーでも検証し、UTC・秒精度にそろえて保存する（期間の絞り込みから外れない）
+const occBad = await api('/api/troubles', { method: 'POST', body: { occurred_at: '昨日の夕方', phenomenon: 'E2E日時検証' } });
+check('トラブル: 日時でない occurred_at は400', occBad.status === 400, `status=${occBad.status}`);
+const occJst = await api('/api/troubles', { method: 'POST', body: { occurred_at: '2033-05-01T08:30+09:00', phenomenon: 'E2E日時検証' } });
+const occGot = (await api(`/api/troubles/${occJst.json?.id}`)).json?.trouble;
+check('トラブル: +09:00 付きの日時は UTC の秒精度で保存される', occJst.status === 201 && occGot?.occurred_at === '2033-04-30T23:30:00Z', `${occJst.status} ${occGot?.occurred_at}`);
+const occAudit = ((await api(`/api/admin/audit?table=trouble_record&limit=20`)).json?.logs || []).find((l) => String(l.record_id) === String(occJst.json?.id) && l.action === 'create');
+check('トラブル: 登録と同時に監査ログ（create）が残る', !!occAudit);
+const occPutBad = await api(`/api/troubles/${occJst.json?.id}`, { method: 'PUT', body: { occurred_at: '2033-13-40' } });
+check('トラブル: 編集でも日時でない occurred_at は400', occPutBad.status === 400, `status=${occPutBad.status}`);
+await api(`/api/troubles/${occJst.json?.id}`, { method: 'DELETE' });
+
+// 電気設定: 未送信の設定を再送するとき、その後に他の管理者がサーバーで保存していたら確認する
+const elStale = await api('/api/electrical-config', { method: 'PUT', body: { equipment_type: 'battery', config: [], expected_updated_at: '2000-01-01T00:00:00Z' } });
+check('電気設定API: 古い更新日時を添えた保存は409', elStale.status === 409, `status=${elStale.status}`);
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+const elLocal = [{ id: 'cf', title: 'E2E競合ローカル', checks: [], measurements: [] }];
+await page.evaluate((cfg) => localStorage.setItem('elec_unsynced_config_battery', JSON.stringify({ value: cfg, base: '2000-01-01T00:00:00Z' })), elLocal);
+const elCfDlgBefore = dialogs.length;
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(800);
+const elConflictAsked = dialogs.slice(elCfDlgBefore).some((d) => d.includes('他の管理者'));
+const elCfgBattery = (await api('/api/electrical-config')).json?.battery;
+check('電気設定: 再送前に他の管理者の変更があれば確認し、OK でこの端末の内容を保存する',
+  elConflictAsked && elCfgBattery?.[0]?.title === 'E2E競合ローカル', JSON.stringify({ asked: elConflictAsked, title: elCfgBattery?.[0]?.title }));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

@@ -15,6 +15,7 @@ import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
 import { createDraft, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
+import { completePlanAfterInspection } from '/js/plan-inspection-link.js';
 
 const INPUT_TYPE_LABELS = { ok_ng: 'OK / NG', number: '数値', select: '選択式', text: '自由記述' };
 
@@ -106,7 +107,7 @@ async function renderList(presetEquipmentId) {
 // ---------------- 入力フォーム（新規・編集） ----------------
 
 
-async function renderEntry({ equipmentId, existing, planId, plannedDate, assigneeName }) {
+async function renderEntry({ equipmentId, existing, planId, planDay, plannedDate, assigneeName }) {
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
   // 未保存ガード: 実際のユーザー入力があったら、ページ離脱時に「内容が消える」旨を警告する
@@ -319,9 +320,9 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
         // expected_updated_at は同時編集ガード（他の人が先に更新していたら409）
         ? await api.put(`/api/inspections/${existing.id}`, { ...body, expected_updated_at: existing.updated_at })
         : await api.post('/api/inspections', body);
-      // 保全計画から開始した点検なら、保存成功時にその計画を自動で完了にする
+      // 保全計画から開始した点検なら、保存成功時にその計画（日程シートから開いたときはその日だけ）を完了にする
       if (!existing && planId) {
-        try { await api.put(`/api/plans/${planId}`, { status: 'done' }); }
+        try { await completePlanAfterInspection(planId, planDay); }
         catch { /* 計画の完了化に失敗しても点検記録は保存済みなので継続 */ }
       }
       if (result.has_abnormal) {
@@ -340,7 +341,7 @@ async function renderEntry({ equipmentId, existing, planId, plannedDate, assigne
           for (const f of pendingFiles.slice(fileIds.length)) {
             remaining.push(await resizeImageFile(f));
           }
-          await enqueueOffline('inspection', { ...baseBody, file_ids: fileIds }, remaining, planId ? { planId } : {});
+          await enqueueOffline('inspection', { ...baseBody, file_ids: fileIds }, remaining, planId ? { planId, planDay } : {});
           dirty = false;
           draft?.clear();
           alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
@@ -703,6 +704,7 @@ async function renderMasters(equipmentId) {
       await renderEntry({
         equipmentId: Number(params.get('equipment_id')) || undefined,
         planId: Number(params.get('plan_id')) || undefined,
+        planDay: /^\d{4}-\d{2}-\d{2}$/.test(params.get('plan_day') || '') ? params.get('plan_day') : undefined,
         plannedDate: params.get('date') || undefined,
         assigneeName: params.get('assignee') || undefined,
       });

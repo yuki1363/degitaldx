@@ -8,6 +8,17 @@ export function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+// 日時の入力（ISO 8601・タイムゾーン付き）を、保存形式（UTC・秒精度・末尾Z）にそろえる。不正なら null。
+//   期間の絞り込みは文字列比較（jstDayStartUtc 等）なので、形式が違う値（日付だけ・ミリ秒付き・+09:00 付き・
+//   ただの文字列）が入ると、一覧・集計の期間から黙って外れていた
+export function normalizeUtcIso(value) {
+  if (typeof value !== 'string') return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+  const d = new Date(value.trim());
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 // ---- JST の日付境界（期間絞り込み・日付表示） ----
 //   日時列（occurred_at / inspected_at / created_at / changed_at 等）は UTC で保存している。
 //   画面の期間指定「YYYY-MM-DD」は JST の日付なので、UTC の日付境界（T00:00:00Z / T23:59:59Z）で

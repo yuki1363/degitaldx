@@ -49,9 +49,20 @@ async function cleanupOldMessages(env) {
     .bind(cutoff).all();
   if (!olds || olds.length === 0) return;
 
-  // 添付ファイルを R2 ごと削除（失敗しても本体の削除は続行）
+  // 1件ずつ「まだピン留めされていなければ」本体を消し、消せたものだけ添付・リアクションを片付ける。
+  // 一覧を読んだ後にピン留めされたメッセージは本体が残るため、添付を R2 から消さない
+  // （先に添付を消してから本体を消していたため、その間にピン留めすると画像の消えたピンが残った）
   const now = nowIso();
+  const deletedIds = [];
   for (const m of olds) {
+    const del = await db.prepare('DELETE FROM chat_messages WHERE id = ? AND pinned_at IS NULL').bind(m.id).run();
+    if ((del.meta?.changes ?? 0) === 0) continue;
+    deletedIds.push(m.id);
+    // リアクションも本体と一緒に物理削除（孤児レコードを残さない）
+    try {
+      await db.prepare('DELETE FROM chat_reactions WHERE message_id = ?').bind(m.id).run();
+    } catch { /* chat_reactions が無い旧DBでも続行 */ }
+    // 添付ファイルを R2 ごと削除（失敗しても続行）
     let fileIds = [];
     try { const a = JSON.parse(m.file_ids_json || 'null'); if (Array.isArray(a)) fileIds = a; } catch { /* 壊れたJSONは無視 */ }
     for (const fid of fileIds) {
@@ -71,22 +82,15 @@ async function cleanupOldMessages(env) {
             `UPDATE files SET purged_at = ?, purged_by = ?, deleted_at = COALESCE(deleted_at, ?), deleted_by = COALESCE(deleted_by, ?) WHERE id = ?`
           ).bind(now, 'system:chat-cleanup', now, 'system:chat-cleanup', fid).run();
         }
-      } catch { /* purged列が無い旧DB等でもメッセージ削除は続行 */ }
+      } catch { /* purged列が無い旧DB等でも続行 */ }
     }
   }
-
-  // リアクションも本体と一緒に物理削除（孤児レコードを残さない）
-  try {
-    await db.prepare(
-      'DELETE FROM chat_reactions WHERE message_id IN (SELECT id FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL)'
-    ).bind(cutoff).run();
-  } catch { /* chat_reactions が無い旧DBでも本体の削除は続行 */ }
-  await db.prepare('DELETE FROM chat_messages WHERE created_at < ? AND pinned_at IS NULL').bind(cutoff).run();
+  if (deletedIds.length === 0) return;
   await writeAuditLog(db, {
     tableName: 'chat_messages', recordId: 'auto-cleanup', action: 'delete',
     changedBy: 'system:chat-cleanup',
     // 証跡用に削除対象のID一覧も残す（肥大化しないよう最大100件まで）
-    diff: { deleted_count: olds.length, cutoff, ids: olds.slice(0, 100).map((m) => m.id) },
+    diff: { deleted_count: deletedIds.length, cutoff, ids: deletedIds.slice(0, 100) },
   });
 }
 

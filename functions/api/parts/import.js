@@ -5,7 +5,7 @@
 // mode: 'merge'               = 差分マージ（型番一致で更新＝CSVで対応付けた列のみ・新規は追加・既存の他部品は不変）
 
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { writeAuditLog, auditStatement } from '../_lib/audit.js';
 import { normImportance } from './index.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
@@ -146,9 +146,11 @@ async function doReplace(DB, userEmail, now, validRows, skipped, errors) {
 async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
   // 既存部品を型番（model_no）でインデックス化
   const { results: existing } = await DB.prepare(
-    `SELECT id, model_no FROM parts_inventory WHERE deleted_at IS NULL AND model_no IS NOT NULL`
+    `SELECT id, model_no, quantity FROM parts_inventory WHERE deleted_at IS NULL AND model_no IS NOT NULL`
   ).all();
   const existingByModelNo = new Map((existing ?? []).map((r) => [r.model_no, r.id]));
+  const qtyById = new Map((existing ?? []).map((r) => [r.id, r.quantity]));
+  const qtyChanges = []; // 監査用: 在庫数が変わった部品 { id, from, to }
 
   const statements = [];
   let inserted = 0;
@@ -172,6 +174,17 @@ async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
       }
       sets.push('updated_by = ?', 'updated_at = ?');
       binds.push(userEmail, now, existingId);
+      // 在庫数を対応付けていれば、変わる分を入出庫履歴に「調整」として残す（増減は書き込む瞬間の在庫から計算）。
+      // 入出庫画面を通さずに在庫数が変わると、履歴の合計と在庫が合わなくなり原因を追えなかった
+      if (Object.prototype.hasOwnProperty.call(row, 'quantity')) {
+        const to = num(row.quantity);
+        statements.push(DB.prepare(
+          `INSERT INTO parts_transaction (part_id, type, quantity, note, created_by, created_at)
+           SELECT id, 'adjust', ?1 - quantity, 'CSV取込（差分マージ）', ?2, ?3
+             FROM parts_inventory WHERE id = ?4 AND quantity IS NOT ?1`
+        ).bind(to, userEmail, now, existingId));
+        if (qtyById.get(existingId) !== to) qtyChanges.push({ id: existingId, from: qtyById.get(existingId), to });
+      }
       statements.push(
         DB.prepare(`UPDATE parts_inventory SET ${sets.join(', ')} WHERE id = ?`).bind(...binds)
       );
@@ -205,21 +218,20 @@ async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
     }
   }
 
-  if (statements.length > 0) {
-    try {
-      await DB.batch(statements);
-    } catch (err) {
-      return jsonError(500, `取り込みに失敗しました: ${err.message}`);
-    }
-  }
-
-  await writeAuditLog(DB, {
+  // 監査ログも同じ batch に入れる（取り込みと記録のどちらかだけが残らないように）
+  statements.push(auditStatement(DB, {
     tableName: 'parts_inventory',
     recordId: 0,
     action: 'update',
     changedBy: userEmail,
-    diff: { mode: 'merge', inserted, updated, skipped, total: validRows.length + skipped },
-  });
+    // 在庫数の変更は誰が・どれを・いくつからいくつにしたかを残す（肥大化しないよう最大100件まで）
+    diff: { mode: 'merge', inserted, updated, skipped, total: validRows.length + skipped, quantity_changes: qtyChanges.slice(0, 100) },
+  }));
+  try {
+    await DB.batch(statements);
+  } catch (err) {
+    return jsonError(500, `取り込みに失敗しました: ${err.message}`);
+  }
 
   return json({ inserted, updated, deleted: 0, skipped, errors });
 }

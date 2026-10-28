@@ -11,7 +11,7 @@
 //   （例: 業務依頼を再受付して再び期限を過ぎた場合）。
 
 import { notifyTeam } from './notify.js';
-import { deriveOverdue, annualMonthInFy, getAnnualFyState } from '../plans/index.js';
+import { deriveOverdue, annualMonthInFy, getAnnualFyState, getBatchPlanIds } from '../plans/index.js';
 import { ensureRepairSchema, isOverdueRepair } from '../repairs/index.js';
 import { ensureColumns } from './db-compat.js';
 
@@ -63,13 +63,17 @@ async function notifyOverduePlans(env) {
     .all();
   // 年間計画は「最後に年度リセットした年度＋1」の年度に当てはめて判定する（plans/index.js の getAnnualFyState）
   const { current: fy } = await getAnnualFyState(db);
+  // annual_only 列が入る前に一括登録した年間計画も月単位で判定する（年間計画表の一覧と同じ見分け方。
+  // 日単位だと毎月1日の予定が2日に「期限超過」として通知されていた）
+  const batchIds = await getBatchPlanIds(db);
   for (const p of results ?? []) {
-    const derived = deriveOverdue(p, { fy }); // annual_only は自動で月単位判定（deriveOverdueの既定動作）
+    const isAnnual = !!p.annual_only || batchIds.has(String(p.id));
+    const derived = deriveOverdue(p, { monthly: isAnnual, fy });
     if (derived.status !== 'overdue') continue;
     const limit = (p.planned_end_date || p.planned_date || '').slice(0, 10);
     // 年間計画（毎年共通のテンプレート）は登録年の日付ではなく、今の年度に当てはめた予定月で書く
     // （年度が変わると本文が変わる＝翌年度の超過は新しい通知になる）
-    const body = p.annual_only
+    const body = isAnnual
       ? `予定月（${annualMonthInFy(limit, fy)}）を過ぎても未実施です`
       : `予定日（${limit}）を過ぎても未実施です`;
     if (await hasNotificationFor(db, 'maintenance_plan', p.id, 'plan_overdue', body)) continue;

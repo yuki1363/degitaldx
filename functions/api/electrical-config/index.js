@@ -5,6 +5,9 @@
 //   PUT /api/electrical-config   （admin のみ）
 //        body: { equipment_type, config?, default? }
 //        渡されたキー（config / default）だけ更新。変更前を master_history に退避（復元用）。
+//        expected_updated_at（任意）: 送った端末が知っている更新日時。サーバーの方が新しければ 409
+//          （オフライン中に保存できず端末に残した設定を後で再送するとき、その間に他の管理者が
+//          保存した新しい設定を黙って上書きしないため）。応答の updated_at が新しい更新日時
 
 import { writeAuditLog } from '../_lib/audit.js';
 import { requireRole } from '../_lib/auth.js';
@@ -19,12 +22,14 @@ export async function onRequestGet({ env, data }) {
   await ensureElectricalSchema(db);
 
   const { results } = await db.prepare(
-    'SELECT equipment_type, config_json, default_json FROM electrical_config'
+    'SELECT equipment_type, config_json, default_json, updated_at FROM electrical_config'
   ).all();
   const out = { main: null, battery: null, generator: null,
-    defaults: { main: null, battery: null, generator: null } };
+    defaults: { main: null, battery: null, generator: null },
+    updated_at: { main: null, battery: null, generator: null } };
   for (const r of results ?? []) {
     if (!EQUIPMENT_TYPES.includes(r.equipment_type)) continue;
+    out.updated_at[r.equipment_type] = r.updated_at ?? null;
     try { out[r.equipment_type] = r.config_json ? JSON.parse(r.config_json) : null; } catch { /* keep null */ }
     try { out.defaults[r.equipment_type] = r.default_json ? JSON.parse(r.default_json) : null; } catch { /* keep null */ }
   }
@@ -46,8 +51,30 @@ export async function onRequestPut({ env, request, data }) {
   if (!hasConfig && !hasDefault) return jsonError(400, 'config または default を指定してください');
 
   const before = await db.prepare(
-    'SELECT config_json, default_json FROM electrical_config WHERE equipment_type = ?'
+    'SELECT config_json, default_json, updated_at FROM electrical_config WHERE equipment_type = ?'
   ).bind(type).first();
+
+  const checkExpected = Object.prototype.hasOwnProperty.call(body, 'expected_updated_at');
+  const expected = checkExpected ? (body.expected_updated_at ?? null) : null;
+  if (checkExpected && (before?.updated_at ?? null) !== expected) {
+    return jsonError(409, '他の管理者が後から設定を保存しています。', { updated_at: before?.updated_at ?? null });
+  }
+
+  const newConfig = hasConfig ? (body.config == null ? null : JSON.stringify(body.config)) : (before?.config_json ?? null);
+  const newDefault = hasDefault ? (body.default == null ? null : JSON.stringify(body.default)) : (before?.default_json ?? null);
+  const now = nowIso();
+
+  // expected_updated_at があるときは、確認から書き込みまでの間に他の人が保存していないことも条件にする
+  const res = await db.prepare(
+    `INSERT INTO electrical_config (equipment_type, config_json, default_json, updated_by, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT(equipment_type) DO UPDATE
+       SET config_json = ?2, default_json = ?3, updated_by = ?4, updated_at = ?5
+       WHERE ?6 = 0 OR electrical_config.updated_at IS ?7`
+  ).bind(type, newConfig, newDefault, data.user.email, now, checkExpected ? 1 : 0, expected).run();
+  if ((res.meta?.changes ?? 0) === 0) {
+    return jsonError(409, '他の管理者が後から設定を保存しています。');
+  }
 
   // 変更前スナップショットを master_history に残す（復元の第3層）
   await writeMasterHistory(db, {
@@ -56,17 +83,6 @@ export async function onRequestPut({ env, request, data }) {
     snapshot: { equipment_type: type, config_json: before?.config_json ?? null, default_json: before?.default_json ?? null },
     changedBy: data.user.email,
   });
-
-  const newConfig = hasConfig ? (body.config == null ? null : JSON.stringify(body.config)) : (before?.config_json ?? null);
-  const newDefault = hasDefault ? (body.default == null ? null : JSON.stringify(body.default)) : (before?.default_json ?? null);
-  const now = nowIso();
-
-  await db.prepare(
-    `INSERT INTO electrical_config (equipment_type, config_json, default_json, updated_by, updated_at)
-     VALUES (?1, ?2, ?3, ?4, ?5)
-     ON CONFLICT(equipment_type) DO UPDATE
-       SET config_json = ?2, default_json = ?3, updated_by = ?4, updated_at = ?5`
-  ).bind(type, newConfig, newDefault, data.user.email, now).run();
 
   // 誰がいつどの設定を変えたかを監査ログにも残す（変更前の内容は master_history に退避済み）
   await writeAuditLog(db, {
@@ -77,5 +93,5 @@ export async function onRequestPut({ env, request, data }) {
     diff: { equipment_type: type, changed: [hasConfig ? 'config' : null, hasDefault ? 'default' : null].filter(Boolean) },
   });
 
-  return json({ ok: true });
+  return json({ ok: true, updated_at: now });
 }
