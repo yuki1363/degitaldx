@@ -153,6 +153,28 @@ npx wrangler d1 time-travel restore mainte-db --timestamp=<unix-timestamp>
 
 **推奨設定:** Cloudflare ダッシュボード → Notifications → Billing Alerts で使用量アラートを設定しておくと安心です。
 
+### 管理画面で利用量を見る（任意・推奨）
+
+管理画面 →「ファイル容量」の「無料枠の使用状況」には、R2 の容量・D1 のサイズ・Access のユーザー数が常に出ます。
+次の環境変数を設定すると、**Workers リクエスト（今日）・D1 読取／書込行数（今日）・R2 Class A／B 操作（今月）・
+Workers AI（今日）・Pages ビルド（今月）** も Cloudflare の集計から取得して同じ画面にメーターで表示します
+（80%で黄・90%で赤。5分ごとに更新、「🔄 再取得」で取り直し。「今日」「今月」は無料枠のリセットに合わせて UTC 基準）。
+
+1. Cloudflare ダッシュボード → 右上のアカウント → **My Profile → API Tokens → Create Token → Custom token**
+   - 権限: **Account → Account Analytics → Read** と **Account → Cloudflare Pages → Read** の2つだけ（読み取り専用）
+   - Account Resources: このアプリのアカウントだけを選ぶ
+2. Pages → 設定 → 環境変数（本番）に追加して再デプロイ
+
+| 変数 | 値 |
+|---|---|
+| `CF_API_TOKEN` | 1 で作ったトークン（**「暗号化」を選ぶ**） |
+| `CF_ACCOUNT_ID` | ダッシュボードの Workers & Pages 画面右側などに出る32桁のアカウントID |
+| `CF_PAGES_PROJECT` | Pages のプロジェクト名（省略時 `degitaldx`） |
+
+トークンはサーバー側（`functions/api/_lib/cf-analytics.js`）だけで使い、画面には送りません。利用量を見られるのは管理者だけです。
+未設定・取得失敗の項目は「Cloudflare ダッシュボードで確認してください」と表示されます
+（Workers AI の集計項目名は公式ドキュメントで確認できておらず、取れない場合があります）。
+
 ## セキュリティ運用メモ
 
 - **Cloudflare Access を必ず有効にしてから運用する。** API はAccess が付与するヘッダー

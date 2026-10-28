@@ -4,17 +4,20 @@
 //     d1     … データベースのおおよそのサイズ（PRAGMA から推定・5GB無料枠）。
 //              D1 が PRAGMA を許可しない場合は size_bytes: null（画面はダッシュボード誘導）。
 //     access … 利用登録ユーザー数（= Cloudflare Access の許可リスト相当・50名無料枠）
-//   ※ Workers リクエスト数・D1 の日次読取/書込は API トークンが必要なため
-//     アプリでは取得しない（画面で Cloudflare ダッシュボードへ誘導する）。
+//     cloudflare … Workers リクエスト・D1 読取/書込行数・R2 操作回数・Workers AI・Pages ビルド
+//              （Cloudflare の API から取得。CF_API_TOKEN / CF_ACCOUNT_ID が未設定なら
+//               configured:false で、画面は Cloudflare ダッシュボードへ誘導する。_lib/cf-analytics.js）
+//   ?refresh=1 で Cloudflare の利用量を取り直す（通常は5分キャッシュ）
 
 import { requireRole } from '../_lib/auth.js';
 import { json } from '../_lib/http.js';
 import { getStorageUsage } from '../_lib/storage.js';
+import { getCloudflareUsage } from '../_lib/cf-analytics.js';
 
 const D1_FREE_TIER_BYTES = 5_000_000_000; // 5 GB
 const ACCESS_FREE_USERS = 50;
 
-export async function onRequestGet({ env, data }) {
+export async function onRequestGet({ request, env, data }) {
   const denied = requireRole(data.user, 'admin');
   if (denied) return denied;
 
@@ -42,10 +45,28 @@ export async function onRequestGet({ env, data }) {
       d1Bytes = pageCount * pageSize;
     }
   } catch { d1Bytes = null; }
+  // PRAGMA が使えない場合は、D1 の応答に付くデータベースの実サイズ（meta.size_after）を使う
+  if (d1Bytes == null) {
+    try {
+      const r = await db.prepare('SELECT 1 AS x').run();
+      const size = Number(r?.meta?.size_after);
+      if (Number.isFinite(size) && size > 0) d1Bytes = size;
+    } catch { /* 取れなければ null（画面はダッシュボード誘導） */ }
+  }
+
+  // Cloudflare の API から取る利用量（トークン未設定なら configured:false）
+  let cloudflare;
+  try {
+    const refresh = new URL(request.url).searchParams.get('refresh') === '1';
+    cloudflare = await getCloudflareUsage(env, { noCache: refresh });
+  } catch (err) {
+    cloudflare = { configured: true, error: String(err?.message || err).slice(0, 200) };
+  }
 
   return json({
     r2,
     d1: { size_bytes: d1Bytes, free_tier_bytes: D1_FREE_TIER_BYTES },
     access: { user_count: userCount, free_limit: ACCESS_FREE_USERS },
+    cloudflare,
   });
 }

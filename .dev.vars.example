@@ -43,3 +43,10 @@ DEV_USER_EMAIL=admin@example.com
 # VAPID_PUBLIC_KEY=BIHbSoHWsRTrqYDA-pavlq8V_4HmF5s2h2HnsiVqg3Oayr4isq8SH2kwSD289nXY1cEkDaEtghggc0KY96bJhRE
 # VAPID_PRIVATE_KEY=IF4UAv__agUh0GuUB03fqTCRUNOKkDFHZuqw6aJEkzQ.gdtKgdaxFOupgMD6lq-WrxX_geYXmzaHYeeyJWqDc5o.yr4isq8SH2kwSD289nXY1cEkDaEtghggc0KY96bJhRE
 # VAPID_SUBJECT=mailto:admin@example.com
+
+# Cloudflare の利用量（管理画面「ファイル容量」の無料枠表示）。読み取り専用トークン
+#   （Account Analytics: Read ／ Cloudflare Pages: Read）。未設定なら表示しない（ダッシュボード案内のみ）。
+#   本番では CF_API_TOKEN を必ず「暗号化」で設定する。ローカルでは通常設定しない。
+# CF_API_TOKEN=
+# CF_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+# CF_PAGES_PROJECT=degitaldx
