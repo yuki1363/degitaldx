@@ -1989,6 +1989,61 @@ const elCfgBattery = (await api('/api/electrical-config')).json?.battery;
 check('電気設定: 再送前に他の管理者の変更があれば確認し、OK でこの端末の内容を保存する',
   elConflictAsked && elCfgBattery?.[0]?.title === 'E2E競合ローカル', JSON.stringify({ asked: elConflictAsked, title: elCfgBattery?.[0]?.title }));
 
+// ---------- 9.17 無料枠の使用状況（Cloudflare の利用量） ----------
+section('9.17 無料枠の使用状況（リクエスト・行数・操作回数・AI・ビルド）');
+const usageRes = await api('/api/admin/usage');
+check('利用量API: トークン未設定なら cloudflare.configured=false（他の項目は今までどおり）',
+  usageRes.status === 200 && usageRes.json?.cloudflare?.configured === false && usageRes.json?.r2 && usageRes.json?.access,
+  JSON.stringify(usageRes.json?.cloudflare));
+check('利用量API: D1 のサイズが取れる（PRAGMA か D1 の応答の実サイズ）', Number(usageRes.json?.d1?.size_bytes) > 0, String(usageRes.json?.d1?.size_bytes));
+const usageByEditor = await apiAs(editorEmail, '/api/admin/usage');
+check('利用量API: 管理者以外は403', usageByEditor.status === 403, `status=${usageByEditor.status}`);
+await page.goto(`${BASE}/pages/admin`, { waitUntil: 'networkidle' });
+await page.click('.tab-btn[data-tab="files"]');
+await page.waitForSelector('#cf-usage', { timeout: 10000 });
+const cfUnset = await page.evaluate(() => document.querySelector('#cf-usage')?.innerText || '');
+check('無料枠: 未設定なら全項目の無料枠と設定方法を案内する',
+  cfUnset.includes('未設定') && cfUnset.includes('R2 Class A') && cfUnset.includes('Workers AI') && cfUnset.includes('CF_API_TOKEN'), cfUnset.slice(0, 200));
+// 設定済みの表示: 画面側の fetch を、フラグが立っているときだけ偽の利用量に差し替える（GET は SW 経由で page.route が効かない）
+await page.addInitScript(() => {
+  if (!sessionStorage.getItem('e2eFakeCfUsage')) return;
+  const orig = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const u = new URL(typeof input === 'string' ? input : input.url, location.origin);
+    const res = await orig(input, init);
+    if (u.pathname !== '/api/admin/usage') return res;
+    const body = await res.json();
+    body.cloudflare = { configured: true, fetched_at: '2026-10-28T05:30:00Z', items: {
+      workers_requests: { used: 92000, limit: 100000, period: 'day' },
+      d1_rows_read: { used: 250000, limit: 5000000, period: 'day' },
+      d1_rows_written: { used: 3000, limit: 100000, period: 'day' },
+      r2_class_a: { used: 45, limit: 1000000, period: 'month' },
+      r2_class_b: { used: 900, limit: 10000000, period: 'month' },
+      ai_neurons: { error: 'unknown field', limit: 10000, period: 'day' },
+      pages_builds: { used: 12, limit: 500, period: 'month' },
+    } };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+});
+await page.evaluate(() => sessionStorage.setItem('e2eFakeCfUsage', '1'));
+const cfVp = page.viewportSize();
+await page.setViewportSize({ width: 375, height: 720 }); // スマホ幅で崩れないこと
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('.tab-btn[data-tab="files"]');
+await page.waitForSelector('#cf-usage .cf-usage-row', { timeout: 10000 });
+const cfSet = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#cf-usage .cf-usage-row').length,
+  text: document.querySelector('#cf-usage')?.innerText || '',
+  overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+}));
+check('無料枠: 設定済みなら7項目をメーターで表示（今日／今月・件数・割合）',
+  cfSet.rows === 7 && cfSet.text.includes('今日 92,000 / 100,000回（92%）') && cfSet.text.includes('今月 12 / 500回'), cfSet.text.slice(0, 300));
+check('無料枠: 80%を超えた項目に警告、取れなかった項目は「取得できませんでした」',
+  cfSet.text.includes('⚠ 無料枠の92%') && /Workers AI[\s\S]*取得できませんでした/.test(cfSet.text), cfSet.text.slice(0, 300));
+check('無料枠: スマホ幅（375px）で画面からはみ出さない', !cfSet.overflow);
+if (cfVp) await page.setViewportSize(cfVp);
+await page.evaluate(() => sessionStorage.removeItem('e2eFakeCfUsage'));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
