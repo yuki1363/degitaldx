@@ -1787,7 +1787,7 @@ section('9.14 AIの権限・件数上限・検索ハイライト・電気設定�
 // AI: 閲覧のみ（viewer）は無料枠を消費する AI API を呼べない。画像AIは AI_VISION_ENABLED=1 のときだけ
 const viewerEmail = 'e2e-viewer@example.com';
 await api('/api/admin/users', { method: 'POST', body: { email: viewerEmail, name: 'E2E閲覧者', role: 'viewer' } });
-for (const ep of ['chat', 'analyze-trouble', 'parse-trouble-pdf', 'parse-search', 'suggest-trouble']) {
+for (const ep of ['suggest-trouble']) {
   const r = await apiAs(viewerEmail, `/api/ai/${ep}`, { method: 'POST', body: { message: 'x', phenomenon: 'x', text: 'x', query: 'x' } });
   check(`AI: 閲覧のみは /api/ai/${ep} を呼べない（403）`, r.status === 403, `status=${r.status}`);
 }

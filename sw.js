@@ -62,7 +62,6 @@ const PRECACHE_URLS = [
   '/js/admin.js',
   '/js/admin-files.js',
   '/js/chat.js',
-  '/js/ai-assistant.js',
   '/js/nav.js',
   '/js/search.js',
   '/js/notifications.js',

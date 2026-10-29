@@ -299,12 +299,12 @@
 │   ├── chat.js notifications.js  # 10 チャット・通知センター／Web Push購読
 │   ├── search.js           # 11 横断検索
 │   ├── utility.js          # 13 ユーティリティ日報
-│   ├── ai-support.js ai-assistant.js  # 14 AIサポート・AI提案UI
+│   ├── ai-support.js       # 14 AIサポート・AI提案UI
 │   └── vendor/             # 同梱ライブラリ（CSPで外部CDN禁止のため）
 ├── functions/api/
 │   ├── _middleware.js      # 認証・未捕捉エラーのJSON化・セキュリティヘッダー
 │   ├── _lib/               # access-jwt / auth / audit / history / fuzzy / trouble-similar /
-│   │                       #   notify / overdue-notify / webpush / storage / ai-models / ai-context 等
+│   │                       #   notify / overdue-notify / webpush / storage / ai-models 等
 │   ├── [[path]].js         # 未定義APIの404
 │   ├── me.js
 │   ├── equipment/ equipment-names/ inspections/ plans/ troubles/ repairs/ reports/
@@ -316,7 +316,7 @@
 │   ├── stats/              # 集計
 │   ├── files/              # R2アップロード/取得
 │   ├── print-templates/    # 帳票テンプレート
-│   ├── ai/                 # Workers AI（suggest-trouble / analyze-trouble / read-meter / extract-equipment / parse-search / parse-trouble-pdf / chat）
+│   ├── ai/                 # Workers AI（suggest-trouble / read-meter / extract-equipment）。画面から呼ばれない API（analyze-trouble / parse-search / parse-trouble-pdf / chat）と AI アシスタント FAB は削除済み
 │   ├── users/
 │   └── admin/              # audit/ restore/ masters/ users/ backup.js usage.js normalize.js
 ├── tests/                  # E2Eテスト（実ブラウザ検証。cd tests && npm test）
