@@ -36,7 +36,7 @@ function showError(err) {
 async function renderList(equipmentId) {
   const [{ categories: cats }, { equipment }] = await Promise.all([
     api.get('/api/troubles/categories'),
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
   ]);
   categories = cats;
 
@@ -412,7 +412,7 @@ async function renderForm(existing, prefill = null) {
   const init = existing || prefill || {};
   const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes, templatesRes] = await Promise.all([
     api.get('/api/troubles/categories'),
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
     // カスタム項目テーブル未作成の環境でもフォーム自体は使えるようにする
     api.get('/api/troubles/fields').catch(() => ({ fields: [] })),
     api.get('/api/users').catch(() => ({ users: [] })),

@@ -393,7 +393,7 @@ async function runLoad() {
 }
 
 async function renderPage() {
-  ({ equipment } = await api.get('/api/equipment'));
+  ({ equipment } = await api.get('/api/equipment?limit=2000'));
   equipSelect = buildEquipSelect(equipment, { allLabel: '全設備' });
 
   // URLクエリ（例: まとめ入力の保存後リンク ?from=&to=&equipment_id=）で初期フィルタを指定できる

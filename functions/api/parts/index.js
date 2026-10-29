@@ -14,6 +14,7 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
 import { buildKeywordClauses } from '../_lib/fuzzy.js';
+import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
 
 const IMPORTANCE_VALUES = ['高', '中', '低'];
 
@@ -108,6 +109,10 @@ export async function onRequestPost({ env, data, request }) {
     supplier_email: trimOrNull(body.supplier_email),
     note: trimOrNull(body.note),
   };
+
+  if (fields.quantity < 0 || fields.quantity > MAX_PART_QTY || fields.safety_stock < 0 || fields.safety_stock > MAX_PART_QTY) {
+    return jsonError(400, `在庫数・安全在庫は0以上、${PART_QTY_MESSAGE}`);
+  }
 
   const result = await DB.prepare(
     `INSERT INTO parts_inventory

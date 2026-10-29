@@ -8,7 +8,7 @@
 //   棚の前で出庫・入庫をワンタップで記録できる（電波が無ければ送信待ちに保存して後で自動送信）。
 
 import { api } from '/js/api.js';
-import { getCurrentUser, hasRole } from '/js/auth.js';
+import { getCurrentUser, hasRole, getCachedRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 import { enqueue as enqueueOffline, listQueued } from '/js/offline-queue.js';
 import { openQrScanner } from '/js/qr-scan.js';
@@ -135,7 +135,11 @@ async function renderOfflineDetail(id) {
         : el('p', { class: 'hint' }, 'この端末ではまだこの部品を開いたことがないため、名前と在庫数は電波が戻ってから表示されます。'),
     ]),
     queuedBox,
-    buildQuickRecord(id, async (res, op) => {
+    // 閲覧のみと分かっている端末には記録欄を出さない（送信してもサーバーが拒否して失敗が溜まるだけのため）。
+    // 権限を確認できていない端末は今までどおり出す（権限はサーバーが送信時に確認する）
+    getCachedRole() === 'viewer'
+      ? el('p', { class: 'notice is-warning' }, 'この端末では「閲覧のみ」の権限のため、入庫・出庫は記録できません。')
+      : buildQuickRecord(id, async (res, op) => {
       const items = await queuedFor(id);
       queuedBox.textContent = `📤 送信待ち: ${queuedText(items)}（電波が戻ると自動で送信します）`;
       queuedBox.style.display = '';
@@ -379,7 +383,7 @@ async function renderList() {
     let input = stocktakeInputs.get(p.id);
     if (!input) {
       input = el('input', {
-        type: 'number', inputmode: 'numeric', min: '0', step: '1',
+        type: 'number', inputmode: 'numeric', min: '0', max: '1000000', step: '1',
         value: String(p.quantity),
         class: 'stocktake-input',
       });
@@ -724,7 +728,7 @@ async function renderDetail(id) {
       el('option', { value: v }, l)
     )
   );
-  const txQtyEl = el('input', { type: 'number', min: '1', value: '1', style: 'width:100px' });
+  const txQtyEl = el('input', { type: 'number', min: '1', max: '1000000', value: '1', style: 'width:100px' });
   const txNoteEl = el('input', { type: 'text', placeholder: 'メモ（任意）' });
 
   const doTransaction = async () => {
@@ -901,8 +905,8 @@ async function renderForm(existing) {
     name: el('input', { type: 'text', value: existing?.name || '', placeholder: '例: ベアリング 6205' }),
     model_no: el('input', { type: 'text', value: existing?.model_no || '', placeholder: '例: 6205ZZ' }),
     location: el('input', { type: 'text', value: existing?.location || '', placeholder: '例: A棚3段目' }),
-    safety_stock: el('input', { type: 'number', min: '0', value: String(existing?.safety_stock ?? 0) }),
-    quantity: el('input', { type: 'number', min: '0', value: String(existing?.quantity ?? 0) }),
+    safety_stock: el('input', { type: 'number', min: '0', max: '1000000', value: String(existing?.safety_stock ?? 0) }),
+    quantity: el('input', { type: 'number', min: '0', max: '1000000', value: String(existing?.quantity ?? 0) }),
     importance: impSelect,
     supplier: el('input', { type: 'text', value: existing?.supplier || '' }),
     supplier_email: el('input', { type: 'email', value: existing?.supplier_email || '', placeholder: '発注メールの宛先（任意）' }),

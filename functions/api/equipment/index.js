@@ -107,6 +107,10 @@ export async function onRequestGet({ request, env }) {
     : `e.deleted_at IS NULL`;
   const binds = q ? [`%${q}%`] : [];
 
+  // 件数の上限（既定300・最大2000）。1件多く読んで、上限を超えるときは truncated:true を返す
+  // （ラベル印刷・設備選択で黙って欠けないよう、画面側が検知できるようにする）
+  const limit = Math.min(Math.max(1, Math.trunc(Number(url.searchParams.get('limit'))) || 300), 2000);
+
   // 設備ごとの画像ファイル数（content_type が image/* のもの）
   const imgCountSub = `(SELECT COUNT(*) FROM files f
       WHERE f.related_table = 'equipment_ledger' AND f.related_id = e.id
@@ -114,7 +118,7 @@ export async function onRequestGet({ request, env }) {
 
   const run = async (cols) => {
     const stmt = env.DB.prepare(
-      `SELECT ${cols} FROM equipment_ledger e WHERE ${cond} ORDER BY e.code LIMIT 300`
+      `SELECT ${cols} FROM equipment_ledger e WHERE ${cond} ORDER BY e.code LIMIT ${limit + 1}`
     );
     const r = await (binds.length ? stmt.bind(...binds) : stmt).all();
     return r.results;
@@ -135,12 +139,13 @@ export async function onRequestGet({ request, env }) {
       // files テーブルも未作成の環境向け最終フォールバック
       const stmt2 = env.DB.prepare(
         `SELECT id, code, name, location, manufacturer, model, installed_on, status
-           FROM equipment_ledger WHERE deleted_at IS NULL ORDER BY code LIMIT 300`
+           FROM equipment_ledger WHERE deleted_at IS NULL ORDER BY code LIMIT ${limit + 1}`
       );
       results = (await stmt2.all()).results;
     }
   }
-  return json({ equipment: results });
+  const truncated = results.length > limit;
+  return json({ equipment: truncated ? results.slice(0, limit) : results, truncated, limit });
 }
 
 export async function onRequestPost({ request, env, data }) {

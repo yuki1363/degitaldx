@@ -19,7 +19,7 @@ async function renderPage() {
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
   const [{ equipment }, { users }] = await Promise.all([
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
     api.get('/api/users'),
   ]);
   if (equipment.length === 0) {

@@ -42,7 +42,7 @@ const KIND = MODE === 'parts'
       qrHint: 'QRコードを読み取ると、その部品の画面が開き、その場で出庫・入庫を記録できます。',
     }
   : {
-      noun: '設備', api: '/api/equipment', listKey: 'equipment',
+      noun: '設備', api: '/api/equipment?limit=2000', listKey: 'equipment',
       url: (x) => `${window.location.origin}/pages/ledger?id=${x.id}`,
       code: (x) => x.code,
       name: (x) => x.name,

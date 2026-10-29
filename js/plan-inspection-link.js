@@ -10,7 +10,7 @@ import { api } from '/js/api.js';
 export async function buildInspectionStartUrl(plan, dateOverride) {
   let equipmentId = null;
   try {
-    const { equipment } = await api.get('/api/equipment');
+    const { equipment } = await api.get('/api/equipment?limit=2000');
     const match = (equipment || []).find((e) =>
       (e.line_name || '') === (plan.line_name || '') &&
       (e.equipment_name || '') === (plan.equipment_name || ''));

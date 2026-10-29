@@ -150,7 +150,7 @@ async function doSearch(params, resultsBox) {
 
 async function renderSearch() {
   const [{ equipment }, { categories }] = await Promise.all([
-    api.get('/api/equipment'),
+    api.get('/api/equipment?limit=2000'),
     api.get('/api/troubles/categories'),
   ]);
 

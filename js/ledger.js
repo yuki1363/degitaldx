@@ -110,6 +110,7 @@ async function renderList() {
   };
 
   // 設備名→機器名を選ぶまで一覧は出さない（検索中は選択に関係なく該当を表示）
+  let listTruncated = false; // 件数の上限（2000）を超えて一部しか取れていないか
   const renderFiltered = () => {
     if (searchQuery) { renderGroups(allEquipment); return; }
     if (!selectedLine) {
@@ -132,7 +133,9 @@ async function renderList() {
       .sort((a, b) => a.localeCompare(b, 'ja'));
     render(lineSelect, [
       el('option', { value: '' }, '設備を選択してください'),
-      el('option', { value: ALL_LINES }, `すべての設備を表示（${allEquipment.length}件）`),
+      el('option', { value: ALL_LINES }, listTruncated
+        ? `すべての設備を表示（先頭${allEquipment.length}件のみ・検索で絞ってください）`
+        : `すべての設備を表示（${allEquipment.length}件）`),
       ...lines.map((l) => el('option', { value: l }, l)),
     ]);
     const valid = ['', ALL_LINES, ...lines];
@@ -164,8 +167,9 @@ async function renderList() {
 
   const load = async () => {
     render(listBox, el('p', { class: 'loading' }, '読み込み中…'));
-    const { equipment } = await api.get(`/api/equipment${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`);
+    const { equipment, truncated } = await api.get(`/api/equipment?limit=2000${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`);
     allEquipment = equipment || [];
+    listTruncated = Boolean(truncated);
     refreshLineOptions();
     refreshEquipOptions();
     renderFiltered();
