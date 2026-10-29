@@ -156,6 +156,7 @@
   - **ラベル台紙は A4・40×40mm・24面（4列×6段）固定**（左右余白19mm・上下余白18.5mm・ラベル間の隙間4mm）。一括印刷（`/pages/labels`・`js/labels.js`）は24枚ごとに `.label-page`（210×297mm）へ分け、`@page { size: A4; margin: 0 }` で台紙に位置を合わせる。ラベル内はQR 27mm＋設備番号8pt＋名称6.5pt（2行まで）。台紙に縁があるため枠線は印刷しない。印刷ダイアログは「A4／倍率100%／余白なし」にする。**使いかけの台紙に印刷できるよう、開始位置（上から◯段目・左から◯列目）を台紙のミニ図のタップで選べる**（`js/labels.js`。開始位置より前のマスは `.label-skip` の空きマスとして位置だけ確保し、印刷では `visibility:hidden`。2枚目以降の台紙は左上から。台紙の枚数表示も空きマスを含めて数える）
   - **QRの誤り訂正は Q**（`ledger.js`・`labels.js`。油・汚れ・擦れ対策。H は40mm角では密度過多）。QRのURLは `window.location.origin` を埋め込むため、**ラベル印刷は必ず本番URLで行う**（プレビューURL・localhostで印刷したQRは後で開けない）
 - **設備一覧API（`GET /api/equipment`）の `limit`**: 既定300・最大2000（下限1）。1件多く読んで超えていれば `truncated:true` を返す。ラベル印刷・設備選択・各画面の一覧取得は `?limit=2000` で呼び、設備台帳の一覧は上限に達したら「先頭N件のみ・検索で絞ってください」と表示する（設備が300件を超えても黙って欠けない）
+- **設備カルテ（全履歴の時系列）**: 設備詳細の「全履歴（時系列）」で、点検・トラブル・業務依頼・保全計画・使用部品（業務依頼／トラブルに紐づけた入出庫）をその設備について新しい順に1本で見られる（種別チップで絞り込み・30件ずつ「もっと見る」）。API は `GET /api/equipment/:id/timeline`（`types`／`limit` 既定30最大100／`offset` 最大5000・`has_more`・全員が閲覧可。`functions/api/equipment/[id]/timeline.js`）。日付は JST に直して並べる（保全計画は予定日）。保全計画は台帳の設備名・機器名と一致するものを拾い、どちらも空の設備では拾わない。単体テストは `tests/unit-timeline.mjs`
 - 設備詳細から**トラブル記録・業務依頼をワンタップで新規作成**（点検開始と同様、設備を紐づけた状態でプリフィル。QRで設備を開いてすぐ記録できる）
 - マニュアル・図面（PDF等）は R2 へアップロードして管理
 - 設備の追加・編集・削除と監査記録（共通設計）
@@ -177,6 +178,7 @@
 - ユーザー・グループ・権限管理（閲覧のみ / 入力可 / 管理者 の3段階。承認者ロールは不要のため削除）。**ユーザー削除は物理削除**（無効化ではなく完全に削除。過去に無効化したユーザーは「再有効化」または「完全削除」が可能）
 - マスタ管理画面: 点検項目・設備・部品・トラブルジャンル・ユーザーの各マスタを画面から**追加・削除可能**
 - マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**。電気設備点検の設定（`electrical_config`。設備種別単位で id 列が無いため `restoreElectricalConfig` で別扱い）と帳票テンプレート（更新前の定義＝入力項目 `fields_json` を含めて退避）も戻せる
+- **バックアップ**（管理画面「バックアップ」タブ・admin のみ）: JSON／SQLダンプ（スキーマ＋データ）／**表ごとのCSV（ZIP）**の3形式。対象は `functions/api/admin/backup.js` の `TABLES`（電気設備点検・電気設定・帳票テンプレ・年度リセット履歴・チャットの👍／既読を含む。`push_subscriptions` は端末の暗号鍵を含むため意図的に除外）。`id` 列が無いテーブルもあるため `ORDER BY rowid`。**新しいテーブルを `schema.sql` に足したら `TABLES` にも足す**（足し忘れは `tests/unit-backup.mjs` が検出する）。CSV(ZIP)は管理画面側で JSON を取得して作る（`js/backup-csv.js`＋JSZip。BOM付きUTF-8・`escCsv` 経由なので `=` 等で始まる値は先頭に `'` が付く＝閲覧・集計用で、復元にはJSON／SQLを使う）。R2の写真・動画は含まれない
 - `audit_log` の閲覧画面（誰がいつ何を追加・編集・削除したかを検索）
 - 削除済みデータの閲覧・復元（論理削除の復元）。対象はトラブル・業務依頼・部品・点検・日報・保全計画・設備・ユーティリティ日報・電気設備点検・帳票テンプレート（`admin/restore/index.js` の `ALLOWED_TABLES`）。**200件ずつページ送り**（`offset`。大量削除時も全件を復元できる）。ユーティリティ日報は同じ日の記録があると 409（1日1件）。**部品は同じ型番・部品名の部品が既にあると 409**（CSVの全置き換えで作り直された部品の旧版を戻すと重複するため）。重複の確認・復元・監査は1つの batch の条件付き UPDATE（同時操作でもすり抜けない）。最後のページの最後の1件を復元したら前のページを表示する
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）。**タグ確認機能**: テンプレ編集画面の「🔍 Excelのタグを確認」で、アップロード済みExcelの `{{タグ}}` を抽出し、差込対象と突合して「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの（＝出力されない）」を表示（休止時間が出ない・○が付かない等のタグ名不一致を管理者が自力で発見できる。`js/excel-fill.js` の `extractTemplateTags`）
@@ -298,12 +300,12 @@
 │   ├── chat.js notifications.js  # 10 チャット・通知センター／Web Push購読
 │   ├── search.js           # 11 横断検索
 │   ├── utility.js          # 13 ユーティリティ日報
-│   ├── ai-support.js ai-assistant.js  # 14 AIサポート・AI提案UI
+│   ├── ai-support.js       # 14 AIサポート・AI提案UI
 │   └── vendor/             # 同梱ライブラリ（CSPで外部CDN禁止のため）
 ├── functions/api/
 │   ├── _middleware.js      # 認証・未捕捉エラーのJSON化・セキュリティヘッダー
 │   ├── _lib/               # access-jwt / auth / audit / history / fuzzy / trouble-similar /
-│   │                       #   notify / overdue-notify / webpush / storage / ai-models / ai-context 等
+│   │                       #   notify / overdue-notify / webpush / storage / ai-models 等
 │   ├── [[path]].js         # 未定義APIの404
 │   ├── me.js
 │   ├── equipment/ equipment-names/ inspections/ plans/ troubles/ repairs/ reports/
@@ -315,7 +317,7 @@
 │   ├── stats/              # 集計
 │   ├── files/              # R2アップロード/取得
 │   ├── print-templates/    # 帳票テンプレート
-│   ├── ai/                 # Workers AI（suggest-trouble / analyze-trouble / read-meter / extract-equipment / parse-search / parse-trouble-pdf / chat）
+│   ├── ai/                 # Workers AI（suggest-trouble / read-meter / extract-equipment）。画面から呼ばれない API（analyze-trouble / parse-search / parse-trouble-pdf / chat）と AI アシスタント FAB は削除済み
 │   ├── users/
 │   └── admin/              # audit/ restore/ masters/ users/ backup.js usage.js normalize.js
 ├── tests/                  # E2Eテスト（実ブラウザ検証。cd tests && npm test）

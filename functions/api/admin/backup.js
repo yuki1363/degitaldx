@@ -3,7 +3,9 @@
 import { requireRole } from '../_lib/auth.js';
 import { nowIso } from '../_lib/util.js';
 
-const TABLES = [
+// 対象テーブル。push_subscriptions は端末の暗号鍵（p256dh/auth）を含み、バックアップに残す価値が低い
+// （再購読すれば作り直せる）ため意図的に除外している
+export const TABLES = [
   'users', 'equipment_ledger',
   'inspection_master', 'inspection_result',
   'trouble_record', 'trouble_category', 'trouble_custom_field',
@@ -13,6 +15,9 @@ const TABLES = [
   'utility_item', 'utility_report',
   'comments', 'chat_messages', 'notifications', 'files',
   'storage_reports', 'audit_log', 'master_history',
+  'print_templates', 'chat_reactions', 'chat_channel_reads',
+  'plan_reset_log', 'annual_plan_status',
+  'electrical_inspection', 'electrical_config',
 ];
 
 // SQL文字列エスケープ（SQLiteのシングルクォートは '' で表現）
@@ -29,7 +34,8 @@ async function buildJsonBackup(db) {
   const backup = { exported_at: nowIso(), tables: {} };
   for (const table of TABLES) {
     try {
-      const { results } = await db.prepare(`SELECT * FROM ${table} ORDER BY id ASC`).all();
+      // id 列が無いテーブル（electrical_config など）もあるため rowid で並べる
+      const { results } = await db.prepare(`SELECT * FROM ${table} ORDER BY rowid ASC`).all();
       backup.tables[table] = results ?? [];
     } catch {
       backup.tables[table] = null;
@@ -86,7 +92,7 @@ async function buildSqlDump(db) {
 
   for (const table of TABLES) {
     try {
-      const { results } = await db.prepare(`SELECT * FROM ${table} ORDER BY id ASC`).all();
+      const { results } = await db.prepare(`SELECT * FROM ${table} ORDER BY rowid ASC`).all();
       if (!results || results.length === 0) {
         lines.push(`-- Table: ${table} (0 rows)`);
         lines.push('');
