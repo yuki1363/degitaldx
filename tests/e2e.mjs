@@ -434,6 +434,22 @@ const quickLinks = await page.evaluate(() => ({
 check('設備台帳: トラブル記録への新規作成リンクがある', (quickLinks.trouble || '').includes(`equipment_id=${eqQuick.json?.id}`), `href=${quickLinks.trouble}`);
 check('設備台帳: 業務依頼への新規作成リンクがある', (quickLinks.repair || '').includes(`equipment_id=${eqQuick.json?.id}`), `href=${quickLinks.repair}`);
 
+// 設備カルテ（時系列）: トラブルと業務依頼を作ると、設備詳細の「全履歴」に新しい順で並び、種別で絞れる
+await api('/api/troubles', { method: 'POST', body: { equipment_id: eqQuick.json?.id, category_id: 1, occurred_at: '2026-10-03T01:00:00Z', phenomenon: 'E2Eカルテ異音' } });
+await api('/api/repairs', { method: 'POST', body: { equipment_id: eqQuick.json?.id, title: 'E2Eカルテ依頼' } });
+const tlApi = await api(`/api/equipment/${eqQuick.json?.id}/timeline`);
+check('設備カルテAPI: トラブルと業務依頼が時系列で返る',
+  tlApi.status === 200 && tlApi.json?.items?.some((x) => x.kind === 'trouble' && x.title === 'E2Eカルテ異音') && tlApi.json?.items?.some((x) => x.kind === 'repair'),
+  JSON.stringify(tlApi.json).slice(0, 200));
+await page.goto(`${BASE}/pages/ledger?id=${eqQuick.json?.id}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#equipment-timeline .list-item', { timeout: 8000 });
+const tlAll = await page.evaluate(() => document.querySelectorAll('#equipment-timeline .list-item').length);
+await page.click('#equipment-timeline .chip[data-kind="trouble"]');
+await page.waitForFunction(() => { const a = [...document.querySelectorAll('#equipment-timeline .list-item')]; return a.length >= 1 && a.every((x) => x.getAttribute('href').includes('/pages/trouble')); }, { timeout: 5000 });
+const tlTrouble = await page.evaluate(() => ({ n: document.querySelectorAll('#equipment-timeline .list-item').length, text: document.getElementById('equipment-timeline').innerText, overflow: document.documentElement.scrollWidth > window.innerWidth + 1 }));
+check('設備詳細: 全履歴（時系列）が出て、種別チップで絞れる（横スクロールなし）',
+  tlAll >= 2 && tlTrouble.n >= 1 && tlTrouble.text.includes('E2Eカルテ異音') && !tlTrouble.overflow, JSON.stringify({ tlAll, ...tlTrouble }).slice(0, 200));
+
 // 発注メールの宛先自動入力・納期指定
 const partForOrder = await api('/api/parts', { method: 'POST', body: { name: 'E2E発注部品', quantity: 1, safety_stock: 5, supplier_email: 'supplier@example.com' } });
 check('発注メールテスト用の部品登録', partForOrder.status === 201, `status=${partForOrder.status}`);

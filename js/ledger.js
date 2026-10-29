@@ -21,6 +21,83 @@ const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting
 const PLAN_TYPE_LABELS = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
 const PLAN_STATUS_LABELS = { pending: '未実施', done: '完了', overdue: '期限超過' };
 
+// 設備カルテ（時系列）: 点検・トラブル・業務依頼・保全計画・使用部品を新しい順に1本で見る
+const TIMELINE_KINDS = [
+  ['', 'すべて'], ['inspection', '点検'], ['trouble', 'トラブル'], ['repair', '業務依頼'], ['plan', '保全計画'], ['parts', '使用部品'],
+];
+const TIMELINE_ICON = { inspection: '🔍', trouble: '⚠️', repair: '🛠', plan: '📅', parts: '🔩' };
+const TIMELINE_HREF = {
+  inspection: (r) => `/pages/inspection?id=${r.rec_id}`,
+  trouble: (r) => `/pages/trouble?id=${r.rec_id}`,
+  repair: (r) => `/pages/repair?id=${r.rec_id}`,
+  plan: (r) => `/pages/plan?id=${r.rec_id}`,
+  parts: (r) => `/pages/parts?id=${r.rec_id}`,
+};
+function timelineRow(r) {
+  const day = r.kind === 'plan' ? formatDate(r.at) : formatDateTime(r.at);
+  let title = r.title;
+  let sub = r.sub;
+  if (r.kind === 'inspection') {
+    title = r.extra === '1' ? '点検（異常あり）' : '点検（正常）';
+    sub = r.sub ? `担当: ${r.sub}` : '';
+  } else if (r.kind === 'repair') {
+    sub = REPAIR_STATUS_LABELS[r.extra] || r.extra;
+  } else if (r.kind === 'plan') {
+    sub = [PLAN_TYPE_LABELS[r.sub] || r.sub, PLAN_STATUS_LABELS[r.extra] || r.extra].filter(Boolean).join(' / ');
+  } else if (r.kind === 'parts') {
+    const sign = r.sub === 'in' ? '入庫 +' : r.sub === 'out' ? '出庫 ' : '調整 ';
+    sub = `${sign}${Math.abs(Number(r.extra)) || r.extra}`;
+  }
+  return el('a', { class: 'list-item', href: TIMELINE_HREF[r.kind](r) }, [
+    el('span', { class: 'timeline-icon', 'aria-hidden': 'true' }, TIMELINE_ICON[r.kind] || '•'),
+    el('div', { class: 'list-item-main' }, [
+      el('div', { class: 'list-item-title' }, title || '（記載なし）'),
+      el('div', { class: 'list-item-sub' }, [day, sub].filter(Boolean).join(' / ')),
+    ]),
+    el('span', { class: 'chevron' }, '›'),
+  ]);
+}
+function buildTimelineCard(equipmentId) {
+  let kind = '';
+  let offset = 0;
+  const listBox = el('div', { class: 'row-list' });
+  const moreBtn = el('button', { class: 'btn btn-sm', style: 'display:none;margin-top:8px', onclick: () => load(false) }, 'もっと見る');
+  const note = el('p', { class: 'hint' }, '');
+  const chips = el('div', { class: 'chip-row' }, TIMELINE_KINDS.map(([value, label]) =>
+    el('button', { class: `chip ${value === kind ? 'is-active' : ''}`, 'data-kind': value, onclick: (e) => {
+      kind = value;
+      chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('is-active', c === e.currentTarget));
+      load(true);
+    } }, label)));
+  const load = async (reset) => {
+    if (reset) { offset = 0; render(listBox, el('p', { class: 'loading' }, '読み込み中…')); }
+    moreBtn.disabled = true;
+    try {
+      const q = new URLSearchParams({ limit: '30', offset: String(offset) });
+      if (kind) q.set('types', kind);
+      const res = await api.get(`/api/equipment/${equipmentId}/timeline?${q}`);
+      if (reset) render(listBox, []);
+      for (const r of res.items || []) listBox.appendChild(timelineRow(r));
+      offset += (res.items || []).length;
+      if (reset && (res.items || []).length === 0) {
+        render(listBox, el('p', { class: 'empty' }, res.error || '該当する履歴はありません。'));
+      }
+      moreBtn.style.display = res.has_more ? '' : 'none';
+      note.textContent = res.error || '';
+    } catch (err) {
+      render(listBox, el('p', { class: 'empty' }, `履歴を取得できませんでした: ${err.message}`));
+    } finally {
+      moreBtn.disabled = false;
+    }
+  };
+  load(true);
+  return el('div', { class: 'card', id: 'equipment-timeline' }, [
+    el('h3', { class: 'card-title' }, '全履歴（時系列）'),
+    el('p', { class: 'hint' }, '点検・トラブル・業務依頼・保全計画・使用部品を新しい順に表示します（日付は日本時間）。'),
+    chips, listBox, moreBtn, note,
+  ]);
+}
+
 // 一覧の設備名→機器名フィルタの内部値
 const ALL_LINES = '__ALL__';
 const ALL_EQUIPS = '__ALL__';
@@ -530,6 +607,7 @@ async function renderDetail(id) {
             })
           ),
     ]),
+    buildTimelineCard(eq.id),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
       history.length === 0

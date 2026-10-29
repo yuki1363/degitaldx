@@ -3039,3 +3039,11 @@ input.is-abnormal {
   text-align: right;
   word-break: break-word;
 }
+
+/* 設備カルテ（時系列）のアイコン */
+.timeline-icon {
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+  font-size: 18px;
+}
