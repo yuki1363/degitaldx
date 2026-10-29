@@ -30,7 +30,7 @@ const CHECK_MARK = '✓';
 
 const JSZIP_SRC = '/js/vendor/jszip.min.js'; // 同梱版（CDN不通・オフラインでも動作）
 let jszipPromise = null;
-function loadJSZip() {
+export function loadJSZip() {
   if (window.JSZip) return Promise.resolve(window.JSZip);
   if (!jszipPromise) {
     jszipPromise = new Promise((resolve, reject) => {
