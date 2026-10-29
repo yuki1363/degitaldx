@@ -2332,6 +2332,63 @@ check('バックアップ(CSV): テーブルごとのCSVを入れたZIPがダウ
   /^backup-csv-\d{4}-\d{2}-\d{2}\.zip$/.test(zipInfo.name) && zipInfo.files?.includes('equipment_ledger.csv') && zipInfo.files?.includes('electrical_config.csv')
     && /^\uFEFF?[^\n]*code/.test(zipInfo.equip || ''),
   JSON.stringify({ name: zipInfo.name, n: zipInfo.files?.length, head: (zipInfo.equip || '').slice(0, 40) }));
+// ---------- 9.23 電気設備点検: オフラインでの保存・削除（送信待ち） ----------
+section('9.23 電気設備点検のオフライン保存・削除（送信待ち・自動送信・失敗の確認）');
+await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
+await page.evaluate(() => localStorage.removeItem('elec_outbox'));
+await context.setOffline(true);
+await page.evaluate(() => {
+  document.getElementById('date').value = '2031-01-15';
+  document.getElementById('inspector').value = 'E2Eオフライン';
+});
+await page.evaluate(() => saveRecord());
+await page.waitForTimeout(800);
+const elOff = await page.evaluate(() => {
+  const box = JSON.parse(localStorage.getItem('elec_outbox') || '[]');
+  const recs = JSON.parse(localStorage.getItem('inspection_records') || '{}');
+  const rec = Object.values(recs).find((r) => r.date === '2031-01-15');
+  return { box: box.map((x) => ({ op: x.op, id: x.id })), id: rec?.id, bar: document.getElementById('elec-outbox-bar')?.innerText || '' };
+});
+check('電気点検: 電波が無いと保存が送信待ちに積まれ、この端末の一覧にも出る（送信待ちバーが出る）',
+  elOff.box.length === 1 && elOff.box[0].op === 'save' && elOff.box[0].id === elOff.id && elOff.bar.includes('送信待ち 1件'), JSON.stringify(elOff));
+const elNotYet = (await api('/api/electrical-inspections')).json?.records?.[elOff.id];
+check('電気点検: 送信待ちの間はサーバーにまだ無い', !elNotYet);
+await context.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+await page.waitForFunction(() => !localStorage.getItem('elec_outbox'), { timeout: 8000 }).catch(() => {});
+const elSent = (await api('/api/electrical-inspections')).json?.records?.[elOff.id];
+check('電気点検: 電波が戻ると自動で送信され、送信待ちが空になる（バーも消える）',
+  elSent?.inspector === 'E2Eオフライン' && await page.evaluate(() => !document.getElementById('elec-outbox-bar')), JSON.stringify({ inspector: elSent?.inspector }));
+
+// 削除も送信待ちにでき、電波が戻るとサーバーでも消える
+await context.setOffline(true);
+await page.evaluate((id) => deleteRecordById(id), elOff.id);
+await page.waitForTimeout(500);
+const elDelQ = await page.evaluate(() => JSON.parse(localStorage.getItem('elec_outbox') || '[]').map((x) => x.op));
+await context.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+await page.waitForFunction(() => !localStorage.getItem('elec_outbox'), { timeout: 8000 }).catch(() => {});
+const elGone = (await api('/api/electrical-inspections')).json?.records?.[elOff.id];
+check('電気点検: オフラインの削除は送信待ちに積まれ、電波が戻るとサーバーでも削除される',
+  elDelQ.join() === 'delete' && !elGone, JSON.stringify({ elDelQ, gone: !elGone }));
+
+// サーバーに断られた送信待ち（入力不正）は理由つきで残り、他の記録を止めない。破棄できる
+await page.evaluate(() => localStorage.setItem('elec_outbox', JSON.stringify([
+  { op: 'save', id: 'e2e-bad', rec: { id: 'e2e-bad', equipmentType: 'zzz', date: '2031-01-16' }, at: '2031-01-16T00:00:00.000Z' },
+])));
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(800);
+const elBad = await page.evaluate(() => ({ box: JSON.parse(localStorage.getItem('elec_outbox') || '[]'), bar: document.getElementById('elec-outbox-bar')?.innerText || '' }));
+check('電気点検: サーバーに断られた送信待ちは理由を残して「うち失敗」と表示する',
+  elBad.box.length === 1 && !!elBad.box[0].error && elBad.bar.includes('うち失敗 1件'), JSON.stringify(elBad).slice(0, 200));
+await page.click('#elec-outbox-bar button');
+await page.waitForSelector('#elec-outbox-dialog .outbox-row', { timeout: 3000 });
+const elDlg = await page.evaluate(() => document.getElementById('elec-outbox-dialog').innerText);
+check('電気点検: 送信待ちの確認で失敗の理由が見える', elDlg.includes('送信できませんでした') && elDlg.includes('equipmentType'), elDlg.slice(0, 160));
+await page.click('#elec-outbox-dialog .outbox-row button:has-text("破棄")'); // confirm は自動承諾→再読み込み
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(500);
+check('電気点検: 失敗した送信待ちを破棄でき、バーが消える', await page.evaluate(() => !localStorage.getItem('elec_outbox') && !document.getElementById('elec-outbox-bar')));
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
