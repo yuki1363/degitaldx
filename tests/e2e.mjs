@@ -82,7 +82,7 @@ await page.waitForFunction(async () => {
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
   'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications',
-  'ai-support', 'report-summary'];
+  'ai-support', 'report-summary', 'help'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
@@ -2480,6 +2480,38 @@ check('保全レポート: スマホ幅（375px）で横にはみ出さない', 
 await page.setViewportSize({ width: 1280, height: 720 });
 await api(`/api/troubles/${rptTr.json?.id}`, { method: 'DELETE' });
 await api(`/api/repairs/${rptRp.json?.id}`, { method: 'DELETE' });
+// ---------- 9.26 アプリ内の使い方ガイド ----------
+section('9.26 使い方ガイド（項目の表示・検索・直接リンク・オフライン）');
+await page.goto(`${BASE}/pages/help`, { waitUntil: 'networkidle' });
+const helpInfo = await page.evaluate(() => ({
+  n: document.querySelectorAll('.help-sec').length,
+  openAtStart: document.querySelectorAll('.help-sec[open]').length,
+  titles: [...document.querySelectorAll('.help-sum')].map((s) => s.textContent),
+}));
+check('使い方: 項目が一覧表示され、最初はすべて閉じている（部品・電波・困ったときを含む）',
+  helpInfo.n >= 14 && helpInfo.openAtStart === 0 && helpInfo.titles.some((t) => t.includes('部品在庫')) && helpInfo.titles.some((t) => t.includes('電波')) && helpInfo.titles.some((t) => t.includes('困ったとき')),
+  JSON.stringify(helpInfo).slice(0, 200));
+await page.fill('.help-search', '送信待ち');
+const helpHit = await page.evaluate(() => ({
+  shown: [...document.querySelectorAll('.help-sec')].filter((d) => !d.hidden).length,
+  allShown: document.querySelectorAll('.help-sec').length,
+  opened: [...document.querySelectorAll('.help-sec')].filter((d) => !d.hidden && d.open).length,
+}));
+check('使い方: 検索すると該当の項目だけに絞られ、開いた状態になる', helpHit.shown >= 1 && helpHit.shown < helpHit.allShown && helpHit.opened === helpHit.shown, JSON.stringify(helpHit));
+await page.fill('.help-search', 'ありえない言葉zzz');
+check('使い方: 該当なしのときは案内を出す', await page.evaluate(() => document.querySelector('.help-note').textContent.includes('該当する項目がありません')));
+await page.fill('.help-search', '');
+await page.goto(`${BASE}/pages/help#parts`, { waitUntil: 'networkidle' });
+check('使い方: #parts で部品在庫の項目が開いた状態で表示される', await page.evaluate(() => document.getElementById('parts')?.open === true && document.querySelectorAll('.help-sec[open]').length === 1));
+await page.setViewportSize({ width: 375, height: 720 });
+await page.waitForTimeout(300);
+check('使い方: スマホ幅（375px）で横にはみ出さない', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+await page.setViewportSize({ width: 1280, height: 720 });
+await context.setOffline(true);
+const helpOff = await page.goto(`${BASE}/pages/help`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
+await page.waitForSelector('.help-sec', { timeout: 8000 }).catch(() => {});
+check('使い方: 電波が無くても開ける（SWのキャッシュ）', !!helpOff && await page.evaluate(() => document.querySelectorAll('.help-sec').length >= 14));
+await context.setOffline(false);
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

@@ -3078,3 +3078,10 @@ input.is-abnormal {
   body.rpt-page .rpt-doc { border: none; padding: 0; }
   body.rpt-page { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+/* アプリ内の使い方ガイド（/pages/help） */
+.help-search { width: 100%; box-sizing: border-box; }
+.help-note { margin: 6px 0 0; }
+.help-sec { background: #fff; border: 1px solid var(--color-border); border-radius: 8px; margin-bottom: 8px; }
+.help-sum { padding: 12px; font-weight: 700; cursor: pointer; min-height: 20px; }
+.help-list { margin: 0; padding: 0 14px 12px 32px; line-height: 1.7; font-size: 14px; }
+.help-list li { margin-bottom: 4px; }
