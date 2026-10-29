@@ -12,6 +12,7 @@ import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
+import { AUTOFILL_HINTS } from '/js/report-autofill.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
@@ -540,15 +541,16 @@ async function renderForm(existing, prefill = null) {
       return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), el('div', { class: 'pf-choice-row' }, radios)]);
     }
     if (fld.type === 'hanko') {
-      const input = el('input', { type: 'text', value: cur, placeholder: '苗字（例: 田中）' });
+      const input = el('input', { type: 'text', value: cur, placeholder: AUTOFILL_HINTS.trouble_report[tag] || '苗字（例: 田中）' });
       input.addEventListener('input', () => { reportValues[tag] = input.value; });
       return el('div', { class: 'field' }, [el('label', {}, `${fld.label || tag}（ハンコ）`), input]);
     }
     let input;
-    if (fld.type === 'textarea') input = el('textarea', { rows: '2', value: cur });
+    const hint = AUTOFILL_HINTS.trouble_report[tag] || '';
+    if (fld.type === 'textarea') input = el('textarea', { rows: '2', value: cur, placeholder: hint });
     else if (fld.type === 'date') input = el('input', { type: 'date', value: cur });
     else if (fld.type === 'time') input = el('input', { type: 'time', value: cur });
-    else input = el('input', { type: 'text', value: cur });
+    else input = el('input', { type: 'text', value: cur, placeholder: hint });
     input.addEventListener('input', () => { reportValues[tag] = input.value; });
     return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
   };

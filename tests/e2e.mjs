@@ -2390,6 +2390,56 @@ await page.waitForLoadState('networkidle');
 await page.waitForTimeout(500);
 check('電気点検: 失敗した送信待ちを破棄でき、バーが消える', await page.evaluate(() => !localStorage.getItem('elec_outbox') && !document.getElementById('elec-outbox-bar')));
 
+// ---------- 9.24 帳票の入力欄を、記録・計画の内容で賄う ----------
+section('9.24 帳票（トラブル報告書・工事連絡書）: 空の入力欄は記録・計画の内容で補う');
+await page.goto(`${BASE}/pages/plan`, { waitUntil: 'networkidle' });
+// 最小の Excel（共有文字列にタグだけ）をその場で作り、帳票出力の実コードを通して差し込み結果を確かめる
+const exportFilled = async (type, record, savedInputs) => {
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }).catch(() => null),
+    page.evaluate(async ({ type, record, savedInputs }) => {
+      await new Promise((resolve) => { const sc = document.createElement('script'); sc.src = '/js/vendor/jszip.min.js'; sc.onload = resolve; document.head.appendChild(sc); });
+      const tags = type === 'trouble_report'
+        ? ['調査対象', 'トラブル名', '処置', '整理NO', '休止時間']
+        : ['担当', '工事概要', '会社名'];
+      const z = new window.JSZip();
+      z.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
+      z.file('xl/workbook.xml', '<?xml version="1.0"?><workbook/>');
+      z.file('xl/sharedStrings.xml', `<?xml version="1.0"?><sst>${tags.map((t) => `<si><t>${t}=[{{${t}}}]</t></si>`).join('')}</sst>`);
+      const bytes = await z.generateAsync({ type: 'uint8array' });
+      const orig = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const u = new URL(typeof input === 'string' ? input : input.url, location.origin).pathname;
+        if (u === '/api/print-templates') return new Response(JSON.stringify({ templates: [{ id: 1, name: 'E2E', template_type: type, image_file_id: 4242, fields_json: '[]' }] }), { headers: { 'Content-Type': 'application/json' } });
+        if (u === '/api/files/4242') return new Response(bytes, { headers: { 'Content-Type': 'application/octet-stream' } });
+        return orig(input, init);
+      };
+      const { openExcelExport } = await import('/js/excel-fill.js');
+      await openExcelExport(type, { ...record, form_values_json: savedInputs ? JSON.stringify(savedInputs) : null });
+      window.fetch = orig;
+    }, { type, record, savedInputs }),
+  ]);
+  if (!dl) return null;
+  const buf = Buffer.concat(await (await dl.createReadStream()).toArray());
+  const zipNode = await (await import('node:module')).createRequire(import.meta.url)('../js/vendor/jszip.min.js').loadAsync(buf);
+  return zipNode.file('xl/sharedStrings.xml').async('string');
+};
+const trbXml = await exportFilled('trouble_report',
+  { id: 9001, occurred_at: '2026-10-03T01:00:00Z', equipment_name: 'E2Eコンプレッサ', phenomenon: 'E2E異音', countermeasure: 'E2Eベルト交換' },
+  { '休止時間': '30', '処置': '' });
+check('トラブル報告書: 空の入力欄は設備・現象・対策で補われ、入力した値（休止時間）はそのまま',
+  !!trbXml && trbXml.includes('調査対象=[E2Eコンプレッサ]') && trbXml.includes('トラブル名=[E2E異音]') && trbXml.includes('処置=[E2Eベルト交換]') && trbXml.includes('休止時間=[30]'),
+  (trbXml || 'no download').slice(0, 300));
+check('トラブル報告書: 整理NO（該当する入力が無い）は補わず空欄のまま', !!trbXml && trbXml.includes('整理NO=[]'));
+const trbXml2 = await exportFilled('trouble_report',
+  { id: 9002, occurred_at: '2026-10-03T01:00:00Z', equipment_name: 'E2E設備', phenomenon: 'E2E現象', countermeasure: 'E2E対策' },
+  { '調査対象': '手入力の対象' });
+check('トラブル報告書: 入力欄に値があれば設備名より優先', !!trbXml2 && trbXml2.includes('調査対象=[手入力の対象]'));
+const cnXml = await exportFilled('construction_notice',
+  { id: 9003, title: 'E2E配管工事', planned_date: '2026-11-05', note: 'E2E備考の内容' }, null);
+check('工事連絡書: 工事概要は備考で補われ、会社名（該当する入力が無い）は空欄のまま',
+  !!cnXml && cnXml.includes('工事概要=[E2E備考の内容]') && cnXml.includes('会社名=[]'), (cnXml || 'no download').slice(0, 300));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

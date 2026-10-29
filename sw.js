@@ -15,7 +15,7 @@
  *   push イベントでプッシュ通知を表示し、notificationclick でアプリの該当画面を開く。
  *   ペイロードは functions/api/_lib/notify.js が { title, body, url } のJSONで送る。
  */
-const CACHE_VERSION = 'v1.35.3';
+const CACHE_VERSION = 'v1.36.0';
 const CACHE_NAME = `mainte-app-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -50,6 +50,7 @@ const PRECACHE_URLS = [
   '/js/permit-fields.js',
   '/js/print-templates.js',
   '/js/excel-fill.js',
+  '/js/report-autofill.js',
   '/js/hanko.js',
   '/js/xlsx-image.js',
   '/js/trouble.js',

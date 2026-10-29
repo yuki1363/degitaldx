@@ -15,6 +15,7 @@ import { el, formatDate, formatDateTime } from '/js/util.js';
 import { CONSTRUCTION_NOTICE_FIELDS, TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { makeHankoPngBase64 } from '/js/hanko.js';
 import { embedHankos } from '/js/xlsx-image.js';
+import { applyReportFallbacks } from '/js/report-autofill.js';
 
 // 種別ごとの標準入力項目（テンプレートの fields_json が不完全でも choice(○)/hanko 等を認識するため）
 const STANDARD_FIELDS = {
@@ -300,7 +301,9 @@ async function fillAndDownload(template, type, record, inputValues) {
       base[f.tag] = '';
     }
   }
-  const values = { ...auto, ...base, ...(inputValues || {}) };
+  // 入力欄が空のタグは、記録／計画の内容で補う（設備名・現象・対策・記録者・担当者・備考など）
+  const inputs = applyReportFallbacks(type, record, inputValues);
+  const values = { ...auto, ...base, ...inputs };
 
   // ○で1つ選択: 群タグ（例 休止種別）→選んだ選択肢名。各選択肢セル（例 {{故障休止}}）は
   // 「選択肢名」を残したまま、選ばれたものにだけ ○ を付ける（○◯故障休止 のように）。
@@ -317,7 +320,7 @@ async function fillAndDownload(template, type, record, inputValues) {
   const hankoItems = [];
   for (const f of parsedFields) {
     if (f.type !== 'hanko' || !f.tag) continue;
-    const surname = String((inputValues && inputValues[f.tag]) || '').trim();
+    const surname = String(inputs[f.tag] || '').trim();
     values[f.tag] = '';
     if (surname) hankoItems.push({ tag: f.tag, base64: makeHankoPngBase64(surname) });
   }
