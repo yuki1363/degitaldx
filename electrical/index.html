@@ -317,8 +317,18 @@ const CFG_KEYS_ALL = { main:'inspection_config',  battery:'inspection_config_bat
 const DEF_KEYS_ALL = { main:'inspection_default', battery:'inspection_default_battery', generator:'inspection_default_generator' };
 
 async function api(path, opts) {
-  const res = await fetch('/api' + path, { credentials:'same-origin', headers:{'Content-Type':'application/json'}, ...(opts||{}) });
-  if (!res.ok) { let m='通信エラー'; try { const j=await res.json(); if (j&&j.error&&j.error.message) m=j.error.message; } catch(e){} const err=new Error(m); err.status=res.status; throw err; }
+  let res;
+  try {
+    res = await fetch('/api' + path, { credentials:'same-origin', headers:{'Content-Type':'application/json'}, ...(opts||{}) });
+  } catch(e) {
+    // 電波が無い・Access の再認証リダイレクトで届かない等。サーバーの判断ではなく「届かなかった」だけ
+    const err = new Error('オフラインのため通信できません。'); err.offline = true; throw err;
+  }
+  if (!res.ok) {
+    let m='通信エラー', offline=false;
+    try { const j=await res.json(); if (j&&j.error&&j.error.message) m=j.error.message; if (j&&j.error&&j.error.offline===true) offline=true; } catch(e){}
+    const err=new Error(m); err.status=res.status; if (offline) err.offline=true; throw err;
+  }
   return res.json();
 }
 function toast(msg) {
@@ -329,9 +339,15 @@ function toast(msg) {
 // 起動時: D1 → localStorage 充填（D1 を真実とする）
 async function loadServerData() {
   try { const me = await api('/me'); SERVER.user=(me&&me.user)||null; SERVER.canEditConfig=!!(me&&me.user&&me.user.role==='admin'); } catch(e){}
+  await flushOutbox(); // 前回送れなかった保存・削除を先に送る（届かなければそのまま残る）
   try {
     const rr = await api('/electrical-inspections');
     const records = (rr&&rr.records)||{};
+    // まだサーバーに届いていない保存・削除をサーバーの内容の上に重ねる（D1 で上書きして黙って消さない）
+    for (const item of getOutbox()) {
+      if (item.op === 'delete') delete records[item.id];
+      else if (item.rec) records[item.id] = item.rec;
+    }
     const buckets = { main:{}, battery:{}, generator:{} };
     for (const id in records) { const r=records[id]; const t=(r&&r.equipmentType)||'main'; if (buckets[t]) buckets[t][id]=r; }
     Object.entries(REC_KEYS_ALL).forEach(([eq,key]) => { try { localStorage.setItem(key, JSON.stringify(buckets[eq])); } catch(e){} });
@@ -350,6 +366,112 @@ async function loadServerData() {
     SERVER.online = true;
   } catch(e) { SERVER.online = false; toast('オフラインのため、この端末に保存済みのデータを表示しています'); }
 }
+// ===================== オフライン送信待ち（記録の保存・削除） =====================
+// 電波が無くて届かなかった保存・削除は、この端末（localStorage）の送信待ちに積み、電波が戻ると自動で送る。
+//   ・サーバーが「断った」もの（権限なし・削除済み・入力不正）は送信待ちにせず、その場で理由を出す
+//   ・送信待ちは同じ記録なら最新の1件にまとめる（保存を繰り返しても1回の送信）
+//   ・送信が断られた（failed）ものは理由つきで残し、「確認」から再送か破棄を選べる
+//   ・送信は Web Locks で端末内の1タブに絞る（複数タブで復帰しても二重送信しない）
+//   ・同じ記録を別の端末が先に直していても、後から届いた方が上書きする（監査ログに上書き前の内容が残る）
+//   ・写真は電波のある場所でしか送れないため、未送信の写真があるときは保存できない（外すか電波のある場所で）
+const OUTBOX_KEY = 'elec_outbox';
+function getOutbox() { try { const v = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch(e) { return []; } }
+function setOutbox(list) { try { if (list.length) localStorage.setItem(OUTBOX_KEY, JSON.stringify(list)); else localStorage.removeItem(OUTBOX_KEY); return true; } catch(e) { return false; } }
+// op: { op:'save'|'delete', id, rec?, at } 。同じ記録の古い送信待ちは置き換える。保存できなければ false
+function queueOutbox(op) {
+  const list = getOutbox().filter(x => x.id !== op.id);
+  list.push({ ...op, at: new Date().toISOString() });
+  return setOutbox(list);
+}
+async function sendOutboxItem(item) {
+  if (item.op === 'delete') {
+    try { await deleteRecordFromServer(item.id); }
+    catch(e) { if (e.status === 404) return; throw e; } // サーバーに無い（未送信のまま削除した等）なら済み
+  } else {
+    await pushRecordToServer(item.rec);
+  }
+}
+let flushingOutbox = false;
+async function flushOutbox() {
+  if (flushingOutbox) return;
+  flushingOutbox = true;
+  try {
+    const run = async () => {
+      for (const item of getOutbox()) {
+        if (item.error) continue; // 断られたものは「確認」から人が再送・破棄する
+        try {
+          await sendOutboxItem(item);
+          setOutbox(getOutbox().filter(x => !(x.id === item.id && x.at === item.at)));
+        } catch(e) {
+          if (e.offline) return;           // まだ届かない。残りも次回
+          // サーバーに断られた。理由を残して次へ（1件のせいで他の記録が止まらないように）
+          setOutbox(getOutbox().map(x => (x.id === item.id && x.at === item.at ? { ...x, error: e.message } : x)));
+        }
+      }
+    };
+    if (navigator.locks && navigator.locks.request) await navigator.locks.request('elec-outbox-flush', { ifAvailable: true }, async (lock) => { if (lock) await run(); });
+    else await run();
+  } finally {
+    flushingOutbox = false;
+    renderOutboxBar();
+  }
+}
+function outboxLabel(item) {
+  const r = item.rec; const name = r ? `${fmtDate(r.date)} ${EQ_NAMES[r.equipmentType] || ''}` : `記録 ${item.id}`;
+  return (item.op === 'delete' ? '削除' : '保存') + '：' + name;
+}
+function renderOutboxBar() {
+  let bar = document.getElementById('elec-outbox-bar');
+  const list = getOutbox();
+  if (!list.length) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div'); bar.id = 'elec-outbox-bar';
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;background:#fff3cd;color:#664d03;border-top:2px solid #e0a800;padding:8px 12px;font-size:14px;z-index:2500;display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+    document.body.appendChild(bar);
+  }
+  const failed = list.filter(x => x.error).length;
+  const waiting = list.length - failed;
+  bar.innerHTML = '';
+  const t = document.createElement('span'); t.style.flex = '1';
+  t.textContent = '📤 送信待ち ' + list.length + '件' + (failed ? '（うち失敗 ' + failed + '件）' : '') + (waiting ? '　電波が戻ると自動で送信します' : '');
+  bar.appendChild(t);
+  const b = document.createElement('button'); b.className = 'btn btn-secondary btn-sm'; b.type = 'button'; b.textContent = '内容を確認';
+  b.onclick = openOutboxDialog; bar.appendChild(b);
+}
+function openOutboxDialog() {
+  let ov = document.getElementById('elec-outbox-dialog'); if (ov) ov.remove();
+  ov = document.createElement('div'); ov.id = 'elec-outbox-dialog';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:3500;display:flex;align-items:flex-end;justify-content:center';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;width:100%;max-width:560px;max-height:80vh;overflow:auto;border-radius:12px 12px 0 0;padding:14px';
+  const h = document.createElement('div'); h.style.cssText = 'font-weight:700;margin-bottom:8px'; h.textContent = '送信待ちの内容'; box.appendChild(h);
+  const list = getOutbox();
+  if (!list.length) { const p = document.createElement('p'); p.textContent = '送信待ちはありません。'; box.appendChild(p); }
+  list.forEach((item) => {
+    const row = document.createElement('div'); row.className = 'outbox-row'; row.style.cssText = 'border-bottom:1px solid #ddd;padding:8px 0';
+    const l = document.createElement('div'); l.textContent = outboxLabel(item); row.appendChild(l);
+    const st = document.createElement('div'); st.style.cssText = 'font-size:13px;color:' + (item.error ? '#c0392b' : '#666');
+    st.textContent = item.error ? '送信できませんでした：' + item.error : '送信待ち（電波が戻ると自動で送信）'; row.appendChild(st);
+    const acts = document.createElement('div'); acts.style.cssText = 'margin-top:6px;display:flex;gap:8px';
+    if (item.error) {
+      const re = document.createElement('button'); re.className = 'btn btn-secondary btn-sm'; re.type = 'button'; re.textContent = '再送';
+      re.onclick = async () => { setOutbox(getOutbox().map(x => (x.id === item.id && x.at === item.at ? { id: x.id, op: x.op, rec: x.rec, at: x.at } : x))); await flushOutbox(); openOutboxDialog(); };
+      acts.appendChild(re);
+    }
+    const dc = document.createElement('button'); dc.className = 'btn btn-danger btn-sm'; dc.type = 'button'; dc.textContent = '破棄';
+    dc.onclick = () => {
+      if (!confirm('この送信待ちを破棄します。サーバーには送られません。よろしいですか？\n（この端末の表示は、再読み込みでサーバーの内容に戻ります）')) return;
+      setOutbox(getOutbox().filter(x => !(x.id === item.id && x.at === item.at)));
+      location.reload();
+    };
+    acts.appendChild(dc); row.appendChild(acts); box.appendChild(row);
+  });
+  const close = document.createElement('button'); close.className = 'btn btn-secondary'; close.type = 'button'; close.style.marginTop = '10px'; close.textContent = '閉じる';
+  close.onclick = () => { ov.remove(); renderOutboxBar(); }; box.appendChild(close);
+  ov.appendChild(box); document.body.appendChild(ov);
+}
+window.addEventListener('online', () => { flushOutbox(); });
+
 async function pushRecordToServer(rec) { if (!rec || !rec.id) return; await api('/electrical-inspections', { method:'POST', body: JSON.stringify(rec) }); }
 async function deleteRecordFromServer(id) { await api('/electrical-inspections/' + encodeURIComponent(id), { method:'DELETE' }); }
 // ===================== 写真・動画 =====================
@@ -923,7 +1045,7 @@ async function saveRecordInner() {
   try {
     await uploadPendingPhotos();
   } catch(e) {
-    alert('写真を送信できませんでした：' + e.message);
+    alert('写真を送信できませんでした：' + e.message + (e.offline ? '\n写真は電波のある場所でしか送れません。写真を外して保存するか、電波のある場所で保存してください。' : ''));
     return;
   }
   const data = collectForm();
@@ -947,11 +1069,21 @@ async function saveRecordInner() {
   // 逆順だと、送信失敗時に「この端末でだけ保存済み」に見える記録が残り、次回オンライン起動時の
   // D1→localStorage 充填（loadServerData）で黙って消える。失敗時は端末側も編集状態も変えず、
   // 入力内容（下書き）を残したまま押し直せるようにする。
+  let queuedOffline = false;
   try {
     await pushRecordToServer(recs[savedId]);   // D1 へ write-through
   } catch(e) {
+    if (e.offline) {
+      // 電波が無くて届かない。この端末の送信待ちに積み、電波が戻ったら自動で送る
+      if (!queueOutbox({ op:'save', id:savedId, rec:recs[savedId] })) {
+        alert('電波が無く、この端末にも保存できませんでした（容量不足・プライベートモード等）。\n電波のある場所で、もう一度「保存する」を押してください。');
+        return;
+      }
+      queuedOffline = true;
+    } else {
     alert('サーバーへ保存できませんでした。記録はまだ保存されていません。\n通信環境を確認して、もう一度「保存する」を押してください。\n（入力内容はこの画面に残っています）\n' + e.message);
     return;
+    }
   }
   editingRecordId = null;
   document.getElementById('edit-banner').style.display = 'none';
@@ -964,7 +1096,8 @@ async function saveRecordInner() {
   clearDraft();
   saveBasicInfo();  // 点検者名・設備名称・天候を次回のデフォルトとして保持
   resetPhotos([]);  // 写真は記録側に保存済み。次の記録へ持ち越さない
-  alert('保存しました');
+  alert(queuedOffline ? '電波が無いため、この端末に保存しました。\n電波が戻ると自動でサーバーへ送信します（画面下の「送信待ち」で確認できます）。' : '保存しました');
+  if (queuedOffline) renderOutboxBar(); else if (getOutbox().length) flushOutbox();
   renderHistory();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1450,7 +1583,11 @@ async function deleteRecord() {
   if (!found) return;
   delete found.recs[id];
   // D1 を先に削除し、成功したときだけ端末側からも消す（逆順だと失敗時に一覧から消えたように見え、次回起動時に復活する）
-  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); return; }
+  try { await deleteRecordFromServer(id); }
+  catch(e) {
+    if (e.offline && queueOutbox({ op:'delete', id })) { renderOutboxBar(); /* 電波が戻ったら削除を送る。この端末の一覧からは先に消す */ }
+    else { alert('削除できませんでした：' + e.message); return; }
+  }
   try { localStorage.setItem(found.key, JSON.stringify(found.recs)); } catch(e) {}
   closeModal(); renderHistory();
 }
@@ -1461,7 +1598,11 @@ async function deleteRecordById(id) {
   if (!found) return;
   delete found.recs[id];
   // D1 を先に削除し、成功したときだけ端末側からも消す（逆順だと失敗時に一覧から消えたように見え、次回起動時に復活する）
-  try { await deleteRecordFromServer(id); } catch(e) { alert('削除できませんでした：' + e.message); return; }
+  try { await deleteRecordFromServer(id); }
+  catch(e) {
+    if (e.offline && queueOutbox({ op:'delete', id })) { renderOutboxBar(); /* 電波が戻ったら削除を送る。この端末の一覧からは先に消す */ }
+    else { alert('削除できませんでした：' + e.message); return; }
+  }
   try { localStorage.setItem(found.key, JSON.stringify(found.recs)); } catch(e) {}
   if (currentRecordId === id) closeModal();
   renderHistory();
