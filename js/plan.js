@@ -10,6 +10,7 @@ import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue, jstTodayStr } from '/js/util.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
+import { AUTOFILL_HINTS } from '/js/report-autofill.js';
 import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
 
 const PLAN_TYPES = {
@@ -649,10 +650,11 @@ async function renderForm(existing, fromAnnual = false) {
       return el('label', { class: 'pf-input-check' }, [cb, ` ${f.label}`]);
     }
     let input;
-    if (f.type === 'textarea') input = el('textarea', { rows: '2', value: cur });
+    const hint = AUTOFILL_HINTS.construction_notice[f.tag] || '';
+    if (f.type === 'textarea') input = el('textarea', { rows: '2', value: cur, placeholder: hint });
     else if (f.type === 'date') input = el('input', { type: 'date', value: cur });
     else if (f.type === 'time') input = el('input', { type: 'time', value: cur });
-    else input = el('input', { type: 'text', value: cur });
+    else input = el('input', { type: 'text', value: cur, placeholder: hint });
     input.addEventListener('input', () => { permitValues[f.tag] = input.value; });
     return el('div', { class: 'field' + (f.type === 'textarea' ? ' pf-full' : '') }, [el('label', {}, f.label), input]);
   };
