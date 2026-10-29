@@ -616,6 +616,32 @@ async function renderBackup() {
     'SQLダンプをダウンロード（スキーマ＋データ）',
   );
 
+  // 表ごとのCSV（ZIP）。閲覧・集計用（復元には JSON／SQL を使う）
+  const csvBtn = el('button', { class: 'btn btn-primary', onclick: async () => {
+    csvBtn.disabled = true;
+    csvBtn.textContent = '準備中…';
+    try {
+      const res = await fetch('/api/admin/backup', { credentials: 'include' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error?.message || `エラー ${res.status}`);
+      }
+      const { buildBackupCsvZip } = await import('/js/backup-csv.js');
+      const { blob, skipped } = await buildBackupCsvZip(await res.json());
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `backup-csv-${jstTodayStr()}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      if (skipped.length) alert(`次のテーブルは取得できませんでした: ${skipped.join(', ')}`);
+    } catch (err) {
+      alert(`CSVバックアップに失敗しました: ${err.message}`);
+    } finally {
+      csvBtn.disabled = false;
+      csvBtn.textContent = 'CSV（ZIP）をダウンロード';
+    }
+  } }, 'CSV（ZIP）をダウンロード');
+
   // 既存データの表記ゆれ正規化（半角カナ→全角カナ・全角英数→半角）
   const NORM_LABEL = { equipment_ledger: '設備台帳', parts_inventory: '部品在庫', maintenance_plan: '保全計画' };
   const normResult = el('p', { class: 'hint', style: 'margin-top:6px' }, '');
@@ -637,7 +663,7 @@ async function renderBackup() {
       el('h3', { class: 'card-title' }, 'データバックアップ'),
       el('p', { class: 'hint' }, 'データベースの全テーブルをダウンロードします。定期的に保存しておくことで、万一に備えられます。'),
       el('ul', { class: 'hint', style: 'margin-top:4px;padding-left:18px' }, [
-        el('li', {}, '含まれるデータ: 設備台帳・点検結果・トラブル記録・業務依頼・部品在庫・保全計画・日報・ユーザー・監査ログ など全テーブル'),
+        el('li', {}, '含まれるデータ: 設備台帳・点検結果・トラブル記録・業務依頼・部品在庫・保全計画・日報・ユーティリティ日報・電気設備点検（記録と設定）・帳票テンプレート・ユーザー・監査ログ など全テーブル（プッシュ通知の購読情報は端末の鍵を含むため対象外）'),
         el('li', {}, '含まれないもの: R2に保存された写真・動画・PDF（ファイルのURLは含まれます）'),
       ]),
       el('div', { class: 'card', style: 'margin-top:12px;background:#f8fafc' }, [
@@ -650,6 +676,12 @@ async function renderBackup() {
         el('p', { class: 'hint' }, 'テーブル定義（CREATE TABLE）＋全データ（INSERT）のセット。Cloudflareが使えなくなっても、手元のSQLiteや他のサービスへそのまま移植できます。'),
         el('p', { class: 'hint', style: 'margin-top:2px' }, '復元方法: sqlite3 コマンド、DB Browser for SQLite、Turso、Neon、PlanetScale など SQLite 互換の DB に取り込めます。'),
         el('div', { class: 'action-row', style: 'margin-top:8px' }, [sqlBtn]),
+      ]),
+      el('div', { class: 'card', style: 'margin-top:12px;background:#f8fafc' }, [
+        el('p', { style: 'font-weight:600;margin-bottom:4px' }, 'CSV形式（表ごと・ZIP）'),
+        el('p', { class: 'hint' }, 'テーブルごとに1つのCSVにして、ZIPでまとめてダウンロードします。Excelで開いて確認・集計する用途です（UTF-8/BOM）。'),
+        el('p', { class: 'hint', style: 'margin-top:2px' }, '※ 「=」「+」「-」「@」で始まる値は、Excel で数式として実行されないよう先頭に「\'」が付きます。データの復元にはJSON／SQLを使ってください。'),
+        el('div', { class: 'action-row', style: 'margin-top:8px' }, [csvBtn]),
       ]),
     ]),
     el('div', { class: 'card' }, [

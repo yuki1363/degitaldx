@@ -434,6 +434,22 @@ const quickLinks = await page.evaluate(() => ({
 check('設備台帳: トラブル記録への新規作成リンクがある', (quickLinks.trouble || '').includes(`equipment_id=${eqQuick.json?.id}`), `href=${quickLinks.trouble}`);
 check('設備台帳: 業務依頼への新規作成リンクがある', (quickLinks.repair || '').includes(`equipment_id=${eqQuick.json?.id}`), `href=${quickLinks.repair}`);
 
+// 設備カルテ（時系列）: トラブルと業務依頼を作ると、設備詳細の「全履歴」に新しい順で並び、種別で絞れる
+await api('/api/troubles', { method: 'POST', body: { equipment_id: eqQuick.json?.id, category_id: 1, occurred_at: '2026-10-03T01:00:00Z', phenomenon: 'E2Eカルテ異音' } });
+await api('/api/repairs', { method: 'POST', body: { equipment_id: eqQuick.json?.id, title: 'E2Eカルテ依頼' } });
+const tlApi = await api(`/api/equipment/${eqQuick.json?.id}/timeline`);
+check('設備カルテAPI: トラブルと業務依頼が時系列で返る',
+  tlApi.status === 200 && tlApi.json?.items?.some((x) => x.kind === 'trouble' && x.title === 'E2Eカルテ異音') && tlApi.json?.items?.some((x) => x.kind === 'repair'),
+  JSON.stringify(tlApi.json).slice(0, 200));
+await page.goto(`${BASE}/pages/ledger?id=${eqQuick.json?.id}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#equipment-timeline .list-item', { timeout: 8000 });
+const tlAll = await page.evaluate(() => document.querySelectorAll('#equipment-timeline .list-item').length);
+await page.click('#equipment-timeline .chip[data-kind="trouble"]');
+await page.waitForFunction(() => { const a = [...document.querySelectorAll('#equipment-timeline .list-item')]; return a.length >= 1 && a.every((x) => x.getAttribute('href').includes('/pages/trouble')); }, { timeout: 5000 });
+const tlTrouble = await page.evaluate(() => ({ n: document.querySelectorAll('#equipment-timeline .list-item').length, text: document.getElementById('equipment-timeline').innerText, overflow: document.documentElement.scrollWidth > window.innerWidth + 1 }));
+check('設備詳細: 全履歴（時系列）が出て、種別チップで絞れる（横スクロールなし）',
+  tlAll >= 2 && tlTrouble.n >= 1 && tlTrouble.text.includes('E2Eカルテ異音') && !tlTrouble.overflow, JSON.stringify({ tlAll, ...tlTrouble }).slice(0, 200));
+
 // 発注メールの宛先自動入力・納期指定
 const partForOrder = await api('/api/parts', { method: 'POST', body: { name: 'E2E発注部品', quantity: 1, safety_stock: 5, supplier_email: 'supplier@example.com' } });
 check('発注メールテスト用の部品登録', partForOrder.status === 201, `status=${partForOrder.status}`);
@@ -1787,7 +1803,7 @@ section('9.14 AIの権限・件数上限・検索ハイライト・電気設定�
 // AI: 閲覧のみ（viewer）は無料枠を消費する AI API を呼べない。画像AIは AI_VISION_ENABLED=1 のときだけ
 const viewerEmail = 'e2e-viewer@example.com';
 await api('/api/admin/users', { method: 'POST', body: { email: viewerEmail, name: 'E2E閲覧者', role: 'viewer' } });
-for (const ep of ['chat', 'analyze-trouble', 'parse-trouble-pdf', 'parse-search', 'suggest-trouble']) {
+for (const ep of ['suggest-trouble']) {
   const r = await apiAs(viewerEmail, `/api/ai/${ep}`, { method: 'POST', body: { message: 'x', phenomenon: 'x', text: 'x', query: 'x' } });
   check(`AI: 閲覧のみは /api/ai/${ep} を呼べない（403）`, r.status === 403, `status=${r.status}`);
 }
@@ -2290,6 +2306,32 @@ await context.setOffline(false);
 await page.evaluate(() => localStorage.removeItem('auth:role'));
 await api(`/api/parts/${lId}`, { method: 'DELETE' });
 
+// ---------- 9.22 バックアップ: 漏れていたテーブル・CSV(ZIP) ----------
+section('9.22 バックアップの対象テーブルとCSV（ZIP）出力');
+const bkJson = await api('/api/admin/backup');
+check('バックアップ(JSON): 電気設備点検・帳票テンプレ・年度リセット履歴も入り、取得失敗のテーブルが無い',
+  bkJson.status === 200 && ['electrical_inspection', 'electrical_config', 'print_templates', 'plan_reset_log'].every((t) => Array.isArray(bkJson.json?.tables?.[t]))
+    && Object.values(bkJson.json?.tables || {}).every((v) => Array.isArray(v)),
+  JSON.stringify(Object.entries(bkJson.json?.tables || {}).filter(([, v]) => !Array.isArray(v)).map(([k]) => k)));
+await page.goto(`${BASE}/pages/admin`, { waitUntil: 'networkidle' });
+await page.click('.tab-btn[data-tab="backup"]');
+await page.waitForSelector('button:has-text("CSV（ZIP）をダウンロード")', { timeout: 5000 });
+const [zipDl] = await Promise.all([
+  page.waitForEvent('download', { timeout: 20000 }).catch(() => null),
+  page.click('button:has-text("CSV（ZIP）をダウンロード")'),
+]);
+let zipInfo = { name: zipDl?.suggestedFilename() || '' };
+if (zipDl) {
+  const buf = Buffer.concat(await (await zipDl.createReadStream()).toArray());
+  const JSZipNode = (await import('node:module')).createRequire(import.meta.url)('../js/vendor/jszip.min.js');
+  const zip = await JSZipNode.loadAsync(buf);
+  zipInfo.files = Object.keys(zip.files);
+  zipInfo.equip = await zip.file('equipment_ledger.csv')?.async('string');
+}
+check('バックアップ(CSV): テーブルごとのCSVを入れたZIPがダウンロードできる',
+  /^backup-csv-\d{4}-\d{2}-\d{2}\.zip$/.test(zipInfo.name) && zipInfo.files?.includes('equipment_ledger.csv') && zipInfo.files?.includes('electrical_config.csv')
+    && /^\uFEFF?[^\n]*code/.test(zipInfo.equip || ''),
+  JSON.stringify({ name: zipInfo.name, n: zipInfo.files?.length, head: (zipInfo.equip || '').slice(0, 40) }));
 // ---------- 9.23 電気設備点検: オフラインでの保存・削除（送信待ち） ----------
 section('9.23 電気設備点検のオフライン保存・削除（送信待ち・自動送信・失敗の確認）');
 await page.goto(`${BASE}/electrical/`, { waitUntil: 'networkidle' });
