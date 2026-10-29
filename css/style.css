@@ -3048,6 +3048,36 @@ input.is-abnormal {
   font-size: 18px;
 }
 
+/* 08 保全レポート（印刷用1枚） */
+.rpt-controls .rpt-range { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.rpt-controls .rpt-range input[type="date"] { max-width: 150px; }
+.rpt-doc { background: #fff; border: 1px solid var(--color-border); border-radius: 8px; padding: 14px; }
+.rpt-title { margin: 0; font-size: 20px; }
+.rpt-meta { font-size: 12px; color: var(--color-text-muted); }
+.rpt-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+.rpt-tile { border: 1px solid var(--color-border); border-radius: 6px; padding: 6px; text-align: center; }
+.rpt-tile-value { font-size: 20px; font-weight: 700; }
+.rpt-tile-label { font-size: 11px; }
+.rpt-tile-sub { font-size: 10px; color: var(--color-text-muted); }
+.rpt-section { margin-top: 12px; break-inside: avoid; }
+.rpt-h3 { margin: 0 0 4px; font-size: 14px; border-left: 4px solid var(--color-primary); padding-left: 6px; }
+.rpt-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rpt-table th, .rpt-table td { border: 1px solid var(--color-border); padding: 3px 5px; text-align: left; vertical-align: top; word-break: break-all; }
+.rpt-table th { background: #f1f5f9; font-weight: 600; }
+.rpt-table tr { break-inside: avoid; }
+.rpt-num { text-align: right !important; white-space: nowrap; }
+.rpt-bar-cell { width: 40%; }
+.rpt-bar { display: block; height: 10px; background: var(--color-primary); border-radius: 2px; }
+.rpt-overdue td { background: #fef2f2; }
+.rpt-empty, .rpt-more { font-size: 12px; color: var(--color-text-muted); margin: 2px 0; }
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  body.rpt-page .app-header, body.rpt-page .rpt-controls, body.rpt-page #offline-queue-bar,
+  body.rpt-page #relogin-banner { display: none !important; }
+  body.rpt-page, body.rpt-page .container { background: #fff !important; padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  body.rpt-page .rpt-doc { border: none; padding: 0; }
+  body.rpt-page { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 /* アプリ内の使い方ガイド（/pages/help） */
 .help-search { width: 100%; box-sizing: border-box; }
 .help-note { margin: 6px 0 0; }

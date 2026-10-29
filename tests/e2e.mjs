@@ -82,7 +82,7 @@ await page.waitForFunction(async () => {
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
   'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications',
-  'ai-support', 'help'];
+  'ai-support', 'report-summary', 'help'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
@@ -2440,6 +2440,46 @@ const cnXml = await exportFilled('construction_notice',
 check('工事連絡書: 工事概要は備考で補われ、会社名（該当する入力が無い）は空欄のまま',
   !!cnXml && cnXml.includes('工事概要=[E2E備考の内容]') && cnXml.includes('会社名=[]'), (cnXml || 'no download').slice(0, 300));
 
+// ---------- 9.25 保全レポート（印刷用1枚） ----------
+section('9.25 保全レポート（概要・ジャンル別・一覧・印刷表示）');
+const rptEq = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-RPT', name: 'E2Eレポート設備' } });
+const rptNowIso = new Date().toISOString();
+const rptTr = await api('/api/troubles', { method: 'POST', body: { equipment_id: rptEq.json?.id, category_id: 1, occurred_at: rptNowIso, phenomenon: 'E2Eレポート異音' } });
+const rptRp = await api('/api/repairs', { method: 'POST', body: { equipment_id: rptEq.json?.id, title: 'E2Eレポート依頼' } });
+await page.goto(`${BASE}/pages/report-summary`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
+const rptText = await page.evaluate(() => document.getElementById('report-doc').innerText);
+check('保全レポート: 今月の概要・トラブル一覧・未完了の依頼が出る',
+  rptText.includes('保全レポート') && rptText.includes('E2Eレポート異音') && rptText.includes('E2Eレポート依頼') && rptText.includes('ジャンル別トラブル') && rptText.includes('期限超過の保全計画'),
+  rptText.slice(0, 200));
+// 先月に切り替えると、今作ったトラブルは出ない（期間の絞り込み）
+await page.click('.chip[data-kind="lastmonth"]');
+await page.waitForFunction(() => !document.getElementById('report-doc').innerText.includes('E2Eレポート異音'), { timeout: 8000 }).catch(() => {});
+check('保全レポート: 先月に切り替えると今月のトラブルは出ない', await page.evaluate(() => !document.getElementById('report-doc').innerText.includes('E2Eレポート異音')));
+await page.click('.chip[data-kind="month"]');
+await page.waitForFunction(() => document.getElementById('report-doc').innerText.includes('E2Eレポート異音'), { timeout: 8000 });
+// 不正な期間（開始 > 終了）は案内を出す
+await page.fill('.rpt-range input[aria-label="開始日"]', '2026-12-31');
+await page.fill('.rpt-range input[aria-label="終了日"]', '2026-01-01');
+await page.click('.rpt-range button:has-text("表示")');
+check('保全レポート: 開始日が終了日より後ならエラー案内', await page.evaluate(() => document.getElementById('report-doc').innerText.includes('期間を正しく指定')));
+await page.click('.chip[data-kind="month"]');
+await page.waitForFunction(() => document.getElementById('report-doc').innerText.includes('E2Eレポート異音'), { timeout: 8000 });
+// 印刷表示: ヘッダー・操作欄が消え、レポートだけ残る
+await page.emulateMedia({ media: 'print' });
+const rptPrint = await page.evaluate(() => ({
+  header: getComputedStyle(document.querySelector('.app-header')).display,
+  controls: getComputedStyle(document.querySelector('.rpt-controls')).display,
+  doc: getComputedStyle(document.getElementById('report-doc')).display,
+}));
+await page.emulateMedia({ media: 'screen' });
+check('保全レポート: 印刷表示ではヘッダーと操作欄が隠れ、レポート本体は残る', rptPrint.header === 'none' && rptPrint.controls === 'none' && rptPrint.doc !== 'none', JSON.stringify(rptPrint));
+await page.setViewportSize({ width: 375, height: 720 });
+await page.waitForTimeout(300);
+check('保全レポート: スマホ幅（375px）で横にはみ出さない', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+await page.setViewportSize({ width: 1280, height: 720 });
+await api(`/api/troubles/${rptTr.json?.id}`, { method: 'DELETE' });
+await api(`/api/repairs/${rptRp.json?.id}`, { method: 'DELETE' });
 // ---------- 9.26 アプリ内の使い方ガイド ----------
 section('9.26 使い方ガイド（項目の表示・検索・直接リンク・オフライン）');
 await page.goto(`${BASE}/pages/help`, { waitUntil: 'networkidle' });
