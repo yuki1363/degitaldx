@@ -3085,3 +3085,5 @@ input.is-abnormal {
 .help-sum { padding: 12px; font-weight: 700; cursor: pointer; min-height: 20px; }
 .help-list { margin: 0; padding: 0 14px 12px 32px; line-height: 1.7; font-size: 14px; }
 .help-list li { margin-bottom: 4px; }
+
+.usage-zero td { color: var(--color-text-muted); }

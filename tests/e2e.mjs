@@ -2513,6 +2513,26 @@ await page.waitForSelector('.help-sec', { timeout: 8000 }).catch(() => {});
 check('使い方: 電波が無くても開ける（SWのキャッシュ）', !!helpOff && await page.evaluate(() => document.querySelectorAll('.help-sec').length >= 14));
 await context.setOffline(false);
 
+// ---------- 9.27 機能別の利用状況（管理画面）・音声入力の案内 ----------
+section('9.27 機能別の利用状況（管理画面）');
+const fuApi = await api('/api/admin/feature-usage?days=30');
+check('利用状況API: 機能ごとの件数が返り、これまでのテストで使った機能が数えられている',
+  fuApi.status === 200 && Array.isArray(fuApi.json?.features) && fuApi.json.features.find((f) => f.key === 'trouble_record')?.total > 0 && fuApi.json.active_users >= 1,
+  JSON.stringify(fuApi.json).slice(0, 200));
+const fuEditor = await apiAs(editorEmail, '/api/admin/feature-usage');
+check('利用状況API: 管理者以外は403', fuEditor.status === 403, `status=${fuEditor.status}`);
+await page.goto(`${BASE}/pages/admin`, { waitUntil: 'networkidle' });
+await page.click('.tab-btn[data-tab="feature-usage"]');
+await page.waitForSelector('.tab-content .rpt-table, #tab-content .rpt-table, .rpt-table', { timeout: 8000 });
+const fuText = await page.evaluate(() => document.querySelector('.rpt-table')?.closest('.card')?.innerText || '');
+check('利用状況: 管理画面のタブに機能別の表が出る（トラブル記録・保全計画・期間の切り替え）',
+  fuText.includes('トラブル記録') && fuText.includes('保全計画') && fuText.includes('直近90日'), fuText.slice(0, 160));
+await page.click('.chip:has-text("直近90日")');
+await page.waitForFunction(() => document.querySelector('.chip.is-active')?.textContent.includes('直近90日'), { timeout: 5000 });
+check('利用状況: 期間を切り替えられる', true);
+await page.goto(`${BASE}/pages/help`, { waitUntil: 'networkidle' });
+check('使い方: 音声入力（キーボードのマイク）の案内がある', await page.evaluate(() => document.getElementById('start')?.textContent.includes('マイク')));
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

@@ -26,6 +26,7 @@ const TABS = [
   { id: 'masters', label: 'マスタ変更履歴' },
   { id: 'print-templates', label: '帳票テンプレート' },
   { id: 'backup',  label: 'バックアップ' },
+  { id: 'feature-usage', label: '利用状況' },
 ];
 
 let activeTab = 'users';
@@ -49,6 +50,7 @@ async function loadTab() {
   if (activeTab === 'masters') await renderMasters();
   if (activeTab === 'print-templates') await renderPrintTemplates(tabContent);
   if (activeTab === 'backup')  await renderBackup();
+  if (activeTab === 'feature-usage') await renderFeatureUsage();
 }
 
 // ---------------- ユーザー管理 ----------------
@@ -571,6 +573,35 @@ async function renderMasters() {
     listBox,
   ]);
   await load();
+}
+
+// ---------------- 利用状況（機能別） ----------------
+
+let featureUsageDays = 30;
+
+async function renderFeatureUsage() {
+  const res = await api.get(`/api/admin/feature-usage?days=${featureUsageDays}`);
+  const periods = [[30, '直近30日'], [90, '直近90日'], [365, '直近1年']];
+  render(tabContent, el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title' }, '機能別の利用状況'),
+    el('p', { class: 'hint' }, '監査ログ（登録・更新・削除・復元）を機能ごとに数えています。画面を見ただけの閲覧は数えられません。どの機能が使われているかの目安にしてください。'),
+    el('div', { class: 'chip-row' }, periods.map(([d, label]) =>
+      el('button', { class: `chip ${d === featureUsageDays ? 'is-active' : ''}`, type: 'button',
+        onclick: () => { featureUsageDays = d; loadTab().catch((err) => render(tabContent, el('p', { class: 'notice is-error' }, err.message))); } }, label))),
+    el('p', { class: 'hint' }, `期間内に操作した人数: ${res.active_users}人`),
+    el('table', { class: 'rpt-table' }, [
+      el('thead', {}, el('tr', {}, ['機能', '合計', '登録', '更新', '削除', '最終操作'].map((h) => el('th', {}, h)))),
+      el('tbody', {}, res.features.map((f) => el('tr', { class: f.total === 0 ? 'usage-zero' : '' }, [
+        el('td', {}, f.label),
+        el('td', { class: 'rpt-num' }, String(f.total)),
+        el('td', { class: 'rpt-num' }, String(f.create)),
+        el('td', { class: 'rpt-num' }, String(f.update)),
+        el('td', { class: 'rpt-num' }, String(f.delete + f.restore)),
+        el('td', {}, f.last_at ? formatDateTime(f.last_at) : '—'),
+      ]))),
+    ]),
+    el('p', { class: 'hint' }, '※ 「削除」には復元の件数も含みます。合計が 0 の行は、この期間に一度も使われていません。'),
+  ]));
 }
 
 // ---------------- バックアップ ----------------
