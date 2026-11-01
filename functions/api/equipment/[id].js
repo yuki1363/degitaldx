@@ -142,14 +142,15 @@ export async function onRequestGet({ env, params }) {
       const sel = `SELECT id, name, model_no, quantity, safety_stock, importance FROM parts_inventory WHERE deleted_at IS NULL`;
       const nameCond = `(?4 = 1 AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, ''))`;
       const tail = ` ORDER BY name ASC LIMIT 20`;
-      try {
-        return (await env.DB.prepare(`${sel} AND (equipment_id = ?3 OR ${nameCond})${tail}`)
-          .bind(equipment.line_name || '', equipment.equipment_name || '', equipment.id, byName).all()).results;
-      } catch {
-        if (!byName) return [];
-        return (await env.DB.prepare(`${sel} AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, '')${tail}`)
-          .bind(equipment.line_name || '', equipment.equipment_name || '').all()).results;
+      // ①主な設備（equipment_id）・複数設備に紐づけた部品（parts_equipment）・名前の一致 ②表が無い旧DBは equipment_id と名前 ③列も無い旧DBは名前だけ
+      const extra = `id IN (SELECT part_id FROM parts_equipment WHERE equipment_id = ?3 AND deleted_at IS NULL)`;
+      const binds = [equipment.line_name || '', equipment.equipment_name || '', equipment.id, byName];
+      for (const cond of [`equipment_id = ?3 OR ${extra} OR ${nameCond}`, `equipment_id = ?3 OR ${nameCond}`]) {
+        try { return (await env.DB.prepare(`${sel} AND (${cond})${tail}`).bind(...binds).all()).results; } catch { /* 次の形で試す */ }
       }
+      if (!byName) return [];
+      return (await env.DB.prepare(`${sel} AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, '')${tail}`)
+        .bind(equipment.line_name || '', equipment.equipment_name || '').all()).results;
     }),
   ]);
 

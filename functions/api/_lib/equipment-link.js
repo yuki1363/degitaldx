@@ -24,6 +24,41 @@ export function ensureEquipmentLinkColumns(db) {
   ]);
 }
 
+/** parts_equipment（部品×設備の複数紐づけ）表を（無ければ）作る。使えない環境では false */
+export function ensurePartsEquipmentTable(db) {
+  return ensureColumns(db, 'parts_equipment_table', [
+    `CREATE TABLE IF NOT EXISTS parts_equipment (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       part_id INTEGER NOT NULL REFERENCES parts_inventory (id),
+       equipment_id INTEGER NOT NULL REFERENCES equipment_ledger (id),
+       created_by TEXT, created_at TEXT, updated_by TEXT, updated_at TEXT, deleted_by TEXT, deleted_at TEXT
+     )`,
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_equipment_pair ON parts_equipment (part_id, equipment_id) WHERE deleted_at IS NULL',
+    'CREATE INDEX IF NOT EXISTS idx_parts_equipment_equipment ON parts_equipment (equipment_id)',
+  ]);
+}
+
+/**
+ * 1件（部品または保全計画）の設備台帳との紐づけ状況。
+ *   status: 'linked'（台帳の設備が決まった）／'ambiguous'（同名の設備が複数）／'unmatched'（台帳に無い名前）／'none'（設備名・機器名が空）
+ *   equipment: 決まった設備 { id, code, name } または null
+ *   equipment_id が入っていればそれを優先し、無ければ名前が1件にだけ一致するときにその設備を返す
+ */
+export async function describeEquipmentLink(db, row) {
+  try {
+    if (row.equipment_id) {
+      const e = await db.prepare('SELECT id, code, name FROM equipment_ledger WHERE id = ?1 AND deleted_at IS NULL').bind(row.equipment_id).first();
+      if (e) return { status: 'linked', equipment: e };
+    }
+    if (!norm(row.line_name) && !norm(row.equipment_name)) return { status: 'none', equipment: null };
+    const c = await findEquipmentCandidates(db, row.line_name, row.equipment_name, 3);
+    if (c.length === 1) return { status: 'linked', equipment: c[0] };
+    return { status: c.length > 1 ? 'ambiguous' : 'unmatched', equipment: null };
+  } catch {
+    return { status: 'none', equipment: null }; // 台帳が引けない環境でも画面は止めない
+  }
+}
+
 /** 設備名＋機器名に一致する設備台帳の候補（最大 limit 件）。両方空なら空配列 */
 export async function findEquipmentCandidates(db, line, equip, limit = 3) {
   const l = norm(line);

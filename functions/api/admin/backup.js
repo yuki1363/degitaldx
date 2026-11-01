@@ -18,6 +18,7 @@ export const TABLES = [
   'print_templates', 'chat_reactions', 'chat_channel_reads',
   'plan_reset_log', 'annual_plan_status',
   'electrical_inspection', 'electrical_config',
+  'parts_equipment',
 ];
 
 // SQL文字列エスケープ（SQLiteのシングルクォートは '' で表現）

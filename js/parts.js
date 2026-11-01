@@ -12,6 +12,7 @@ import { getCurrentUser, hasRole, getCachedRole } from '/js/auth.js';
 import { el, render, formatDateTime, maskEmail } from '/js/util.js';
 import { enqueue as enqueueOffline, listQueued } from '/js/offline-queue.js';
 import { openQrScanner } from '/js/qr-scan.js';
+import { buildEquipSelect } from '/js/equip-picker.js';
 import qrcode from '/js/vendor/qrcode.mjs';
 
 // 画面を開いている間の自動更新の間隔（他の人の入出庫を反映する。裏に回ったら止める）
@@ -704,6 +705,51 @@ function infoRow(label, value) {
   ]);
 }
 
+// 「使用している設備」— 部品の設備名＋機器名で決まる主な設備と、追加で紐づけた設備（同じ部品を複数の機械で使う場合）
+function buildPartEquipmentCard({ partId, part, links, status, canEdit, reload }) {
+  const names = [part.line_name, part.equipment_name].filter(Boolean).join(' / ');
+  const warning = {
+    ambiguous: `⚠ 設備名・機器名（${names}）に一致する設備が台帳に複数あるため、主な設備を決められません。設備名・機器名を直すか、下で設備を追加してください。`,
+    unmatched: `⚠ 設備名・機器名（${names}）に一致する設備が設備台帳にありません。名前を直すか、下で設備を追加してください。`,
+  }[status] || '';
+  const rows = links.map((e) => el('div', { class: 'list-item' }, [
+    el('a', { class: 'list-item-main', href: `/pages/ledger?id=${e.id}`, style: 'text-decoration:none;color:inherit' }, [
+      el('div', { class: 'list-item-title' }, `🔗 ${e.name}`),
+      el('div', { class: 'list-item-sub' }, `${e.code}${e.kind === 'primary' ? '　主な設備（設備名・機器名）' : ''}`),
+    ]),
+    canEdit && e.kind === 'extra'
+      ? el('button', { class: 'btn btn-sm', type: 'button', onclick: async () => {
+          if (!confirm(`「${e.name}」を、この部品の使用設備から外しますか？`)) return;
+          try { await api.del(`/api/parts/${partId}/equipment?equipment_id=${e.id}`); reload(); } catch (err) { alert(err.message); }
+        } }, '外す')
+      : el('span', { class: 'chevron' }, '›'),
+  ]));
+  const addBox = el('div', {});
+  const openAdd = async (btn) => {
+    btn.disabled = true;
+    try {
+      const { equipment } = await api.get('/api/equipment?limit=2000');
+      const taken = new Set(links.map((e) => e.id));
+      const picker = buildEquipSelect((equipment || []).filter((e) => !taken.has(e.id)), { allLabel: '設備を選択', placeholder: '設備を選択（入力で絞り込み）' });
+      const addBtn = el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => {
+        if (!picker.value) { alert('設備を選択してください。'); return; }
+        addBtn.disabled = true;
+        try { await api.post(`/api/parts/${partId}/equipment`, { equipment_id: Number(picker.value) }); reload(); }
+        catch (err) { alert(err.message); addBtn.disabled = false; }
+      } }, '追加');
+      render(addBox, el('div', { class: 'add-row' }, [picker, addBtn]));
+    } catch (err) { alert(`設備の一覧を取得できませんでした: ${err.message}`); btn.disabled = false; }
+  };
+  return el('div', { class: 'card', id: 'part-equipment' }, [
+    el('h3', { class: 'card-title' }, '使用している設備（設備台帳）'),
+    links.length ? el('div', { class: 'row-list' }, rows) : el('p', { class: 'empty' }, status === 'none' ? '設備は指定されていません。' : '設備台帳の設備にはまだ紐づいていません。'),
+    warning ? el('p', { class: 'notice is-warning' }, warning) : null,
+    el('p', { class: 'hint' }, '同じ部品を複数の機械で使うときは、「＋ 設備を追加」でその設備を紐づけてください。各設備の画面の「関連部品」に出ます。'),
+    canEdit ? el('div', { class: 'action-row' }, [el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => openAdd(e.currentTarget) }, '＋ 設備を追加')]) : null,
+    addBox,
+  ]);
+}
+
 let detailTimer = null;
 
 async function renderDetail(id) {
@@ -714,7 +760,7 @@ async function renderDetail(id) {
     if (err?.offline === true || navigator.onLine === false) { await renderOfflineDetail(id); return; }
     throw err;
   }
-  const { part, transactions, equipment: linkedEquipment } = data;
+  const { part, transactions, equipment_links: equipmentLinks = [], equipment_status: equipmentStatus = 'none' } = data;
   saveSnapshot(part);
   const canEdit = hasRole(currentUser, 'editor');
   const isLow = part.quantity < part.safety_stock; // 在庫数 < 必要数 で要発注
@@ -795,18 +841,7 @@ async function renderDetail(id) {
       infoRow('仕入先メール', part.supplier_email),
       infoRow('備考', part.note),
     ]),
-    linkedEquipment
-      ? el('div', { class: 'card' }, [
-          el('h3', { class: 'card-title' }, '対象設備（設備台帳）'),
-          el('a', { class: 'list-item', href: `/pages/ledger?id=${linkedEquipment.id}` }, [
-            el('div', { class: 'list-item-main' }, [
-              el('div', { class: 'list-item-title' }, linkedEquipment.name),
-              el('div', { class: 'list-item-sub' }, linkedEquipment.code),
-            ]),
-            el('span', { class: 'chevron' }, '›'),
-          ]),
-        ])
-      : null,
+    buildPartEquipmentCard({ partId: id, part, links: equipmentLinks, status: equipmentStatus, canEdit, reload: () => renderDetail(id).catch(showError) }),
     canEdit
       ? el('div', { class: 'action-row' }, [
           el('button', { class: isLow ? 'btn btn-primary' : 'btn', onclick: () => openOrderDialog(part, () => renderDetail(id).catch(showError)) }, '📧 発注メールを作成'),

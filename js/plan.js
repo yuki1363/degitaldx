@@ -456,7 +456,7 @@ function parseFormValues(jsonStr) {
 
 async function renderDetail(id, fromAnnual = false) {
   // 計画と工事連絡書テンプレートを並行取得（テンプレートは入力状態の総数算出に使う）
-  const [{ plan }, tmplRes] = await Promise.all([
+  const [{ plan, equipment_link: eqLink, equipment_status: eqStatus }, tmplRes] = await Promise.all([
     api.get(`/api/plans/${id}`),
     api.get('/api/print-templates').catch(() => ({ templates: [] })),
   ]);
@@ -525,6 +525,15 @@ async function renderDetail(id, fromAnnual = false) {
       ),
       infoRow('設備名', plan.line_name),
       infoRow('機器名', plan.equipment_name),
+      eqStatus && eqStatus !== 'none'
+        ? el('div', { class: 'info-row' }, [
+            el('span', { class: 'info-label' }, '設備台帳'),
+            eqLink
+              ? el('a', { class: 'info-value', href: `/pages/ledger?id=${eqLink.id}` }, `🔗 ${eqLink.code} ${eqLink.name}`)
+              : el('span', { class: 'info-value', style: 'color:#b45309' },
+                  eqStatus === 'ambiguous' ? '⚠ 同じ名前の設備が台帳に複数あるため、紐づけられません（設備名・機器名で区別してください）' : '⚠ 設備台帳に同じ名前の設備がありません（紐づいていません）'),
+          ])
+        : null,
       infoRow('点検者', plan.inspector_name),
       infoRow('担当者', plan.assignee_name),
       showConstructionInfo ? infoRow('時間帯', timeText) : null,
