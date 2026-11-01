@@ -1025,3 +1025,13 @@ UPDATE utility_item SET section = '温水・圧縮機', sort_order = 19 WHERE na
 UPDATE utility_item SET section = '温水・圧縮機', sort_order = 20 WHERE name = '総運転時間3' AND (section = '運転時間・油面' OR sort_order IN (14, 16));
 UPDATE utility_item SET section = '温水・圧縮機', sort_order = 21 WHERE name = '油面確認3'   AND (section IN ('運転時間・油面', '油面確認') OR sort_order = 17);
 UPDATE utility_item SET section = '温水・圧縮機' WHERE section = '圧縮機・温水';
+
+-- ============================================================
+-- 設備台帳との紐づけ（05 部品在庫・01 保全計画）
+--   設備名(line_name)＋機器名(equipment_name)が設備台帳の1件にだけ一致するとき、その設備の id を入れる。
+--   名前の表記ゆれ・台帳側の名称変更があっても、設備カルテなどで拾えるようにするため。
+--   0件・複数件に一致するときは NULL のまま（従来どおり名前の一致で拾う）。
+--   maintenance_plan.equipment_id は既存の列（旧FK）を流用する。
+-- ============================================================
+ALTER TABLE parts_inventory ADD COLUMN equipment_id INTEGER;
+CREATE INDEX IF NOT EXISTS idx_parts_inventory_equipment ON parts_inventory (equipment_id);

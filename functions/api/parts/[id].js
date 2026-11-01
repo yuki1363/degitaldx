@@ -10,6 +10,7 @@ import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
 import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
+import { linkRowToEquipment } from '../_lib/equipment-link.js';
 
 // NFKC 正規化＋trim（半角カナ→全角カナ・全角英数→半角。検索・表示の統一）。空は null
 const nz = (v) => { const s = normalizeJa(String(v)).trim(); return s === '' ? null : s; };
@@ -105,6 +106,9 @@ export async function onRequestPut({ env, data, params, request }) {
     .bind(newModelNo, newName, newLineName, newEquipName, newSafetyStock, newLocation,
           newImportance, newSupplier, newSupplierEmail, newNote, userEmail, now, id)
     .run();
+  if (String(part.line_name ?? '') !== String(newLineName ?? '') || String(part.equipment_name ?? '') !== String(newEquipName ?? '')) {
+    await linkRowToEquipment(DB, 'parts_inventory', id); // 設備名・機器名を変えたときだけ紐づけを入れ直す
+  }
 
   // 変更差分を記録（変化したフィールドのみ）
   const diff = {};

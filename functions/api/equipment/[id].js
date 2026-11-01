@@ -106,18 +106,20 @@ export async function onRequestGet({ env, params }) {
     ),
     // 今後の保全計画（01）— 計画は自由入力の設備名・機器名で保存されるため、
     // 設備台帳の line_name / equipment_name と一致する未完了の予定を予定日順で拾う。
+    // 台帳の ID で紐づいた計画（equipment_id）を先に、無ければ名前の一致で拾う。
+    // 名前が空の設備は名前では拾わない（空どうしで無関係な計画に一致するのを防ぐ）
     safe(() => {
-      if (!equipment.line_name && !equipment.equipment_name) return [];
+      const noName = !equipment.line_name && !equipment.equipment_name;
       return env.DB.prepare(
         `SELECT id, title, plan_type, planned_date, planned_end_date, status
            FROM maintenance_plan
           WHERE deleted_at IS NULL AND status != 'done'
-            AND COALESCE(line_name, '') = COALESCE(?1, '')
-            AND COALESCE(equipment_name, '') = COALESCE(?2, '')
+            AND (equipment_id = ?3
+                 OR (?4 = 0 AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, '')))
           ORDER BY planned_date ASC, id ASC
           LIMIT 10`
       )
-        .bind(equipment.line_name || '', equipment.equipment_name || '')
+        .bind(equipment.line_name || '', equipment.equipment_name || '', equipment.id, noName ? 1 : 0)
         .all()
         .then((r) => r.results);
     }),
@@ -133,21 +135,21 @@ export async function onRequestGet({ env, params }) {
         .all()
         .then((r) => r.results)
     ),
-    // 関連部品（05）— 設備名・機器名で照合（部品在庫↔設備台帳の紐づけ）
-    safe(() => {
-      if (!equipment.line_name) return [];
-      return env.DB.prepare(
-        `SELECT id, name, model_no, quantity, safety_stock, importance
-           FROM parts_inventory
-          WHERE deleted_at IS NULL
-            AND COALESCE(line_name, '') = COALESCE(?1, '')
-            AND COALESCE(equipment_name, '') = COALESCE(?2, '')
-          ORDER BY name ASC
-          LIMIT 20`
-      )
-        .bind(equipment.line_name || '', equipment.equipment_name || '')
-        .all()
-        .then((r) => r.results);
+    // 関連部品（05）— 台帳の ID で紐づいた部品（equipment_id）を先に、無ければ設備名・機器名の一致で拾う。
+    // 設備名が空の設備は名前では拾わない。equipment_id 列が無い旧DBでは名前の一致だけで拾う
+    safe(async () => {
+      const byName = equipment.line_name ? 1 : 0;
+      const sel = `SELECT id, name, model_no, quantity, safety_stock, importance FROM parts_inventory WHERE deleted_at IS NULL`;
+      const nameCond = `(?4 = 1 AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, ''))`;
+      const tail = ` ORDER BY name ASC LIMIT 20`;
+      try {
+        return (await env.DB.prepare(`${sel} AND (equipment_id = ?3 OR ${nameCond})${tail}`)
+          .bind(equipment.line_name || '', equipment.equipment_name || '', equipment.id, byName).all()).results;
+      } catch {
+        if (!byName) return [];
+        return (await env.DB.prepare(`${sel} AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, '')${tail}`)
+          .bind(equipment.line_name || '', equipment.equipment_name || '').all()).results;
+      }
     }),
   ]);
 

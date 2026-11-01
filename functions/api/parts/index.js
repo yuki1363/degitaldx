@@ -15,6 +15,7 @@ import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
 import { buildKeywordClauses } from '../_lib/fuzzy.js';
 import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
+import { linkRowToEquipment } from '../_lib/equipment-link.js';
 
 const IMPORTANCE_VALUES = ['高', '中', '低'];
 
@@ -141,6 +142,7 @@ export async function onRequestPost({ env, data, request }) {
     .run();
 
   const newId = result.meta?.last_row_id;
+  await linkRowToEquipment(DB, 'parts_inventory', newId); // 設備名＋機器名が台帳の1件に一致すれば equipment_id を入れる
 
   await writeAuditLog(DB, {
     tableName: 'parts_inventory',
