@@ -7,6 +7,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
+import { autoLinkAfterLedgerChange } from '../_lib/equipment-link.js';
 
 export const EQUIPMENT_STATUS = ['active', 'stopped', 'retired'];
 
@@ -186,6 +187,8 @@ export async function onRequestPost({ request, env, data }) {
     changedBy: data.user.email,
     diff: v,
   });
+  // 同じ設備名＋機器名の部品・保全計画を、この設備に自動で紐づける（失敗しても登録は成功のまま）
+  await autoLinkAfterLedgerChange(env.DB, data.user.email);
 
   return json({ id }, 201);
 }

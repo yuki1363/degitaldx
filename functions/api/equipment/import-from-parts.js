@@ -9,6 +9,7 @@ import { json, jsonError } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
+import { autoLinkAfterLedgerChange } from '../_lib/equipment-link.js';
 
 const comboKey = (line, equip) => `${line || ''}${equip || ''}`;
 
@@ -74,6 +75,8 @@ export async function onRequestPost({ env, data }) {
     changedBy: userEmail,
     diff: { mode: 'import_from_parts', created: toCreate.length },
   });
+  // 作った設備に、同じ名前の部品・保全計画を自動で紐づける（失敗しても登録は成功のまま）
+  await autoLinkAfterLedgerChange(DB, userEmail);
 
   return json({ created: toCreate.length });
 }
