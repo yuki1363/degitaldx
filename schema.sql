@@ -1035,3 +1035,24 @@ UPDATE utility_item SET section = '温水・圧縮機' WHERE section = '圧縮�
 -- ============================================================
 ALTER TABLE parts_inventory ADD COLUMN equipment_id INTEGER;
 CREATE INDEX IF NOT EXISTS idx_parts_inventory_equipment ON parts_inventory (equipment_id);
+
+-- ============================================================
+-- 部品と設備の紐づけ（複数）— 05 部品在庫
+--   1つの部品を複数の機械で使う場合に、使う設備を追加で紐づけるための表。
+--   部品の「設備名＋機器名」（＝主な設備。parts_inventory.equipment_id）はそのまま残り、
+--   ここには「主な設備以外の設備」を入れる。論理削除（deleted_at）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS parts_equipment (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  part_id      INTEGER NOT NULL REFERENCES parts_inventory (id),
+  equipment_id INTEGER NOT NULL REFERENCES equipment_ledger (id),
+  created_by   TEXT,
+  created_at   TEXT,
+  updated_by   TEXT,
+  updated_at   TEXT,
+  deleted_by   TEXT,
+  deleted_at   TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_equipment_pair
+  ON parts_equipment (part_id, equipment_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_parts_equipment_equipment ON parts_equipment (equipment_id);

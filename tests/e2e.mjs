@@ -2562,6 +2562,47 @@ await api(`/api/plans/${lkPlan.json?.id}`, { method: 'DELETE' });
 await api(`/api/parts/${lkPart.json?.id}`, { method: 'DELETE' });
 await api(`/api/equipment/${lkEq.json?.id}`, { method: 'DELETE' });
 
+// ---------- 9.29 部品を複数の設備に紐づける・紐づけ状況の表示 ----------
+section('9.29 部品と複数設備の紐づけ（同じ部品を複数の機械で使う）・紐づけ状況の表示');
+const mpA = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-MP-A', name: 'E2E複数A', line_name: 'E2E複数設備', equipment_name: 'E2E機器A' } });
+const mpB = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-MP-B', name: 'E2E複数B', line_name: 'E2E複数設備', equipment_name: 'E2E機器B' } });
+const mpC = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-MP-C', name: 'E2E複数C', line_name: 'E2E複数設備', equipment_name: 'E2E機器C' } });
+const mpPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E共用部品', quantity: 3, line_name: 'E2E複数設備', equipment_name: 'E2E機器A' } });
+const mpAdd = await api(`/api/parts/${mpPart.json?.id}/equipment`, { method: 'POST', body: { equipment_id: mpB.json?.id } });
+check('部品に使用設備を追加できる（API）', mpAdd.status === 201, `status=${mpAdd.status}`);
+const mpBDetail = await api(`/api/equipment/${mpB.json?.id}`);
+check('追加した設備（B）の画面の「関連部品」に、主な設備がAの部品が出る', (mpBDetail.json?.parts || []).some((p) => p.name === 'E2E共用部品'), JSON.stringify(mpBDetail.json?.parts));
+check('主な設備（A）の「関連部品」にも出る', ((await api(`/api/equipment/${mpA.json?.id}`)).json?.parts || []).some((p) => p.name === 'E2E共用部品'));
+check('紐づけていない設備（C）の「関連部品」には出ない', !((await api(`/api/equipment/${mpC.json?.id}`)).json?.parts || []).some((p) => p.name === 'E2E共用部品'));
+await page.goto(`${BASE}/pages/parts?id=${mpPart.json?.id}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#part-equipment', { timeout: 8000 });
+const mpCard = await page.evaluate(() => document.getElementById('part-equipment').innerText);
+check('部品の詳細: 「使用している設備」に、主な設備と追加した設備が出る（紐づけ状況が分かる）',
+  mpCard.includes('E2E複数A') && mpCard.includes('主な設備') && mpCard.includes('E2E複数B') && mpCard.includes('外す'), mpCard.slice(0, 200));
+await page.click('#part-equipment button:has-text("＋ 設備を追加")');
+await page.waitForSelector('#part-equipment .equip-picker', { timeout: 8000 });
+await page.fill('#part-equipment .equip-picker', 'E2E-MP-C E2E複数C');
+await page.click('#part-equipment .add-row button:text-is("追加")');
+await page.waitForFunction(() => document.getElementById('part-equipment')?.innerText.includes('E2E複数C'), { timeout: 8000 });
+check('部品の詳細: 画面から設備を追加できる（Cが並ぶ）', true);
+page.once('dialog', () => {});
+await page.click('#part-equipment .list-item:has-text("E2E複数B") button:has-text("外す")'); // confirm は自動承諾
+await page.waitForFunction(() => !document.getElementById('part-equipment')?.innerText.includes('E2E複数B'), { timeout: 8000 });
+check('部品の詳細: 画面から設備を外せる（Bが消え、A・Cは残る）', await page.evaluate(() => { const t = document.getElementById('part-equipment').innerText; return t.includes('E2E複数A') && t.includes('E2E複数C'); }));
+await page.setViewportSize({ width: 375, height: 720 });
+await page.waitForTimeout(300);
+check('部品の詳細: スマホ幅（375px）で横にはみ出さない', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+await page.setViewportSize({ width: 1280, height: 720 });
+// 計画の詳細: 紐づけ状況の表示（紐づく／台帳に無い）
+const mpPlanOk = await api('/api/plans', { method: 'POST', body: { title: 'E2E紐づき計画', planned_date: '2031-04-01', plan_type: 'inspection', line_name: 'E2E複数設備', equipment_name: 'E2E機器A' } });
+const mpPlanNg = await api('/api/plans', { method: 'POST', body: { title: 'E2E未紐づき計画', planned_date: '2031-04-02', plan_type: 'inspection', line_name: '台帳に無い設備', equipment_name: '台帳に無い機器' } });
+await page.goto(`${BASE}/pages/plan?id=${mpPlanOk.json?.id}`, { waitUntil: 'networkidle' });
+const mpRowOk = await page.evaluate(() => [...document.querySelectorAll('.info-row')].find((r) => r.textContent.includes('設備台帳'))?.textContent || '');
+await page.goto(`${BASE}/pages/plan?id=${mpPlanNg.json?.id}`, { waitUntil: 'networkidle' });
+const mpRowNg = await page.evaluate(() => [...document.querySelectorAll('.info-row')].find((r) => r.textContent.includes('設備台帳'))?.textContent || '');
+check('計画の詳細: 紐づいている設備名のリンクが出る／台帳に無い名前は注意が出る', mpRowOk.includes('E2E-MP-A') && mpRowNg.includes('紐づいていません'), JSON.stringify([mpRowOk, mpRowNg]));
+for (const [t, id] of [['plans', mpPlanOk.json?.id], ['plans', mpPlanNg.json?.id], ['parts', mpPart.json?.id], ['equipment', mpA.json?.id], ['equipment', mpB.json?.id], ['equipment', mpC.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

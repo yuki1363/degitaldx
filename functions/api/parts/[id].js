@@ -10,7 +10,7 @@ import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
 import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
-import { linkRowToEquipment } from '../_lib/equipment-link.js';
+import { linkRowToEquipment, describeEquipmentLink, ensurePartsEquipmentTable } from '../_lib/equipment-link.js';
 
 // NFKC 正規化＋trim（半角カナ→全角カナ・全角英数→半角。検索・表示の統一）。空は null
 const nz = (v) => { const s = normalizeJa(String(v)).trim(); return s === '' ? null : s; };
@@ -39,23 +39,26 @@ export async function onRequestGet({ env, params }) {
     .bind(id)
     .all();
 
-  // 設備台帳との照合（line_name・equipment_name が一致する設備を1件返す）
-  let equipment = null;
-  if (part.line_name) {
-    try {
-      equipment = await DB.prepare(
-        `SELECT id, code, name FROM equipment_ledger
-          WHERE deleted_at IS NULL
-            AND COALESCE(line_name, '') = COALESCE(?1, '')
-            AND COALESCE(equipment_name, '') = COALESCE(?2, '')
-          LIMIT 1`
-      )
-        .bind(part.line_name || '', part.equipment_name || '')
-        .first();
-    } catch { /* 未マイグレーション環境でも落ちないよう */ }
-  }
+  // 設備台帳との紐づけ。主な設備（設備名＋機器名／equipment_id）と、追加で紐づけた設備（parts_equipment）。
+  // 以前は名前が複数の設備に一致しても先頭の1件を返していた。一致が1件に決まるときだけ「主な設備」にする
+  const primary = await describeEquipmentLink(DB, part);
+  let extras = [];
+  try {
+    await ensurePartsEquipmentTable(DB);
+    ({ results: extras } = await DB.prepare(
+      `SELECT e.id, e.code, e.name
+         FROM parts_equipment pe JOIN equipment_ledger e ON e.id = pe.equipment_id
+        WHERE pe.part_id = ?1 AND pe.deleted_at IS NULL AND e.deleted_at IS NULL
+        ORDER BY e.code`
+    ).bind(id).all());
+  } catch { /* 表が使えない環境でも主な設備だけで表示する */ }
+  const equipmentLinks = [
+    ...(primary.equipment ? [{ ...primary.equipment, kind: 'primary' }] : []),
+    ...(extras ?? []).filter((e) => e.id !== primary.equipment?.id).map((e) => ({ ...e, kind: 'extra' })),
+  ];
 
-  return json({ part, transactions, equipment });
+  // equipment は従来の応答（主な設備1件）との互換のため残す
+  return json({ part, transactions, equipment: primary.equipment, equipment_links: equipmentLinks, equipment_status: primary.status });
 }
 
 export async function onRequestPut({ env, data, params, request }) {

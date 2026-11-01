@@ -2,7 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
-import { linkRowToEquipment } from '../_lib/equipment-link.js';
+import { linkRowToEquipment, describeEquipmentLink } from '../_lib/equipment-link.js';
 import { normalizeFormValues, deriveOverdue, getAnnualFyState } from './index.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
@@ -24,7 +24,9 @@ export async function onRequestGet({ params, env }) {
   if (!plan) return jsonError(404, '保全計画が見つかりません');
   // 一覧GETと同じく、期限を過ぎた pending は「期限超過」として返す（表示の一貫性）
   const fy = plan.annual_only ? (await getAnnualFyState(db)).current : undefined;
-  return json({ plan: deriveOverdue(plan, { fy }) });
+  // 設備台帳との紐づけ状況（画面に「どの設備に紐づいているか」を出すため）
+  const link = await describeEquipmentLink(db, plan);
+  return json({ plan: deriveOverdue(plan, { fy }), equipment_link: link.equipment, equipment_status: link.status });
 }
 
 export async function onRequestPut({ request, params, env, data }) {
