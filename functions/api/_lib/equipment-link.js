@@ -101,11 +101,25 @@ export async function linkRowToEquipment(db, table, id) {
 }
 
 /**
+ * 設備台帳に設備を登録・名称変更したあとに呼ぶ。まだ紐づいていない部品・保全計画のうち、
+ * 設備名＋機器名が台帳の1件にだけ一致するようになったものを自動で紐づける（管理画面のボタンと同じ処理）。
+ * 台帳の保存は成功済みなので、失敗しても例外にしない（紐づけは後からボタンでもできる）。
+ */
+export async function autoLinkAfterLedgerChange(db, userEmail, source = 'ledger_change') {
+  try {
+    return await backfillEquipmentLinks(db, { dryRun: false, userEmail, source });
+  } catch (err) {
+    console.error('autoLinkAfterLedgerChange failed:', err && err.stack ? err.stack : err);
+    return null;
+  }
+}
+
+/**
  * 既存データの一括紐づけ。dryRun=true なら数えるだけで何も書かない。
  * 設備名＋機器名の組ごとに台帳を引き、1件一致 → 紐づけ／複数一致 → 要確認／0件 → 一致なし に分けて返す。
  * 既に equipment_id が入っている行は触らない。
  */
-export async function backfillEquipmentLinks(db, { dryRun = true, userEmail = 'system' } = {}) {
+export async function backfillEquipmentLinks(db, { dryRun = true, userEmail = 'system', source = 'manual' } = {}) {
   await ensureEquipmentLinkColumns(db);
   const summary = { dry_run: dryRun, tables: {}, ambiguous: [], unmatched: [] };
   const statements = [];
@@ -154,6 +168,7 @@ export async function backfillEquipmentLinks(db, { dryRun = true, userEmail = 's
       tableName: 'equipment_ledger', recordId: 0, action: 'update', changedBy: userEmail,
       diff: {
         equipment_link_backfill: Object.fromEntries(Object.entries(summary.tables).map(([k, v]) => [k, v.linked])),
+        source, // manual（管理画面のボタン）／ledger_change（設備台帳の登録・名称変更）など
         // どの行を紐づけたか（上限つき）。戻すときの手がかり
         linked_ids: Object.fromEntries(Object.entries(auditIds).map(([k, ids]) => [k, ids.slice(0, BACKFILL_AUDIT_IDS)])),
       },

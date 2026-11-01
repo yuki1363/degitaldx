@@ -2603,6 +2603,22 @@ const mpRowNg = await page.evaluate(() => [...document.querySelectorAll('.info-r
 check('計画の詳細: 紐づいている設備名のリンクが出る／台帳に無い名前は注意が出る', mpRowOk.includes('E2E-MP-A') && mpRowNg.includes('紐づいていません'), JSON.stringify([mpRowOk, mpRowNg]));
 for (const [t, id] of [['plans', mpPlanOk.json?.id], ['plans', mpPlanNg.json?.id], ['parts', mpPart.json?.id], ['equipment', mpA.json?.id], ['equipment', mpB.json?.id], ['equipment', mpC.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
 
+// ---------- 9.30 台帳に追加・名称変更したら自動で紐づく ----------
+section('9.30 設備台帳に追加・名称変更したときの自動紐づけ');
+const alPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E自動紐づけ部品', quantity: 1, line_name: 'E2E後から設備', equipment_name: 'E2E後から機器' } });
+const alBefore = await api(`/api/parts/${alPart.json?.id}`);
+check('台帳に無い間は、部品は設備に紐づかない（equipment_id が空・注意の状態）', !alBefore.json?.part?.equipment_id && alBefore.json?.equipment_status === 'unmatched', JSON.stringify([alBefore.json?.part?.equipment_id, alBefore.json?.equipment_status]));
+const alEq = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-AUTO', name: 'E2E自動', line_name: 'E2E後から設備', equipment_name: 'E2E後から機器' } });
+const alAfter = await api(`/api/parts/${alPart.json?.id}`);
+check('台帳に同じ名前の設備を追加すると、部品が自動でその設備に紐づく（ボタンを押さなくてよい）',
+  alAfter.json?.part?.equipment_id === alEq.json?.id && alAfter.json?.equipment_status === 'linked', JSON.stringify([alAfter.json?.part?.equipment_id, alEq.json?.id]));
+const alPart2 = await api('/api/parts', { method: 'POST', body: { name: 'E2E改名後に紐づく部品', quantity: 1, line_name: 'E2E改名後設備', equipment_name: 'E2E改名後機器' } });
+await api(`/api/equipment/${alEq.json?.id}`, { method: 'PUT', body: { code: 'E2E-AUTO', name: 'E2E自動', line_name: 'E2E改名後設備', equipment_name: 'E2E改名後機器' } });
+const alRen = await api(`/api/parts/${alPart2.json?.id}`);
+check('台帳の設備名を変えると、新しい名前に一致する部品が自動で紐づく。以前紐づいた部品はそのまま',
+  alRen.json?.part?.equipment_id === alEq.json?.id && (await api(`/api/parts/${alPart.json?.id}`)).json?.part?.equipment_id === alEq.json?.id);
+for (const [t, id] of [['parts', alPart.json?.id], ['parts', alPart2.json?.id], ['equipment', alEq.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

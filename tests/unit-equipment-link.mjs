@@ -110,5 +110,27 @@ const titles = (await tl(4)).map((x) => x.title);
 ok('設備カルテ: equipment_id で紐づいた計画は、名前が違っても・名前が空でも拾う', titles.includes('名前違いの計画') && titles.includes('名前なしの計画'), titles.join());
 ok('設備カルテ: 他の設備の計画は拾わない', !(await tl(1)).some((x) => x.title === '名前違いの計画'));
 
+// 台帳に追加・名称変更したら、同じ名前の部品・計画を自動で紐づける
+sqlite.exec(`INSERT INTO parts_inventory (part_no, name, line_name, equipment_name, quantity, created_by) VALUES ('n1', '後から台帳に載る部品', '新設備', '新機器', 1, 't')`);
+sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, line_name, equipment_name, created_by) VALUES ('後から台帳に載る計画', 'inspection', '2026-12-01', '新設備', '新機器', 't')`);
+const nPart = q(`SELECT id FROM parts_inventory WHERE part_no='n1'`).id;
+const nPlan = q(`SELECT id FROM maintenance_plan WHERE title='後から台帳に載る計画'`).id;
+await lib.autoLinkAfterLedgerChange(db, 'u@x');
+ok('台帳に無い間は紐づかない（自動処理を呼んでも NULL のまま）', q('SELECT equipment_id e FROM parts_inventory WHERE id=?', nPart).e === null);
+const newEq = Number(sqlite.prepare(`INSERT INTO equipment_ledger (code, name, line_name, equipment_name, created_by) VALUES ('09-01', '新設備 新機器', '新設備', '新機器', 't')`).run().lastInsertRowid);
+const auto = await lib.autoLinkAfterLedgerChange(db, 'u@x');
+ok('台帳に追加すると、同じ名前の部品・計画が自動で紐づく', q('SELECT equipment_id e FROM parts_inventory WHERE id=?', nPart).e === newEq && q('SELECT equipment_id e FROM maintenance_plan WHERE id=?', nPlan).e === newEq && auto.tables.parts_inventory.linked >= 1, JSON.stringify(auto?.tables));
+ok('自動の紐づけは監査ログに source 付きで残る', /"source":"ledger_change"/.test(q(`SELECT diff_json d FROM audit_log WHERE table_name='equipment_ledger' ORDER BY id DESC LIMIT 1`).d));
+sqlite.exec(`INSERT INTO parts_inventory (part_no, name, line_name, equipment_name, quantity, created_by) VALUES ('n2', '同名が増えた後の部品', '新設備', '新機器', 1, 't')`);
+sqlite.exec(`INSERT INTO equipment_ledger (code, name, line_name, equipment_name, created_by) VALUES ('09-02', '新設備 新機器（2台目）', '新設備', '新機器', 't')`);
+await lib.autoLinkAfterLedgerChange(db, 'u@x');
+ok('同じ名前の設備が2件になると、まだ紐づいていない部品は決めない。紐づけ済みはそのまま',
+  q(`SELECT equipment_id e FROM parts_inventory WHERE part_no='n2'`).e === null && q('SELECT equipment_id e FROM parts_inventory WHERE id=?', nPart).e === newEq);
+sqlite.exec(`INSERT INTO parts_inventory (part_no, name, line_name, equipment_name, quantity, created_by) VALUES ('n3', '名称変更後に合う部品', '改名後の設備', '改名後の機器', 1, 't')`);
+sqlite.exec(`UPDATE equipment_ledger SET line_name='改名後の設備', equipment_name='改名後の機器' WHERE code='09-02'`);
+await lib.autoLinkAfterLedgerChange(db, 'u@x');
+ok('台帳の名称を変えると、新しい名前に一致する部品が紐づく', q(`SELECT equipment_id e FROM parts_inventory WHERE part_no='n3'`).e === q(`SELECT id FROM equipment_ledger WHERE code='09-02'`).id);
+ok('自動処理が失敗しても例外にしない（台帳の保存を失敗させない）', (await lib.autoLinkAfterLedgerChange({ prepare() { throw new Error('db down'); } }, 'u@x')) === null);
+
 console.log(`\n========== 単体（設備台帳との紐づけ）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

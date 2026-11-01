@@ -9,6 +9,7 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
 import { listAttachedFiles } from '../_lib/storage.js';
 import { parseEquipmentInput } from './index.js';
+import { autoLinkAfterLedgerChange } from '../_lib/equipment-link.js';
 
 async function findEquipment(env, idParam) {
   const id = Number(idParam);
@@ -204,6 +205,8 @@ export async function onRequestPut({ request, env, data, params }) {
     changedBy: data.user.email,
     diff,
   });
+  // 設備名・機器名を変えたときは、新しい名前に一致する部品・保全計画を自動で紐づける（失敗しても更新は成功のまま）
+  if ('line_name' in diff || 'equipment_name' in diff) await autoLinkAfterLedgerChange(env.DB, data.user.email);
 
   return json({ id: existing.id });
 }
