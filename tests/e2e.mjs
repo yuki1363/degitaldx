@@ -2533,6 +2533,35 @@ check('利用状況: 期間を切り替えられる', true);
 await page.goto(`${BASE}/pages/help`, { waitUntil: 'networkidle' });
 check('使い方: 音声入力（キーボードのマイク）の案内がある', await page.evaluate(() => document.getElementById('start')?.textContent.includes('マイク')));
 
+// ---------- 9.28 設備台帳との紐づけ（ID） ----------
+section('9.28 設備台帳との紐づけ（設備名の変更に左右されない）');
+const lkEq = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-LINK', name: 'E2E紐づけ', line_name: 'E2E紐づけ設備', equipment_name: 'E2E紐づけ機器' } });
+const lkPlan = await api('/api/plans', { method: 'POST', body: { title: 'E2E紐づけ計画', planned_date: '2031-03-01', plan_type: 'inspection', line_name: 'E2E紐づけ設備', equipment_name: 'E2E紐づけ機器' } });
+const lkPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E紐づけ部品', quantity: 1, line_name: 'E2E紐づけ設備', equipment_name: 'E2E紐づけ機器' } });
+// 台帳側の設備名を変える（計画・部品に入っている名前とは一致しなくなる）
+await api(`/api/equipment/${lkEq.json?.id}`, { method: 'PUT', body: { code: 'E2E-LINK', name: 'E2E紐づけ', line_name: 'E2E改名後の設備', equipment_name: 'E2E紐づけ機器' } });
+const lkDetail = await api(`/api/equipment/${lkEq.json?.id}`);
+check('設備詳細: 台帳の設備名を変えても、登録時に紐づいた計画・部品は拾える（名前の一致に頼らない）',
+  (lkDetail.json?.plans || []).some((p) => p.title === 'E2E紐づけ計画') && (lkDetail.json?.parts || []).some((p) => p.name === 'E2E紐づけ部品'),
+  JSON.stringify({ plans: lkDetail.json?.plans?.length, parts: lkDetail.json?.parts?.length }));
+const lkTl = await api(`/api/equipment/${lkEq.json?.id}/timeline?types=plan`);
+check('設備カルテ: 紐づいた計画が、名前が変わっても時系列に出る', (lkTl.json?.items || []).some((x) => x.title === 'E2E紐づけ計画'));
+const lkDry = await api('/api/admin/link-equipment', { method: 'POST', body: {} });
+check('紐づけ管理API: 既定は確認のみで、件数の内訳（紐づく・複数一致・台帳に無い）を返す',
+  lkDry.status === 200 && lkDry.json?.dry_run === true && ['maintenance_plan', 'parts_inventory'].every((t) => lkDry.json?.tables?.[t] && 'linked' in lkDry.json.tables[t]), JSON.stringify(lkDry.json).slice(0, 200));
+const lkEditor = await apiAs(editorEmail, '/api/admin/link-equipment', { method: 'POST', body: {} });
+check('紐づけ管理API: 管理者以外は403', lkEditor.status === 403, `status=${lkEditor.status}`);
+await page.goto(`${BASE}/pages/admin`, { waitUntil: 'networkidle' });
+await page.click('.tab-btn[data-tab="manage"]');
+await page.waitForSelector('button:has-text("確認する（変更しません）")', { timeout: 8000 });
+await page.click('button:has-text("確認する（変更しません）")');
+await page.waitForSelector('.card:has-text("設備台帳との紐づけ") .rpt-table', { timeout: 8000 });
+const lkUi = await page.evaluate(() => [...document.querySelectorAll('.card')].find((c) => c.querySelector('h3')?.textContent === '設備台帳との紐づけ')?.innerText || '');
+check('管理画面: 「確認する」で、紐づけられる件数などの表が出る（まだ何も変更しない）', lkUi.includes('まだ何も変更していません') && lkUi.includes('部品在庫') && lkUi.includes('保全計画'), lkUi.slice(0, 200));
+await api(`/api/plans/${lkPlan.json?.id}`, { method: 'DELETE' });
+await api(`/api/parts/${lkPart.json?.id}`, { method: 'DELETE' });
+await api(`/api/equipment/${lkEq.json?.id}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

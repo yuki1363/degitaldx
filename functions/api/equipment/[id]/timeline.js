@@ -25,7 +25,7 @@ const KINDS = {
                 COALESCE(p.title, '') AS title, COALESCE(p.plan_type, '') AS sub, COALESCE(p.status, '') AS extra
            FROM maintenance_plan p
           WHERE p.deleted_at IS NULL
-            AND COALESCE(p.line_name, '') = ?2 AND COALESCE(p.equipment_name, '') = ?3`,
+            AND (p.equipment_id = ?1 OR (COALESCE(p.line_name, '') = ?2 AND COALESCE(p.equipment_name, '') = ?3))`,
   // 使用部品: 業務依頼・トラブルに紐づけて記録された入出庫のうち、この設備のもの
   parts: `SELECT 'parts' AS kind, pt.part_id AS rec_id, pt.created_at AS at, datetime(pt.created_at, '+9 hours') AS sort_key,
                  COALESCE(p.name, '') AS title, pt.type AS sub, CAST(pt.quantity AS TEXT) AS extra
@@ -54,9 +54,11 @@ export async function onRequestGet({ request, env, params }) {
   const limit = clampInt(sp.get('limit'), 30, 1, 100);
   const offset = clampInt(sp.get('offset'), 0, 0, 5000);
 
-  // 設備名・機器名の無い設備は、保全計画を拾わない（空文字どうしで無関係な計画に一致するのを防ぐ）
+  // 設備名・機器名の無い設備は、名前では保全計画を拾わない（空文字どうしで無関係な計画に一致するのを防ぐ）。
+  // 台帳の ID で紐づいた計画（equipment_id）は、名前が空でも拾う。名前に使えない値（制御文字）で一致を止める
   const planBlank = !eq.line_name && !eq.equipment_name;
-  const parts = kinds.filter((k) => !(k === 'plan' && planBlank)).map((k) => KINDS[k]);
+  const NO_NAME = '\u0001';
+  const parts = kinds.map((k) => KINDS[k]);
   if (parts.length === 0) return json({ items: [], has_more: false });
 
   // 日付の同じものは種別・IDで安定して並べる。続きの判定のため1件多く読む
@@ -67,7 +69,7 @@ export async function onRequestGet({ request, env, params }) {
   const needsPlan = parts.includes(KINDS.plan);
   const stmt = env.DB.prepare(needsPlan ? sql : sql.replace('?4', '?2').replace('?5', '?3'));
   const binds = needsPlan
-    ? [id, eq.line_name || '', eq.equipment_name || '', limit + 1, offset]
+    ? [id, planBlank ? NO_NAME : (eq.line_name || ''), planBlank ? NO_NAME : (eq.equipment_name || ''), limit + 1, offset]
     : [id, limit + 1, offset];
 
   let rows;

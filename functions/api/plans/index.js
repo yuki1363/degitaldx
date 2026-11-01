@@ -2,6 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog, auditStatement } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { linkRowToEquipment } from '../_lib/equipment-link.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
@@ -486,6 +487,7 @@ export async function onRequestPost({ request, env, data }) {
   const result = await insertMaintenancePlan(db, cols, vals);
 
   const id = result.meta?.last_row_id;
+  await linkRowToEquipment(db, 'maintenance_plan', id); // 設備名＋機器名が台帳の1件に一致すれば equipment_id を入れる（失敗しても保存は止めない）
 
   await writeAuditLog(db, {
     tableName: 'maintenance_plan',

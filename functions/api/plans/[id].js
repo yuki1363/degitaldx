@@ -2,6 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
+import { linkRowToEquipment } from '../_lib/equipment-link.js';
 import { normalizeFormValues, deriveOverdue, getAnnualFyState } from './index.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
@@ -110,6 +111,11 @@ export async function onRequestPut({ request, params, env, data }) {
     await db.prepare(`
       UPDATE maintenance_plan SET ${setClauses.join(', ')} WHERE id = ?
     `).bind(...binds).run();
+  }
+
+  // 設備名・機器名を変えたときは、設備台帳との紐づけも入れ直す（失敗しても保存は止めない）
+  if (setClauses.length > 0 && ('line_name' in body || 'equipment_name' in body)) {
+    await linkRowToEquipment(db, 'maintenance_plan', id);
   }
 
   // 帳票の入力値は別UPDATE（form_values_json 列が無い旧DBでも本体更新が壊れないように）

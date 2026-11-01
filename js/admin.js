@@ -334,6 +334,45 @@ function customFieldSection() {
   return wrap;
 }
 
+// 部品在庫・保全計画の設備名＋機器名を、設備台帳の設備(ID)に紐づける。まず「確認」（何も変更しない）→「実行」
+function linkEquipmentSection() {
+  const result = el('div', {});
+  const confirmBtn = el('button', { class: 'btn btn-sm', type: 'button', disabled: true }, '紐づけを実行');
+  const show = (r) => {
+    const tables = Object.values(r.tables || {});
+    const pairText = (p) => `${p.table}: ${[p.line_name, p.equipment_name].filter(Boolean).join(' / ') || '（名称なし）'}（${p.count}件${p.candidates ? `・候補: ${p.candidates.join(', ')}` : ''}）`;
+    render(result, [
+      el('p', { class: 'hint', style: 'margin-top:8px' }, r.dry_run ? '確認結果（まだ何も変更していません）' : '実行しました'),
+      el('table', { class: 'rpt-table' }, [
+        el('thead', {}, el('tr', {}, ['対象', r.dry_run ? '紐づけられる' : '紐づけた', '同名が複数', '台帳に無い'].map((h) => el('th', {}, h)))),
+        el('tbody', {}, tables.map((t) => el('tr', {}, [el('td', {}, t.label), el('td', { class: 'rpt-num' }, String(t.linked)), el('td', { class: 'rpt-num' }, String(t.ambiguous)), el('td', { class: 'rpt-num' }, String(t.unmatched))]))),
+      ]),
+      r.ambiguous.length ? el('div', {}, [el('p', { class: 'hint' }, '同じ設備名＋機器名の設備が台帳に複数あり、自動では決められないもの:'), el('ul', { class: 'hint' }, r.ambiguous.map((p) => el('li', {}, pairText(p))))]) : null,
+      r.unmatched.length ? el('div', {}, [el('p', { class: 'hint' }, '台帳に同じ名前の設備が無いもの（表記のずれの可能性。件数の多い順・上位30組）:'), el('ul', { class: 'hint' }, r.unmatched.map((p) => el('li', {}, pairText(p))))]) : null,
+    ]);
+  };
+  const run = async (dryRun, btn) => {
+    btn.disabled = true;
+    try {
+      const r = await api.post('/api/admin/link-equipment', { dry_run: dryRun });
+      show(r);
+      confirmBtn.disabled = !dryRun || !Object.values(r.tables).some((t) => t.linked > 0);
+    } catch (err) { alert(`失敗しました: ${err.message}`); }
+    finally { btn.disabled = false; if (!dryRun) confirmBtn.disabled = true; }
+  };
+  const checkBtn = el('button', { class: 'btn btn-sm', type: 'button', onclick: () => run(true, checkBtn) }, '🔍 確認する（変更しません）');
+  confirmBtn.onclick = () => {
+    if (!confirm('確認した内容で、部品在庫・保全計画を設備台帳に紐づけます。\n（名称や更新日時は変わりません。実行内容は監査ログに残ります）\nよろしいですか？')) return;
+    run(false, confirmBtn);
+  };
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title' }, '設備台帳との紐づけ'),
+    el('p', { class: 'hint' }, '部品在庫・保全計画の「設備名＋機器名」が設備台帳の1件にだけ一致するものを、その設備に紐づけます。設備カルテなどが、名前の表記ゆれや台帳側の名称変更に左右されずに履歴を拾えるようになります。新しく登録・編集したものは自動で紐づきます。このボタンは、すでにあるデータ用です。'),
+    el('div', { class: 'action-row' }, [checkBtn, confirmBtn]),
+    result,
+  ]);
+}
+
 async function renderManage() {
   const { equipment } = await api.get('/api/equipment?limit=2000');
 
@@ -346,6 +385,7 @@ async function renderManage() {
     categorySection('トラブルジャンル', '/api/troubles/categories', '使用中のジャンルは削除できません（先に該当トラブル記録のジャンルを変更してください）。'),
     categorySection('日報カテゴリ', '/api/reports/categories', '使用中のカテゴリは削除できません。'),
     customFieldSection(),
+    linkEquipmentSection(),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '点検項目マスタ'),
       el('p', { class: 'hint' }, '点検項目は設備ごとに管理します。設備を選んで管理画面を開いてください。'),
