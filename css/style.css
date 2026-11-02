@@ -3071,7 +3071,8 @@ input.is-abnormal {
 .rpt-overdue td { background: #fef2f2; }
 .rpt-empty, .rpt-more { font-size: 12px; color: var(--color-text-muted); margin: 2px 0; }
 @media print {
-  @page { size: A4 portrait; margin: 12mm; }
+  /* @page は全ページ共通で body クラスで絞れない。ここで margin を指定するとラベル印刷（余白0）まで上書きされ、台紙に合わなくなる。
+     保全レポートの余白は pages/report-summary.html の <style> で、そのページだけに指定する */
   body.rpt-page .app-header, body.rpt-page .rpt-controls, body.rpt-page #offline-queue-bar,
   body.rpt-page #relogin-banner { display: none !important; }
   body.rpt-page, body.rpt-page .container { background: #fff !important; padding: 0 !important; margin: 0 !important; max-width: none !important; }

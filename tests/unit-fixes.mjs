@@ -113,5 +113,12 @@ console.log('\n=== 単体: 数量の上限・列の自動追加の再試行・�
   ok('limit の上限は2000', r.limit === 2000);
 }
 
+// ラベル印刷: css/style.css の @page は全ページ共通。余白0の1つだけにする（保全レポートの margin:12mm が後から上書きして、
+// ラベルが約0.89倍に縮み台紙とずれた不具合の再発防止。レポートの余白は report-summary.html の print 専用 <style> で指定する）
+const css = fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const pageRules = css.match(/@page\s*\{[^}]*\}/g) || [];
+ok('style.css の @page は1つだけで、余白は0（ラベル台紙に合わせる）', pageRules.length === 1 && /margin:\s*0/.test(pageRules[0]), pageRules.join(' | '));
+ok('保全レポートの余白は専用ページ側の print 用 <style> で指定する', /@page\s*\{[^}]*margin:\s*12mm/.test(fs.readFileSync(path.join(ROOT, 'pages/report-summary.html'), 'utf8')));
+
 console.log(`\n========== 単体（数量上限・列再試行・設備limit）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);
