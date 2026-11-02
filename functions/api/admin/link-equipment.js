@@ -4,7 +4,7 @@
 //   既に紐づいている行は触らない。updated_at は変えない。実行内容は監査ログに残す。
 
 import { requireRole } from '../_lib/auth.js';
-import { json, readJson } from '../_lib/http.js';
+import { json, jsonError, readJson } from '../_lib/http.js';
 import { backfillEquipmentLinks } from '../_lib/equipment-link.js';
 
 export async function onRequestPost({ request, env, data }) {
@@ -12,6 +12,9 @@ export async function onRequestPost({ request, env, data }) {
   if (denied) return denied;
   const body = (await readJson(request)) || {};
   const dryRun = body.dry_run !== false; // 明示的に false のときだけ書き込む
-  const summary = await backfillEquipmentLinks(env.DB, { dryRun, userEmail: data.user.email });
+  // tables: 対象の表を絞る（['parts_inventory'] など）。未指定は部品・保全計画の両方
+  const tables = Array.isArray(body.tables) ? body.tables.filter((t) => ['parts_inventory', 'maintenance_plan'].includes(t)) : null;
+  if (tables && !tables.length) return jsonError(400, 'tables が不正です。');
+  const summary = await backfillEquipmentLinks(env.DB, { dryRun, userEmail: data.user.email, tables });
   return json(summary);
 }

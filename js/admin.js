@@ -337,6 +337,8 @@ function customFieldSection() {
 // 部品在庫・保全計画の設備名＋機器名を、設備台帳の設備(ID)に紐づける。まず「確認」（何も変更しない）→「実行」
 function linkEquipmentSection() {
   const result = el('div', {});
+  const withPlans = el('input', { type: 'checkbox', onchange: () => { confirmBtn.disabled = true; } }); // 既定は部品のみ（保全計画は必要なときだけ）
+  const tablesBody = () => (withPlans.checked ? {} : { tables: ['parts_inventory'] });
   const confirmBtn = el('button', { class: 'btn btn-sm', type: 'button', disabled: true }, '紐づけを実行');
   const show = (r) => {
     const tables = Object.values(r.tables || {});
@@ -354,7 +356,7 @@ function linkEquipmentSection() {
   const run = async (dryRun, btn) => {
     btn.disabled = true;
     try {
-      const r = await api.post('/api/admin/link-equipment', { dry_run: dryRun });
+      const r = await api.post('/api/admin/link-equipment', { dry_run: dryRun, ...tablesBody() });
       show(r);
       confirmBtn.disabled = !dryRun || !Object.values(r.tables).some((t) => t.linked > 0);
     } catch (err) { alert(`失敗しました: ${err.message}`); }
@@ -362,12 +364,13 @@ function linkEquipmentSection() {
   };
   const checkBtn = el('button', { class: 'btn btn-sm', type: 'button', onclick: () => run(true, checkBtn) }, '🔍 確認する（変更しません）');
   confirmBtn.onclick = () => {
-    if (!confirm('確認した内容で、部品在庫・保全計画を設備台帳に紐づけます。\n（名称や更新日時は変わりません。実行内容は監査ログに残ります）\nよろしいですか？')) return;
+    if (!confirm(`確認した内容で、${withPlans.checked ? '部品在庫・保全計画' : '部品在庫'}を設備台帳に紐づけます。\n（名称や更新日時は変わりません。実行内容は監査ログに残ります）\nよろしいですか？`)) return;
     run(false, confirmBtn);
   };
   return el('div', { class: 'card' }, [
     el('h3', { class: 'card-title' }, '設備台帳との紐づけ'),
     el('p', { class: 'hint' }, '部品在庫・保全計画の「設備名＋機器名」が設備台帳の1件にだけ一致するものを、その設備に紐づけます。設備カルテなどが、名前の表記ゆれや台帳側の名称変更に左右されずに履歴を拾えるようになります。新しく登録・編集したものは自動で紐づきます。このボタンは、すでにあるデータ用です。'),
+    el('label', { class: 'hint', style: 'display:block;margin:6px 0' }, [withPlans, ' 保全計画も対象にする（チェックなしは部品在庫のみ）']),
     el('div', { class: 'action-row' }, [checkBtn, confirmBtn]),
     result,
   ]);
