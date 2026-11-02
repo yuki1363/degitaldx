@@ -117,15 +117,16 @@ export async function autoLinkAfterLedgerChange(db, userEmail, source = 'ledger_
 /**
  * 既存データの一括紐づけ。dryRun=true なら数えるだけで何も書かない。
  * 設備名＋機器名の組ごとに台帳を引き、1件一致 → 紐づけ／複数一致 → 要確認／0件 → 一致なし に分けて返す。
- * 既に equipment_id が入っている行は触らない。
+ * 既に equipment_id が入っている行は触らない。tables を渡すとその表だけを対象にする（既定は両方）。
  */
-export async function backfillEquipmentLinks(db, { dryRun = true, userEmail = 'system', source = 'manual' } = {}) {
+export async function backfillEquipmentLinks(db, { dryRun = true, userEmail = 'system', source = 'manual', tables = null } = {}) {
   await ensureEquipmentLinkColumns(db);
   const summary = { dry_run: dryRun, tables: {}, ambiguous: [], unmatched: [] };
   const statements = [];
   const auditIds = {};
 
   for (const [table, { label }] of Object.entries(TABLES)) {
+    if (Array.isArray(tables) && !tables.includes(table)) continue; // 対象を絞ったとき（例: 部品のみ）
     const { results: pairs } = await db.prepare(
       `SELECT line_name, equipment_name, COUNT(*) AS n FROM ${table}
         WHERE deleted_at IS NULL AND equipment_id IS NULL

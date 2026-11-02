@@ -102,6 +102,16 @@ const call = async (role, body) => (await adminApi.onRequestPost({ request: new 
 ok('管理API: admin 以外は403', (await call('editor', {})).status === 403 && (await call('viewer', {})).status === 403);
 ok('管理API: dry_run を省略すると確認のみ（書き込まない）', (await (await call('admin', {})).json()).dry_run === true);
 
+// 対象の絞り込み（部品のみ）
+ok('管理API: tables に不正な値だけだと400', (await call('admin', { tables: ['users'] })).status === 400);
+sqlite.exec(`INSERT INTO parts_inventory (part_no, name, line_name, equipment_name, quantity, created_by) VALUES ('t1', '絞り込み部品', '充填機', 'ポンプ', 1, 't')`);
+sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, line_name, equipment_name, created_by) VALUES ('絞り込み計画', 'inspection', '2026-11-20', '充填機', 'ポンプ', 't')`);
+const only = await (await call('admin', { dry_run: true, tables: ['parts_inventory'] })).json();
+ok('部品のみで確認すると、計画は集計に出ない', Object.keys(only.tables).join() === 'parts_inventory' && only.tables.parts_inventory.linked >= 1, JSON.stringify(only.tables));
+await (await call('admin', { dry_run: false, tables: ['parts_inventory'] })).json();
+ok('部品のみで実行すると、部品だけ紐づき計画は NULL のまま',
+  q(`SELECT equipment_id e FROM parts_inventory WHERE part_no='t1'`).e === 1 && q(`SELECT equipment_id e FROM maintenance_plan WHERE title='絞り込み計画'`).e === null);
+
 // 設備カルテ: ID で紐づいた計画は、名前が違っても・空でも拾う
 sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, line_name, equipment_name, equipment_id, created_by) VALUES ('名前違いの計画', 'inspection', '2026-11-05', '旧名称', '旧機器', 4, 't')`);
 sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, equipment_id, created_by) VALUES ('名前なしの計画', 'inspection', '2026-11-06', 4, 't')`);
