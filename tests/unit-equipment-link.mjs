@@ -10,6 +10,7 @@ const load = (p) => import(pathToFileURL(path.join(ROOT, p)).href);
 const lib = await load('functions/api/_lib/equipment-link.js');
 const adminApi = await load('functions/api/admin/link-equipment.js');
 const timeline = await load('functions/api/equipment/[id]/timeline.js');
+const detail = await load('functions/api/equipment/[id].js');
 
 const sqlite = new DatabaseSync(':memory:');
 for (const st of fs.readFileSync(path.join(ROOT, 'schema.sql'), 'utf8').split(/;\s*(?:\n|$)/)) {
@@ -141,6 +142,26 @@ sqlite.exec(`UPDATE equipment_ledger SET line_name='改名後の設備', equipme
 await lib.autoLinkAfterLedgerChange(db, 'u@x');
 ok('台帳の名称を変えると、新しい名前に一致する部品が紐づく', q(`SELECT equipment_id e FROM parts_inventory WHERE part_no='n3'`).e === q(`SELECT id FROM equipment_ledger WHERE code='09-02'`).id);
 ok('自動処理が失敗しても例外にしない（台帳の保存を失敗させない）', (await lib.autoLinkAfterLedgerChange({ prepare() { throw new Error('db down'); } }, 'u@x')) === null);
+
+// 設備詳細の点検履歴: 保全計画で種別「点検」の未実施の予定を5件、実施記録を5件まで返す
+const eqA = 1; // 充填機 / ポンプ
+const addPlan = (title, type, date, status = 'pending', extra = '') => sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, status, line_name, equipment_name, created_by${extra ? ', ' + extra.split('=')[0] : ''}) VALUES ('${title}', '${type}', '${date}', '${status}', '充填機', 'ポンプ', 't'${extra ? ', ' + extra.split('=')[1] : ''})`);
+for (let i = 1; i <= 6; i++) addPlan(`点検予定${i}`, 'inspection', `2099-0${i}-01`);
+addPlan('完了済みの点検', 'inspection', '2026-01-01', 'done');
+addPlan('工事の予定', 'construction', '2026-11-10');
+addPlan('期限切れの点検', 'inspection', '2020-01-01');
+addPlan('年間計画の点検', 'inspection', '2026-11-01', 'pending', 'annual_only=1');
+sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, status, line_name, equipment_name, recurrence_rule, created_by) VALUES ('繰り返しの点検', 'inspection', '2021-01-01', 'pending', '充填機', 'ポンプ', '{"freq":"monthly","interval":1}', 't')`);
+sqlite.exec(`INSERT INTO maintenance_plan (title, plan_type, planned_date, status, line_name, equipment_name, created_by) VALUES ('他の設備の点検', 'inspection', '2020-02-01', 'pending', '搬送', 'ポンプ2', 't')`);
+for (let i = 1; i <= 7; i++) sqlite.exec(`INSERT INTO inspection_result (equipment_id, assignee_id, inspected_at, items_json, created_by) VALUES (${eqA}, 1, '2026-10-0${i}T00:00:00Z', '[]', 't')`);
+const det = await (await detail.onRequestGet({ request: new Request(`http://x/api/equipment/${eqA}`), env: { DB: db }, params: { id: String(eqA) } })).json();
+const ip = det.inspection_plans || [];
+ok('設備詳細: 点検の予定は5件まで・予定日順', ip.length === 5 && ip[0].title === '期限切れの点検', ip.map((p) => p.title).join());
+ok('設備詳細: 完了済み・工事・年間計画専用・他の設備の予定は含めない', !ip.some((p) => ['完了済みの点検', '工事の予定', '年間計画の点検', '他の設備の点検'].includes(p.title)));
+ok('設備詳細: 期限を過ぎた予定は is_overdue、未来の予定は false', ip[0].is_overdue === true && ip.filter((p) => p.title.startsWith('点検予定')).every((p) => p.is_overdue === false));
+const det2 = await (await detail.onRequestGet({ request: new Request(`http://x/api/equipment/${eqA}`), env: { DB: db }, params: { id: String(eqA) } })).json();
+ok('設備詳細: 繰り返し予定は期限超過にしない（展開しないと判定できないため）', (await (async () => { sqlite.exec(`DELETE FROM maintenance_plan WHERE title LIKE '点検予定%' OR title='期限切れの点検'`); const d = await (await detail.onRequestGet({ request: new Request(`http://x/api/equipment/${eqA}`), env: { DB: db }, params: { id: String(eqA) } })).json(); return d.inspection_plans.find((p) => p.title === '繰り返しの点検')?.is_overdue === false; })()));
+ok('設備詳細: 実施記録は5件まで', det2.inspections.length === 5, String(det2.inspections.length));
 
 console.log(`\n========== 単体（設備台帳との紐づけ）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

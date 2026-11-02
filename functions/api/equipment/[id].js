@@ -6,7 +6,7 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, jstToday } from '../_lib/util.js';
 import { listAttachedFiles } from '../_lib/storage.js';
 import { parseEquipmentInput } from './index.js';
 import { autoLinkAfterLedgerChange } from '../_lib/equipment-link.js';
@@ -64,7 +64,7 @@ export async function onRequestGet({ env, params }) {
     }
   };
 
-  const [files, inspections, troubles, repairs, plans, history, parts] = await Promise.all([
+  const [files, inspections, troubles, repairs, plans, history, parts, inspectionPlans] = await Promise.all([
     safe(() => listAttachedFiles(env, 'equipment_ledger', equipment.id)),
     safe(() =>
       env.DB.prepare(
@@ -72,7 +72,7 @@ export async function onRequestGet({ env, params }) {
            FROM inspection_result r
           WHERE r.equipment_id = ?1 AND r.deleted_at IS NULL
           ORDER BY r.inspected_at DESC
-          LIMIT 10`
+          LIMIT 5`
       )
         .bind(equipment.id)
         .all()
@@ -153,9 +153,29 @@ export async function onRequestGet({ env, params }) {
       return (await env.DB.prepare(`${sel} AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, '')${tail}`)
         .bind(equipment.line_name || '', equipment.equipment_name || '').all()).results;
     }),
+    // 点検予定（01）— 種別が「点検」で未実施の予定を予定日順に5件。点検履歴の欄に「予定」として並べ、
+    // 「点検を始める」から点検実施（02）へ進む（保存すると予定が完了し、実施記録＝履歴になる）。
+    // 台帳の ID（equipment_id）または設備名・機器名の一致で拾う。年間計画表専用の予定（annual_only）と
+    // 繰り返し予定（recurrence_rule・展開しないと超過判定できない）は期限超過の判定から外す
+    safe(async () => {
+      const noName = !equipment.line_name && !equipment.equipment_name;
+      const binds = [equipment.line_name || '', equipment.equipment_name || '', equipment.id, noName ? 1 : 0];
+      const sel = `SELECT id, title, planned_date, planned_end_date, status, recurrence_rule FROM maintenance_plan
+          WHERE deleted_at IS NULL AND plan_type = 'inspection' AND status != 'done'`;
+      const who = `(equipment_id = ?3 OR (?4 = 0 AND COALESCE(line_name, '') = COALESCE(?1, '') AND COALESCE(equipment_name, '') = COALESCE(?2, '')))`;
+      const tail = ` ORDER BY planned_date ASC, id ASC LIMIT 5`;
+      let rows;
+      try { rows = (await env.DB.prepare(`${sel} AND COALESCE(annual_only, 0) = 0 AND ${who}${tail}`).bind(...binds).all()).results; }
+      catch { rows = (await env.DB.prepare(`${sel} AND ${who}${tail}`).bind(...binds).all()).results; } // annual_only 列が無い旧DB
+      const today = jstToday();
+      return rows.map(({ recurrence_rule, ...p }) => ({
+        ...p,
+        is_overdue: !recurrence_rule && (p.planned_end_date || p.planned_date) < today,
+      }));
+    }),
   ]);
 
-  return json({ equipment, files, inspections, troubles, repairs, plans, history, parts });
+  return json({ equipment, files, inspections, inspection_plans: inspectionPlans, troubles, repairs, plans, history, parts });
 }
 
 export async function onRequestPut({ request, env, data, params }) {
