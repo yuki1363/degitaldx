@@ -333,7 +333,7 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { equipment: eq, files, inspections, troubles = [], repairs = [], plans = [], history, parts = [] } =
+  const { equipment: eq, files, inspections, inspection_plans: inspectionPlans = [], troubles = [], repairs = [], plans = [], history, parts = [] } =
     await api.get(`/api/equipment/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const isAdmin = hasRole(currentUser, 'admin');
@@ -489,9 +489,31 @@ async function renderDetail(id) {
     ]),
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
-        el('h3', { class: 'card-title' }, '点検履歴（直近10件）'),
+        el('h3', { class: 'card-title' }, '点検履歴（予定5件・実施5件）'),
         el('a', { class: 'btn btn-sm', href: `/pages/inspection?equipment_id=${eq.id}` }, 'すべて見る'),
       ]),
+      // 保全計画で種別「点検」の未実施の予定。「点検を始める」で点検実施へ進み、保存すると下の実施記録（履歴）になる
+      inspectionPlans.length > 0
+        ? el('div', { class: 'row-list' },
+            inspectionPlans.map((p) => {
+              const q = new URLSearchParams({ new: '1', plan_id: String(p.id), equipment_id: String(eq.id) });
+              if (p.planned_date) q.set('date', p.planned_date.slice(0, 10));
+              return el('div', { class: 'list-item' }, [
+                el('a', { class: 'list-item-main', href: `/pages/plan?id=${p.id}` }, [
+                  el('div', { class: 'list-item-title' }, [
+                    '📅 ',
+                    p.planned_end_date && p.planned_end_date !== p.planned_date
+                      ? `${formatDate(p.planned_date)} 〜 ${formatDate(p.planned_end_date)}`
+                      : formatDate(p.planned_date),
+                    p.is_overdue ? el('span', { class: 'abn-badge is-abn' }, '⚠期限超過') : el('span', { class: 'status-badge' }, '予定'),
+                  ]),
+                  el('div', { class: 'list-item-sub' }, p.title),
+                ]),
+                canEdit ? el('a', { class: 'btn btn-sm btn-primary', href: `/pages/inspection?${q}` }, '▶ 点検を始める') : null,
+              ]);
+            })
+          )
+        : null,
       inspections.length === 0
         ? el('p', { class: 'empty' }, '点検記録はまだありません。')
         : el('div', { class: 'row-list' },

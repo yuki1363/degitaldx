@@ -2619,6 +2619,23 @@ check('台帳の設備名を変えると、新しい名前に一致する部品�
   alRen.json?.part?.equipment_id === alEq.json?.id && (await api(`/api/parts/${alPart.json?.id}`)).json?.part?.equipment_id === alEq.json?.id);
 for (const [t, id] of [['parts', alPart.json?.id], ['parts', alPart2.json?.id], ['equipment', alEq.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
 
+// ---------- 9.31 設備詳細の点検履歴に点検予定を出す ----------
+section('9.31 設備詳細の点検履歴（予定5件・実施5件）');
+const ipEq = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-IPLAN', name: 'E2E点検予定設備', line_name: 'E2E予定ライン', equipment_name: 'E2E予定機器' } });
+const ipPlan = await api('/api/plans', { method: 'POST', body: { title: 'E2E点検予定の履歴表示', plan_type: 'inspection', planned_date: '2020-03-01', line_name: 'E2E予定ライン', equipment_name: 'E2E予定機器' } });
+const ipOther = await api('/api/plans', { method: 'POST', body: { title: 'E2E工事予定は出さない', plan_type: 'construction', planned_date: '2020-03-02', line_name: 'E2E予定ライン', equipment_name: 'E2E予定機器' } });
+const ipDet = await api(`/api/equipment/${ipEq.json?.id}`);
+check('設備詳細APIは点検の予定だけを inspection_plans に返す（期限超過つき）',
+  (ipDet.json?.inspection_plans || []).length === 1 && ipDet.json.inspection_plans[0].title === 'E2E点検予定の履歴表示' && ipDet.json.inspection_plans[0].is_overdue === true, JSON.stringify(ipDet.json?.inspection_plans));
+await page.goto(`${BASE}/pages/ledger?id=${ipEq.json?.id}`, { waitUntil: 'networkidle' });
+// 「今後の保全計画」の欄には工事も出る。点検履歴のカードの中だけを見る
+const ipText = await page.evaluate(() => [...document.querySelectorAll('.card')].find((c) => c.querySelector('.card-title')?.textContent.startsWith('点検履歴'))?.textContent || '');
+check('画面の点検履歴に「予定」と「期限超過」が出て、工事の予定は出ない', ipText.includes('E2E点検予定の履歴表示') && ipText.includes('期限超過') && !ipText.includes('E2E工事予定は出さない') && ipText.includes('点検履歴（予定5件・実施5件）'),
+  JSON.stringify({ plan: ipText.includes('E2E点検予定の履歴表示'), over: ipText.includes('期限超過'), kou: ipText.includes('E2E工事予定は出さない'), title: ipText.includes('点検履歴（予定5件・実施5件）'), has: ipText.includes('点検履歴') }));
+const ipHref = await page.evaluate(() => [...document.querySelectorAll('a')].find((a) => a.textContent.includes('点検を始める'))?.getAttribute('href') || '');
+check('「▶ 点検を始める」は plan_id と設備を付けて点検実施へ進む', ipHref.includes('/pages/inspection') && ipHref.includes(`plan_id=${ipPlan.json?.id}`) && ipHref.includes(`equipment_id=${ipEq.json?.id}`), ipHref);
+for (const [t, id] of [['plans', ipPlan.json?.id], ['plans', ipOther.json?.id], ['equipment', ipEq.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
