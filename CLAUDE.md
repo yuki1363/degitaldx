@@ -126,7 +126,7 @@
 - カスタマイズ可能なトラブル記録帳票（管理者が入力項目を追加・削除できるフォームビルダー。定義変更は `master_history` で復元可能）
 - 設備台帳（06）・点検結果（02）との紐づけ
 - 記録の登録・編集・削除と監査記録（共通設計）
-- **類似トラブル事例の表示**: 現象欄に入力すると、過去の似たトラブルを最大5件、リアルタイム表示（登録・編集フォームと詳細画面。横断検索11と同じあいまい検索＝全角半角・ひらがなカタカナのゆれを吸収）。原因・対策の参考にできる。API `GET /api/troubles/similar`、共通ロジックは `functions/api/_lib/trouble-similar.js`（`findSimilarTroubles`）。あいまい検索の中核は `functions/api/_lib/fuzzy.js` に集約し、横断検索・部品検索と共有する。取得失敗・0件・現象2文字未満のときは何も表示せず入力を止めない（点検の前回値表示と同じ流儀）。**検索対象は現象・原因・対策に加え設備名・設備番号・ライン名・ジャンル・報告者・帳票入力**（列をつないだ1つの文字列に LIKE＝列を増やしても bind 数が増えない。空白区切り最大5語の OR で拾い、**一致した語の数（SQLの副問い合わせで1行ずつ数える）→ 同じ設備 → 新しい順**に並べて上位を返す。新しい順などで先に件数を切ってから並べ替えると、よくある語（例「異音」）だけに一致する新しい記録が多いとき（200件超）、全部の語に一致する古い記録が候補から落ちて 14 AIサポート・類似事例に出なかった。パラメータは `?1…` の番号つき。単体テストは `tests/unit-similar.mjs`）
+- **類似トラブル事例の表示**: 現象欄に入力すると、過去の似たトラブルを最大5件、リアルタイム表示（登録・編集フォームと詳細画面。横断検索11と同じあいまい検索＝全角半角・ひらがなカタカナのゆれを吸収）。原因・対策の参考にできる。API `GET /api/troubles/similar`、共通ロジックは `functions/api/_lib/trouble-similar.js`（`findSimilarTroubles`）。あいまい検索の中核は `functions/api/_lib/fuzzy.js` に集約し、横断検索・部品検索と共有する。取得失敗・0件・現象2文字未満のときは何も表示せず入力を止めない（点検の前回値表示と同じ流儀）。**検索対象は現象・原因・対策に加え設備名・設備番号・ライン名・ジャンル・報告者・帳票入力**（列をつないだ1つの文字列に LIKE＝列を増やしても bind 数が増えない。空白区切り最大5語の OR で拾い、**一致した語の数（SQLの副問い合わせで1行ずつ数える）→ 同じ設備 → 新しい順**に並べて上位を返す。新しい順などで先に件数を切ってから並べ替えると、よくある語（例「異音」）だけに一致する新しい記録が多いとき（200件超）、全部の語に一致する古い記録が候補から落ちて 04 類似事例に出なかった。パラメータは `?1…` の番号つき。単体テストは `tests/unit-similar.mjs`）
 - **AIによる原因・対策の提案（任意・ボタン式）**: 登録・編集フォームの「🤖 AIに原因・対策のヒントをもらう」ボタンで、現象＋過去の類似事例をもとに Workers AI（`env.AI`）が原因・対策・確度を提案する（`POST /api/ai/suggest-trouble`、editor以上）。「反映」で原因・対策欄に流し込める（入力済みなら上書き確認）。**自動発動せずボタンを押した時だけ動く**（ニューロン無料枠を守るため。Web Pushと同じ「未構成なら機能を出さない」方式で、`env.AI` 未構成なら `/api/me` の `ai_enabled:false` を見てボタン自体を非表示にする）。過去事例テキストはプロンプト埋め込み前に150字で切り詰める（コスト・暴走防止）
 - **帳票出力（トラブル報告書）**: 記録詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（後述「帳票テンプレート」）。トラブル編集ページに「トラブル報告書（帳票）の入力」欄があり、調査対象・休止時間・休止区分(○選択)・処置・有効性の確認・特記事項・担当者印(苗字)などを入力して `form_values_json` に保存→出力時に自動差込（出力時の再入力不要。標準項目は `js/permit-fields.js` の `TROUBLE_REPORT_FIELDS`）。**入力欄が空のものは、トラブル記録の内容で補う**（調査対象←設備名／トラブル名←現象／処置←対策／担当者印←記録者の苗字。入力欄に値があればそちらを優先。整理NO・休止時間・休止区分・有効性の確認・特記事項は該当する入力が無いため手入力のまま。`js/report-autofill.js` の `applyReportFallbacks`。出力時にだけ補い、データは二重に持たない。差込タグ名は変わらないので用紙の作り直しは不要。画面の入力欄には「空欄なら『対策』を使います」のように補い元を表示。単体テスト `tests/unit-autofill.mjs`）
 **テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, form_values_json, +監査列）、`trouble_category`（ジャンルマスタ）
@@ -248,31 +248,8 @@
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから複数枚添付できる（editor以上）。02 点検実施と同じ流儀＝保存時に `js/files.js` の `uploadFile`（長辺1280pxへ縮小・EXIF除去・R2容量ガード）で送ってから `file_ids` を本文に載せ、サーバーは `attachFiles` で `related_table='utility_report'` に紐づける。詳細画面（`GET /api/utility-reports/:id` の `files`）と編集画面にサムネイルを表示する。送信済みのファイルは再送しないので、保存が409等で失敗して押し直しても二重登録にならない。**添付は詳細・編集画面の × から削除できる**（editor以上・`DELETE /api/files/:id` の論理削除。06 設備台帳と同じ `thumb-cell`/`thumb-del`。R2の容量を実際に空けるのは管理画面「ファイル容量」の物理削除）
 - **スコープ外**: オフライン送信キュー、未入力リマインド通知
 **テーブル**: `utility_item`（section, name, input_type[number/select/multi/time/text], unit, min_value, max_value, options_json, alert_options_json, sort_order, +共通監査列）、`utility_report`（report_date, inspected_at, reporter_name, has_abnormal, values_json, note, +共通監査列）
-### 14. AIサポート（現場の困りごとから横断して探す）
-設備が止まった瞬間に「前に同じことがあったか・部品は在庫にあるか・もう依頼が出ているか・どう直すか」を、
-記録を書き始めずにその場で引ける画面（`/pages/ai-support`・`js/ai-support.js`）。
-ホームの機能タイル `🤖 AIサポート`（横断検索11のとなり）から入る。
-- **1行入力→4ブロック**: 例「3号機 コンプレッサ 異音」と入力して🔍探すと、
-  ① 過去の似たトラブル ② 関連する部品在庫 ③ 関連する業務依頼 を各最大10件、セクションごとのカードで表示。
-  ④ **🤖 対応策の案**（推定原因・推奨対策・確度）はボタンを押したときだけAIが動く
-- **新規APIは作っていない**。既存エンドポイントの組み合わせのみ（バックエンド・スキーマ変更ゼロ）:
-  `GET /api/troubles/similar`（あいまいOR検索）／`GET /api/parts?q=&include_similar=1`（あいまいAND＋類似OR枠）／
-  `GET /api/search?q=&type=repair`（あいまいAND検索）／`POST /api/ai/suggest-trouble`（editor以上）
-- **①②③はAI非依存**なので `env.AI` 未構成でもページは開いて動く。AIに依存するのは④だけなので、
-  **④のボタンだけ**を `ai_enabled`（`/api/me`）＋ editor で出し分ける（無効化ではなく非表示）
-- **業務依頼は `/api/search` に渡すキーワードを先頭2語までに切る**。`/api/search` は検索列7列・
-  キーワード最大5語で bind数 = 語数 × 列数 × バリアント数となり、長音付きカタカナ（1語で最大6バリアント）を
-  3語以上入れると D1 の bind 上限100を超えていたため（実測: 3語で126・5語で210）。横断検索11側は
-  `fitKeywords` で上限内に収まる語だけを使うよう修正済みだが、ここでは精度を保つため2語切りを維持する。
-  さらに**AND検索が0件のときだけ先頭1語で1回だけ再検索**し、見出しに「（「◯◯」で再検索）」と出す
-- **部品はAND検索が0件のとき、類似（いずれかの語に一致）を畳まずに「関連しそうな部品在庫」として展開**する。
-  「コンプレッサ 異音」のように現象の語を混ぜるとANDは必ず0件になり、「0件」表示で関係のある部品が隠れるため
-- 在庫バッジ（`在庫0` / `要発注` / `📨 発注中`）は 05 部品在庫と同じクラス・同じ判定
-- 各セクションの「すべて見る（横断検索）›」は `/pages/search?q=…&type=trouble|parts|repair` へ
-  （部品一覧は `q` パラメータを受け付けないため3種とも横断検索へ寄せる）
-- AI結果の下から「この内容でトラブルを記録する ›」「業務依頼を出す ›」で既存フォームへプリフィル遷移
-  （機能10のチャット→記録化と同じ既存URLプリフィルの流用）
-**テーブル**: なし（既存テーブルの読み取りのみ。新規レコードを作らないため監査列・論理削除の対象外）
+### 14. AIサポート（廃止）
+- 専用画面（`/pages/ai-support`・`js/ai-support.js`）とホームのタイルは**不要のため削除済み**。過去事例の検索は横断検索11、類似トラブルの表示・AIによる原因・対策の提案は 04 トラブル記録の登録・編集フォームで行う（`/api/troubles/similar`・`/api/ai/suggest-trouble` は 04 が使うため残す）
 ---
 ## ディレクトリ構成
 ```
@@ -284,7 +261,7 @@
 ├── electrical/index.html   # 12 電気設備点検（独立ドキュメント）
 ├── pages/                  # 各機能のHTML（plan / plan-annual / inspection / inspection-batch /
 │                           #   inspection-report / repair / trouble / parts / ledger / labels / report /
-│                           #   utility / dashboard / admin / chat / search / ai-support / notifications）
+│                           #   utility / dashboard / admin / chat / search / notifications）
 ├── css/style.css
 ├── js/
 │   ├── api.js auth.js nav.js util.js home-tabs.js   # 共通（fetch・権限・ナビ・DOMヘルパ）
@@ -305,7 +282,6 @@
 │   ├── chat.js notifications.js  # 10 チャット・通知センター／Web Push購読
 │   ├── search.js           # 11 横断検索
 │   ├── utility.js          # 13 ユーティリティ日報
-│   ├── ai-support.js       # 14 AIサポート・AI提案UI
 │   └── vendor/             # 同梱ライブラリ（CSPで外部CDN禁止のため）
 ├── functions/api/
 │   ├── _middleware.js      # 認証・未捕捉エラーのJSON化・セキュリティヘッダー
@@ -350,7 +326,6 @@
 ### AI機能（Workers AI）の出し分け
 - テキスト系AI（トラブルの原因・対策提案など）は `env.AI` 未構成なら `/api/me` の `ai_enabled:false` でボタンを出さない
 - **AI の API（`functions/api/ai/*`）はすべて Functions 側で入力可（editor）以上に限る**（閲覧のみのユーザーが直接呼んで Workers AI の無料枠を使い切れないように）。プロンプトに入る入力には長さの上限を設ける（会話履歴の各発言・現象・原因・対策など）。画像AI（`read-meter`・`extract-equipment`）はサーバー側でも `AI_VISION_ENABLED=1` でなければ 403
-- 14 AIサポートの「🤖 対応策の案をもらう」も同じ方式で出し分ける（`ai_enabled` ＋ editor 以上）。同ページのトラブル・部品・業務依頼の検索はAIを使わないので、AI未構成でも画面は開いて動く
 - **画像を読むAI（計器の📷自動読み取り＝`/api/ai/read-meter`・設備銘板の自動読み取り＝`/api/ai/extract-equipment`）は既定で非表示**。既定モデル `@cf/meta/llama-3.2-11b-vision-instruct` は Cloudflare アカウントでの**ライセンス同意が必要**で、未同意だと実行時に `5016: … you must submit the prompt 'agree'` で失敗し、現場の入力画面に英文のライセンス文がそのまま出てしまうため（実際に発生）。表示するには Cloudflare ダッシュボード → Pages → 設定 → 環境変数に **`AI_VISION_ENABLED=1`** を設定する（`/api/me` の `ai_vision_enabled`／`js/auth.js` の `getAiVisionEnabled()`／`js/inspection-items.js`・`js/ledger.js`。再デプロイ不要）
 - ライセンス同意が不要なモデルに変えたい場合は `AI_VISION_MODEL` を設定する（`functions/api/_lib/ai-models.js`）
 
