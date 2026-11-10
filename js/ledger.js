@@ -675,7 +675,12 @@ async function renderForm(existing) {
     });
   }
 
+  // 保存中は2回目のタップを無視する（遅い回線での連打で二重登録しないように）。
+  // 新規は設備番号をサーバーが採番するため、2回目の送信は「次の番号」で別の設備として登録されてしまう。
+  let saving = false;
+  const saveBtn = el('button', { class: 'btn btn-primary', onclick: () => save() }, '保存');
   const save = async () => {
+    if (saving) return;
     // 表示名(name)はサーバー側で「設備名＋機器名」から自動生成する
     const body = {
       // 新規でコードを手入力していなければ空で送り、サーバー側で設備ごとの連番を採番する
@@ -693,6 +698,8 @@ async function renderForm(existing) {
     };
     if (!body.line_name) { alert('設備名は必須です。'); return; }
     if (existing && !body.code) { alert('設備番号は必須です。'); return; }
+    saving = true;
+    saveBtn.disabled = true;
     try {
       if (existing) {
         await api.put(`/api/equipment/${existing.id}`, body);
@@ -701,7 +708,10 @@ async function renderForm(existing) {
         const { id } = await api.post('/api/equipment', body);
         go(`?id=${id}`);
       }
+      // 成功時は画面が切り替わるまで無効のまま
     } catch (err) {
+      saving = false;
+      saveBtn.disabled = false;
       alert(err.message);
     }
   };
@@ -756,7 +766,7 @@ async function renderForm(existing) {
       field('状態', f.status),
       field('備考', f.note),
       el('div', { class: 'action-row' }, [
-        el('button', { class: 'btn btn-primary', onclick: save }, '保存'),
+        saveBtn,
         el('button', { class: 'btn', onclick: () => (existing ? go(`?id=${existing.id}`) : go('')) }, 'キャンセル'),
       ]),
     ]),
