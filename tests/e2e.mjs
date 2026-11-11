@@ -910,7 +910,7 @@ check('年度リセット: リセット直後に過去年の今月分が期限�
 }
 for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 
-// ---------- 8.0 ダッシュボード: 設備別の故障件数（上位10件のランキングではなく全設備の一覧表） ----------
+// ---------- 8.0 設備別の故障件数（上位10件のランキングではなく全設備。レポートタブに表示） ----------
 {
   const ids = [];
   for (let i = 1; i <= 12; i++) {
@@ -925,19 +925,25 @@ for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api
     st?.equipment_trouble_counts?.length === 12 && st?.equipment_ranking === undefined
       && st.equipment_trouble_counts[0].trouble_count === 3 && st.equipment_trouble_counts[0].equipment_id === ids[11],
     JSON.stringify(st?.equipment_trouble_counts?.length));
+  // サマリーには設備別を出さない（レポートタブと重複するため）。レポートタブに全設備が出る
   await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
-  await page.fill('input[type="date"] >> nth=0', '2032-03-01');
-  await page.fill('input[type="date"] >> nth=1', '2032-03-31');
-  await page.click('button.btn-sm:text-is("集計")');
+  await page.fill('.period-bar input[type="date"] >> nth=0', '2032-03-01');
+  await page.fill('.period-bar input[type="date"] >> nth=1', '2032-03-31');
+  await page.click('.period-bar button.btn-sm:text-is("集計")');
   await page.waitForTimeout(1200);
-  const closedOpen = await page.locator('details.equip-counts').evaluate((d) => d.open);
-  check('ダッシュボード: 設備別故障件数は折りたたみ（最初は閉じている）', closedOpen === false);
-  await page.click('details.equip-counts summary');
-  const rows = await page.locator('.extract-table tbody tr').count();
-  check('ダッシュボード: 設備別故障件数が一覧表で全設備ぶん出る', rows === 12, `rows=${rows}`);
-  await page.fill('input[placeholder*="設備名・設備番号で絞り込み"]', '件数表設備12');
-  const filtered = await page.locator('.extract-table tbody tr').count();
-  check('ダッシュボード: 設備名で絞り込める', filtered === 1, `rows=${filtered}`);
+  check('ダッシュボード: サマリーに設備別の表は出さない（レポートと重複させない）',
+    await page.locator('details.equip-counts').count() === 0 && !(await page.evaluate(() => document.getElementById('tab-content').innerText.includes('設備別'))));
+  await page.click('#tab-btn-report');
+  await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
+  const eqRows = await page.evaluate(() => [...document.querySelectorAll('#report-doc .rpt-section')]
+    .find((x) => x.innerText.includes('設備別 故障件数'))?.querySelectorAll('tbody tr').length);
+  check('保全レポート: 設備別の故障件数は上限なしで全設備ぶん出る', eqRows === 12, `rows=${eqRows}`);
+  const tabsFit = await page.evaluate(() => { const t = document.querySelector('.tab-bar'); return getComputedStyle(t).overflowX; });
+  check('ダッシュボード: タブ欄は横スクロールさせない', tabsFit === 'visible', tabsFit);
+  await page.setViewportSize({ width: 375, height: 720 });
+  const tabOverflow = await page.evaluate(() => { const t = document.querySelector('.tab-bar'); return t.scrollWidth <= t.clientWidth + 1; });
+  check('ダッシュボード: スマホ幅（375px）でもタブが収まる', tabOverflow);
+  await page.setViewportSize({ width: 1280, height: 720 });
   for (const id of ids.filter(Boolean)) await api(`/api/equipment/${id}`, { method: 'DELETE' });
 }
 

@@ -1,5 +1,5 @@
 // 08 保全レポート（印刷用1枚）— ダッシュボードの「📄 レポート」タブ（js/dashboard.js から呼ぶ）
-//   期間を渡すと、概要・ジャンル別・設備別の故障件数・トラブル一覧・未完了の業務依頼・期限超過の保全計画を
+//   期間を渡すと、概要・ジャンル別・設備別の故障件数（期間内にトラブルがあった全設備）・トラブル一覧・未完了の業務依頼・期限超過の保全計画を
 //   A4 1ページ前後にまとめて描画する（印刷は dashboard.js 側のボタン。PDF保存も可）。
 //   既存の API（/api/stats・/api/troubles・/api/repairs・/api/plans）の読み取りだけを使う。
 //   ※ 点検実施率は /api/stats と同じ（期間内の「点検」計画のうち完了したものの割合）。
@@ -12,7 +12,6 @@ const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '
 const TROUBLE_ROWS = 40;   // 一覧に出す件数（超えたら「ほかN件」）
 const REPAIR_ROWS = 25;
 const PLAN_ROWS = 25;
-const EQUIP_ROWS = 15;     // 設備別の故障件数に出す設備数（超えたら「ほかN設備」）
 
 const trunc = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
 const cell = (v, cls) => el('td', cls ? { class: cls } : {}, v == null || v === '' ? '—' : String(v));
@@ -71,12 +70,9 @@ export async function renderReport(docBox, from, to, user) {
         cell(c.category_name), cell(c.count, 'rpt-num'),
         el('td', { class: 'rpt-bar-cell' }, el('span', { class: 'rpt-bar', style: `width:${Math.round((c.count / maxCat) * 100)}%` })),
       ])), 'この期間のトラブルはありません。')),
-    section('設備別 故障件数', el('div', {}, [
-      table(['設備', '件数'],
-        equipCounts.slice(0, EQUIP_ROWS).map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
-        'この期間のトラブルはありません。'),
-      equipCounts.length > EQUIP_ROWS ? el('p', { class: 'rpt-more' }, `ほか ${equipCounts.length - EQUIP_ROWS} 設備（全設備の件数はダッシュボードの「設備ごとの件数を見る」で確認できます）`) : null,
-    ])),
+    section(`設備別 故障件数（${equipCounts.length}設備）`, table(['設備', '件数'],
+      equipCounts.map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
+      'この期間のトラブルはありません。')),
     section(`期間内のトラブル（${troubles.length}件）`, el('div', {}, [
       table(['発生日', '設備', 'ジャンル', '現象'],
         troubles.slice(0, TROUBLE_ROWS).map((t) => el('tr', {}, [
