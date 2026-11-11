@@ -16,7 +16,7 @@ import { AUTOFILL_HINTS, RECORD_TAGS } from '/js/report-autofill.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
-import { buildPartPicker, buildUsedPartsInput, renderUsedList, checkQty, recordUsedParts, newTxId } from '/js/used-parts.js';
+import { buildUsedPartsInput, recordUsedParts } from '/js/used-parts.js';
 
 // 業務依頼ステータスの表示ラベル（このトラブルから作成された依頼の状況表示に使う）
 const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
@@ -201,7 +201,7 @@ async function loadSimilarInto(box, { phenomenon, excludeId, equipmentId, newTab
 }
 
 async function renderDetail(id) {
-  const { trouble, files, history, used_parts = [] } = await api.get(`/api/troubles/${id}`);
+  const { trouble, files, history } = await api.get(`/api/troubles/${id}`);
   // このトラブルから作成された業務依頼（相互リンクの逆引き）。列未追加の環境でも落ちないよう握りつぶす。
   const { repairs: linkedRepairs = [] } =
     await api.get(`/api/repairs?source_table=trouble_record&source_id=${id}`).catch(() => ({ repairs: [] }));
@@ -258,26 +258,6 @@ async function renderDetail(id) {
       }
     },
   });
-
-  // 使用部品（部品在庫から出庫して、このトラブルに紐づけ）。入力可の人は詳細からも追加できる
-  let parts = [];
-  if (canEdit) { try { ({ parts } = await api.get('/api/parts')); } catch { parts = []; } }
-  const usedBox = el('div', { class: 'row-list' }, []);
-  renderUsedList(usedBox, used_parts);
-  const partPicker = buildPartPicker(parts);
-  const partQty = el('input', { type: 'number', min: '1', value: '1', style: 'width:72px', 'aria-label': '数量' });
-  const recordPartBtn = el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => {
-    const part = partPicker.part;
-    if (!part) { alert(partPicker.hasText() ? '入力した部品は在庫にありません。候補から選んでください。' : '部品を選択してください。'); return; }
-    const qty = Number(partQty.value);
-    if (checkQty(part, qty) === null) return;
-    recordPartBtn.disabled = true;
-    const failed = await recordUsedParts([{ part, qty, txId: newTxId() }], {
-      relatedTable: 'trouble_record', relatedId: id, noteLabel: `トラブル「${trouble.phenomenon.slice(0, 30)}」`,
-    });
-    if (failed.length > 0) { alert(failed[0].message); recordPartBtn.disabled = false; return; }
-    await renderDetail(id); // 在庫が減ったので、残数つきの選択肢ごと描き直す
-  } }, '記録');
 
   // 類似のトラブル事例（詳細では読み取り専用・一発取得）。0件・取得失敗時は非表示のまま。
   const similarBox = el('div', {});
@@ -363,11 +343,6 @@ async function renderDetail(id) {
           ),
         ])
       : null,
-    el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title' }, '使用部品'),
-      canEdit ? el('div', { class: 'inline-form' }, [partPicker, partQty, recordPartBtn]) : null,
-      usedBox,
-    ]),
     el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
         el('h3', { class: 'card-title' }, '添付写真・ファイル'),
@@ -681,7 +656,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
       // 入力画面には写真・動画の欄を置かない（添付は詳細画面から。ここでは file_ids は空）
       body.file_ids = fileIds;
       // 使用部品は、トラブルを保存できたあとで出庫する（在庫を減らして、このトラブルに紐づける）。
-      // 出庫できなかった部品があっても、トラブルは保存済み。詳細画面の「使用部品」からやり直せる
+      // 出庫できなかった部品があっても、トラブルは保存済み。編集画面の「使用部品」からやり直せる
       const recordParts = async (recordId) => {
         if (pendingParts.length === 0) return;
         saveBtn.textContent = '使用部品を記録中…';
@@ -692,7 +667,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
         if (failed.length > 0) {
           alert('トラブルは保存しましたが、次の使用部品は記録できませんでした。\n' +
             failed.map((x) => `・${x.item.part.name}: ${x.message}`).join('\n') +
-            '\n詳細画面の「使用部品」から追加してください。');
+            '\nそのトラブルの編集画面の「使用部品」から追加してください。');
         }
       };
       if (existing) {
@@ -711,7 +686,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
       // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する。
       const offline = err?.offline === true || navigator.onLine === false;
       if (offline && !existing) {
-        if (pendingParts.length > 0 && !confirm('オフラインです。使用部品は記録されず、トラブルだけが「送信待ち」に保存されます。\n送信されたあと、詳細画面の「使用部品」から追加してください。続けますか？')) {
+        if (pendingParts.length > 0 && !confirm('オフラインです。使用部品は記録されず、トラブルだけが「送信待ち」に保存されます。\n送信されたあと、編集画面の「使用部品」から追加してください。続けますか？')) {
           saveBtn.disabled = false;
           saveBtn.textContent = '保存';
           return;

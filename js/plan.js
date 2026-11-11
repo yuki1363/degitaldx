@@ -10,7 +10,7 @@ import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import { el, render, formatDate, formatDateTime, ACTION_LABELS, nowLocalInputValue, jstTodayStr } from '/js/util.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
-import { AUTOFILL_HINTS } from '/js/report-autofill.js';
+import { AUTOFILL_HINTS, RECORD_TAGS } from '/js/report-autofill.js';
 import { buildInspectionStartUrl } from '/js/plan-inspection-link.js';
 
 const PLAN_TYPES = {
@@ -442,10 +442,13 @@ function buildPermitFields(templates) {
       }
     }
   }
+  // 計画の入力から入るタグ（工事概要・担当・責任者など）は、テンプレートが入力項目として
+  // 定義していても出さない（タイトル・備考・担当者・点検者の入力をそのまま反映するため）
+  const own = (list) => list.filter((f) => !RECORD_TAGS.construction_notice.includes(f.tag));
   if (fields.length === 0) {
-    return CONSTRUCTION_NOTICE_FIELDS.map((f) => ({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' }));
+    return own(CONSTRUCTION_NOTICE_FIELDS.map((f) => ({ tag: f.tag, label: f.label || f.tag, type: f.type || 'text' })));
   }
-  return fields;
+  return own(fields);
 }
 
 // plan.form_values_json を安全にパース
@@ -674,16 +677,13 @@ async function renderForm(existing, fromAnnual = false) {
     const fields = permitFields.filter((f) => f.tag !== '開始時間' && f.tag !== '終了時間');
     const inputs = fields.filter((f) => f.type !== 'check');
     const checks = fields.filter((f) => f.type === 'check');
-    const children = [
-      el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, '帳票（工事連絡許可書）の入力'),
-      el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます（種別に関わらず入力できます）。'),
-    ];
+    // 工事連絡書の入力は、ほかの入力欄と区分けしない（別の枠・見出しにしない）
+    const children = [];
     if (inputs.length) children.push(el('div', { class: 'pf-grid' }, inputs.map(permitInput)));
     if (checks.length) {
-      children.push(el('div', { class: 'pt-tags-label', style: 'margin:8px 0 4px' }, '許可必要作業（該当をチェック）'));
-      children.push(el('div', { class: 'pf-checklist' }, checks.map(permitInput)));
+      children.push(el('div', { class: 'field' }, [el('label', {}, '許可必要作業（該当をチェック）'), el('div', { class: 'pf-checklist' }, checks.map(permitInput))]));
     }
-    render(permitBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:12px 0 0' }, children));
+    render(permitBox, children);
   };
 
   const save = async () => {
@@ -738,8 +738,8 @@ async function renderForm(existing, fromAnnual = false) {
       cascade.lineDatalist,
       field('機器名', cascade.equipInput),
       cascade.equipDatalist,
-      field('点検者', inspectorInput),
-      field('担当者', assigneeInput),
+      field('点検者・工事責任者', inspectorInput),
+      field('担当者（シーバイエス担当）', assigneeInput),
       field('状態', statusSelect),
       field('備考', noteInput),
       permitBox,
