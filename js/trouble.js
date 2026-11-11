@@ -5,7 +5,7 @@
 //        /pages/trouble?id=N       … 詳細
 
 import { api } from '/js/api.js';
-import { getCurrentUser, hasRole, getAiEnabled } from '/js/auth.js';
+import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
@@ -16,6 +16,7 @@ import { AUTOFILL_HINTS } from '/js/report-autofill.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
+import { buildPartPicker, buildUsedPartsInput, renderUsedList, checkQty, recordUsedParts, newTxId } from '/js/used-parts.js';
 
 // 業務依頼ステータスの表示ラベル（このトラブルから作成された依頼の状況表示に使う）
 const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
@@ -112,7 +113,19 @@ async function renderList(equipmentId) {
   const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportCsv('sjis') }, '📥 CSV（Shift_JIS）');
   const csvCount = el('span', { class: 'hint' }, '');
 
+  // 過去のトラブルをキーワードで探す入口（検索は横断検索に集約。原因・対策の参考にする）
+  const kwInput = el('input', { type: 'search', placeholder: '例: コンプレッサ 異音', style: 'flex:1;min-width:0', 'aria-label': 'キーワード' });
+  const goSearch = () => {
+    const q = kwInput.value.trim();
+    window.location.href = `/pages/search?type=trouble${q ? `&q=${encodeURIComponent(q)}` : ''}`;
+  };
+  kwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') goSearch(); });
+
   render(app, [
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '🔎 過去のトラブルを探す（原因・対策の参考に）'),
+      el('div', { class: 'inline-form' }, [kwInput, el('button', { class: 'btn btn-primary', type: 'button', id: 'trouble-kw-go', onclick: goSearch }, '横断検索')]),
+    ]),
     el('div', { class: 'card' }, [
       el('div', { class: 'field-pair' }, [
         el('div', { class: 'field' }, [el('label', {}, 'ジャンル'), catSel]),
@@ -154,7 +167,7 @@ function infoRow(label, value) {
   ]);
 }
 
-// 類似トラブル事例のカードを box に描画する（現象テキストからあいまい検索。AI不要・常時無料）。
+// 類似トラブル事例のカードを box に描画する（現象テキストからあいまい検索。AIは使わない・常時無料）。
 //   現象が2文字未満・取得失敗・0件のときは何も描画しない（入力を止めない＝点検の前回値と同じ流儀）。
 //   newTab=true のときは各項目を新規タブで開く（フォーム入力中に遷移して内容を失わないため）。
 async function loadSimilarInto(box, { phenomenon, excludeId, equipmentId, newTab }) {
@@ -200,7 +213,7 @@ async function loadSimilarInto(box, { phenomenon, excludeId, equipmentId, newTab
 }
 
 async function renderDetail(id) {
-  const { trouble, files, history } = await api.get(`/api/troubles/${id}`);
+  const { trouble, files, history, used_parts = [] } = await api.get(`/api/troubles/${id}`);
   // このトラブルから作成された業務依頼（相互リンクの逆引き）。列未追加の環境でも落ちないよう握りつぶす。
   const { repairs: linkedRepairs = [] } =
     await api.get(`/api/repairs?source_table=trouble_record&source_id=${id}`).catch(() => ({ repairs: [] }));
@@ -257,6 +270,26 @@ async function renderDetail(id) {
       }
     },
   });
+
+  // 使用部品（部品在庫から出庫して、このトラブルに紐づけ）。入力可の人は詳細からも追加できる
+  let parts = [];
+  if (canEdit) { try { ({ parts } = await api.get('/api/parts')); } catch { parts = []; } }
+  const usedBox = el('div', { class: 'row-list' }, []);
+  renderUsedList(usedBox, used_parts);
+  const partPicker = buildPartPicker(parts);
+  const partQty = el('input', { type: 'number', min: '1', value: '1', style: 'width:72px', 'aria-label': '数量' });
+  const recordPartBtn = el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: async () => {
+    const part = partPicker.part;
+    if (!part) { alert(partPicker.hasText() ? '入力した部品は在庫にありません。候補から選んでください。' : '部品を選択してください。'); return; }
+    const qty = Number(partQty.value);
+    if (checkQty(part, qty) === null) return;
+    recordPartBtn.disabled = true;
+    const failed = await recordUsedParts([{ part, qty, txId: newTxId() }], {
+      relatedTable: 'trouble_record', relatedId: id, noteLabel: `トラブル「${trouble.phenomenon.slice(0, 30)}」`,
+    });
+    if (failed.length > 0) { alert(failed[0].message); recordPartBtn.disabled = false; return; }
+    await renderDetail(id); // 在庫が減ったので、残数つきの選択肢ごと描き直す
+  } }, '記録');
 
   // 類似のトラブル事例（詳細では読み取り専用・一発取得）。0件・取得失敗時は非表示のまま。
   const similarBox = el('div', {});
@@ -343,6 +376,11 @@ async function renderDetail(id) {
         ])
       : null,
     el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '使用部品'),
+      canEdit ? el('div', { class: 'inline-form' }, [partPicker, partQty, recordPartBtn]) : null,
+      usedBox,
+    ]),
+    el('div', { class: 'card' }, [
       el('div', { class: 'card-title-row' }, [
         el('h3', { class: 'card-title' }, '添付写真・ファイル'),
         canEdit ? el('button', { class: 'btn btn-sm', onclick: () => fileInput.click() }, '＋ 添付') : null,
@@ -408,10 +446,10 @@ function parseFormValues(jsonStr) {
   catch { return {}; }
 }
 
-async function renderForm(existing, prefill = null) {
+async function renderForm(existing, prefill = null, usedParts = []) {
   // existing = 本物の編集（PUT）。prefill = 点検異常などからの新規プリフィル（POST のまま）。
   const init = existing || prefill || {};
-  const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes, templatesRes] = await Promise.all([
+  const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes, templatesRes, partsRes] = await Promise.all([
     api.get('/api/troubles/categories'),
     api.get('/api/equipment?limit=2000'),
     // カスタム項目テーブル未作成の環境でもフォーム自体は使えるようにする
@@ -419,8 +457,11 @@ async function renderForm(existing, prefill = null) {
     api.get('/api/users').catch(() => ({ users: [] })),
     // トラブル報告書テンプレートの入力項目（帳票入力欄に使う。未登録時は標準項目）
     api.get('/api/print-templates').catch(() => ({ templates: [] })),
+    // 使用部品の選択肢（部品在庫）。取得できなくてもトラブルの入力自体は続けられる
+    api.get('/api/parts').catch(() => ({ parts: [] })),
   ]);
   const users = usersRes.users || [];
+  const usedInput = buildUsedPartsInput({ parts: partsRes.parts || [], recorded: usedParts });
 
   // トラブル報告書（帳票）の入力欄。ここで入力した値を form_values_json に保存し、
   // 帳票出力時に Excel へ自動差込する（出力時の再入力が不要になる）。
@@ -460,7 +501,33 @@ async function renderForm(existing, prefill = null) {
     users.map((u) => el('option', { value: u.name || u.email }))
   );
 
-  // ---- 類似トラブル事例（あいまい検索・常時表示・AI不要） ----
+  // ---- 設備が一覧に無いとき: 設備台帳から追加するよう案内する ----
+  //   入力した文字が設備一覧のどれにも一致しないと、そのまま保存すると設備なしの記録になってしまう。
+  //   台帳は別タブで開く（この入力内容を失わないため）。追加したら「一覧を更新」で選べるようになる。
+  const eqHint = el('div', {});
+  const updateEqHint = () => {
+    const t = f.equipment_id.unmatchedText;
+    if (!t) { render(eqHint, []); return; }
+    const refreshBtn = el('button', { type: 'button', class: 'btn btn-sm', onclick: async () => {
+      refreshBtn.disabled = true;
+      try {
+        const fresh = await api.get('/api/equipment?limit=2000');
+        f.equipment_id.setEquipment(fresh.equipment);
+      } catch (err) { alert(err.message || String(err)); }
+      refreshBtn.disabled = false;
+      updateEqHint();
+    } }, '🔄 追加したので一覧を更新');
+    render(eqHint, el('div', { class: 'notice is-warning', id: 'equip-missing-hint' }, [
+      el('div', {}, `「${t}」は設備一覧にありません。設備台帳に追加してから選んでください。`),
+      el('div', { class: 'action-row', style: 'margin-top:6px' }, [
+        el('a', { class: 'btn btn-sm btn-primary', href: '/pages/ledger?new=1', target: '_blank', rel: 'noopener' }, '＋ 設備台帳で追加'),
+        refreshBtn,
+      ]),
+    ]));
+  };
+  f.equipment_id.addEventListener('change', updateEqHint);
+
+  // ---- 類似トラブル事例（あいまい検索・常時表示・AIは使わない） ----
   //   現象欄の入力に追従して過去の似た記録を表示する（300msデバウンス）。
   const similarBox = el('div', {});
   const refreshSimilar = () => loadSimilarInto(similarBox, {
@@ -629,6 +696,17 @@ async function renderForm(existing, prefill = null) {
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }
+    // 設備欄に入力した文字が一覧に無いまま保存すると、設備なしの記録になってしまう
+    if (f.equipment_id.unmatchedText) {
+      updateEqHint();
+      alert(`設備「${f.equipment_id.unmatchedText}」は設備一覧にありません。\n設備台帳に追加してから選ぶか、設備欄を空にしてください。`);
+      return;
+    }
+    if (usedInput.hasUnaddedText()) {
+      alert('使用部品の欄に、「＋ 追加」を押していない部品があります。追加するか、入力を消してください。');
+      return;
+    }
+    const pendingParts = usedInput.getPending();
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中…';
     const fileIds = []; // アップロード済み分（オフライン失敗時のキュー投入で使うため try の外に置く）
@@ -645,14 +723,31 @@ async function renderForm(existing, prefill = null) {
       }
       saveBtn.textContent = '保存中…';
       body.file_ids = fileIds;
+      // 使用部品は、トラブルを保存できたあとで出庫する（在庫を減らして、このトラブルに紐づける）。
+      // 出庫できなかった部品があっても、トラブルは保存済み。詳細画面の「使用部品」からやり直せる
+      const recordParts = async (recordId) => {
+        if (pendingParts.length === 0) return;
+        saveBtn.textContent = '使用部品を記録中…';
+        const failed = await recordUsedParts(pendingParts, {
+          relatedTable: 'trouble_record', relatedId: recordId,
+          noteLabel: `トラブル「${body.phenomenon.slice(0, 30)}」`,
+        });
+        if (failed.length > 0) {
+          alert('トラブルは保存しましたが、次の使用部品は記録できませんでした。\n' +
+            failed.map((x) => `・${x.item.part.name}: ${x.message}`).join('\n') +
+            '\n詳細画面の「使用部品」から追加してください。');
+        }
+      };
       if (existing) {
         await api.put(`/api/troubles/${existing.id}`, body);
         guard?.clear(); // 保存済みなので離脱警告を出さない
+        await recordParts(existing.id);
         go(`?id=${existing.id}`);
       } else {
         const { id } = await api.post('/api/troubles', body);
         draft?.clear(); // 保存できたので下書きを消す
         guard?.clear();
+        await recordParts(id);
         go(`?id=${id}`);
       }
     } catch (err) {
@@ -661,6 +756,11 @@ async function renderForm(existing, prefill = null) {
       // （二重アップロードも取り残しも発生しない）。
       const offline = err?.offline === true || navigator.onLine === false;
       if (offline && !existing) {
+        if (pendingParts.length > 0 && !confirm('オフラインです。使用部品は記録されず、トラブルだけが「送信待ち」に保存されます。\n送信されたあと、詳細画面の「使用部品」から追加してください。続けますか？')) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = '保存';
+          return;
+        }
         try {
           const remaining = [];
           for (const file of pendingFiles.slice(fileIds.length)) {
@@ -681,56 +781,6 @@ async function renderForm(existing, prefill = null) {
   };
   const saveBtn = el('button', { class: 'btn btn-primary', onclick: () => save() }, '保存');
 
-  // ---- AI提案（原因・対策のヒント） ----
-  //   Workers AI が未構成なら getAiEnabled() が false → ボタン自体を出さない
-  //   （VAPID公開鍵と同じ考え方。E2E環境は [ai] を外すため常に非表示になる）。
-  const aiBox = el('div', {});
-  const applyAiSuggestion = (s) => {
-    const hasContent = f.cause.value.trim() || f.countermeasure.value.trim();
-    if (hasContent && !confirm('原因・対策欄に入力済みの内容がありますが、AIの提案で上書きしますか？')) return;
-    if (s.cause) { f.cause.value = s.cause; f.cause.dispatchEvent(new Event('input', { bubbles: true })); }
-    if (s.countermeasure) { f.countermeasure.value = s.countermeasure; f.countermeasure.dispatchEvent(new Event('input', { bubbles: true })); }
-  };
-  const renderAiResult = (s) => {
-    const conf = { high: ['高', 'imp-high'], medium: ['中', 'imp-mid'], low: ['低', 'imp-low'] }[s.confidence] || ['—', 'imp-low'];
-    render(aiBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
-      el('div', { class: 'card-title-row' }, [
-        el('h4', { style: 'margin:0;font-size:14px;color:#374151' }, '🤖 AIの提案'),
-        el('span', { class: `imp-badge ${conf[1]}` }, `確度: ${conf[0]}`),
-      ]),
-      s.cause ? infoRow('推定原因', s.cause) : null,
-      s.countermeasure ? infoRow('推奨対策', s.countermeasure) : null,
-      (s.cause || s.countermeasure)
-        ? el('div', { class: 'action-row', style: 'margin-top:8px' }, [
-            el('button', { class: 'btn btn-sm', type: 'button', onclick: () => applyAiSuggestion(s) }, '⬇ 原因・対策欄に反映'),
-          ])
-        : el('p', { class: 'hint', style: 'margin-top:8px' }, 'AIから有効な提案が得られませんでした。'),
-      el('p', { class: 'hint', style: 'margin-top:4px' }, '※ AIの提案です。内容を確認してから保存してください。'),
-    ]));
-  };
-  const aiBtn = getAiEnabled()
-    ? el('button', {
-        class: 'btn', type: 'button',
-        onclick: async () => {
-          const phenomenon = f.phenomenon.value.trim();
-          if (!phenomenon) { alert('先に現象を入力してください。'); return; }
-          aiBtn.disabled = true;
-          const label = aiBtn.textContent;
-          aiBtn.textContent = '🤖 AIが考え中…';
-          render(aiBox, el('p', { class: 'loading' }, 'AIが過去事例をもとに考えています…'));
-          try {
-            const { suggestion } = await api.post('/api/ai/suggest-trouble', { phenomenon });
-            renderAiResult(suggestion || {});
-          } catch (err) {
-            render(aiBox, el('p', { class: 'notice is-error' }, err.message || 'AIの処理に失敗しました。'));
-          } finally {
-            aiBtn.disabled = false;
-            aiBtn.textContent = label;
-          }
-        },
-      }, '🤖 AIに原因・対策のヒントをもらう')
-    : null;
-
   render(app, [
     draftBanner,
     el('div', { class: 'card' }, [
@@ -747,12 +797,15 @@ async function renderForm(existing, prefill = null) {
           }, '📷 QR'),
         ]),
       ]),
+      eqHint,
       field('現象（必須）', f.phenomenon),
       similarBox,
-      aiBtn ? el('div', { class: 'action-row', style: 'margin:4px 0' }, [aiBtn]) : null,
-      aiBox,
       field('原因', f.cause),
       field('対策', f.countermeasure),
+      el('div', { class: 'field' }, [
+        el('label', {}, '使用部品（部品在庫から選択）'),
+        usedInput.node,
+      ]),
       field('記録者', f.reporter_name),
       reporterOptions,
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
@@ -790,8 +843,8 @@ async function renderForm(existing, prefill = null) {
       await renderDetail(Number(params.get('id')));
     } else if (params.get('edit')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('編集する権限がありません。');
-      const { trouble } = await api.get(`/api/troubles/${Number(params.get('edit'))}`);
-      await renderForm(trouble);
+      const { trouble, used_parts } = await api.get(`/api/troubles/${Number(params.get('edit'))}`);
+      await renderForm(trouble, null, used_parts || []);
     } else if (params.get('new')) {
       if (!hasRole(currentUser, 'editor')) throw new Error('登録する権限がありません。');
       // 点検異常などからのプリフィル（設備・現象）を受け取る

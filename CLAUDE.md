@@ -127,7 +127,9 @@
 - 設備台帳（06）・点検結果（02）との紐づけ
 - 記録の登録・編集・削除と監査記録（共通設計）
 - **類似トラブル事例の表示**: 現象欄に入力すると、過去の似たトラブルを最大5件、リアルタイム表示（登録・編集フォームと詳細画面。横断検索11と同じあいまい検索＝全角半角・ひらがなカタカナのゆれを吸収）。原因・対策の参考にできる。API `GET /api/troubles/similar`、共通ロジックは `functions/api/_lib/trouble-similar.js`（`findSimilarTroubles`）。あいまい検索の中核は `functions/api/_lib/fuzzy.js` に集約し、横断検索・部品検索と共有する。取得失敗・0件・現象2文字未満のときは何も表示せず入力を止めない（点検の前回値表示と同じ流儀）。**検索対象は現象・原因・対策に加え設備名・設備番号・ライン名・ジャンル・報告者・帳票入力**（列をつないだ1つの文字列に LIKE＝列を増やしても bind 数が増えない。空白区切り最大5語の OR で拾い、**一致した語の数（SQLの副問い合わせで1行ずつ数える）→ 同じ設備 → 新しい順**に並べて上位を返す。新しい順などで先に件数を切ってから並べ替えると、よくある語（例「異音」）だけに一致する新しい記録が多いとき（200件超）、全部の語に一致する古い記録が候補から落ちて 04 類似事例に出なかった。パラメータは `?1…` の番号つき。単体テストは `tests/unit-similar.mjs`）
-- **AIによる原因・対策の提案（任意・ボタン式）**: 登録・編集フォームの「🤖 AIに原因・対策のヒントをもらう」ボタンで、現象＋過去の類似事例をもとに Workers AI（`env.AI`）が原因・対策・確度を提案する（`POST /api/ai/suggest-trouble`、editor以上）。「反映」で原因・対策欄に流し込める（入力済みなら上書き確認）。**自動発動せずボタンを押した時だけ動く**（ニューロン無料枠を守るため。Web Pushと同じ「未構成なら機能を出さない」方式で、`env.AI` 未構成なら `/api/me` の `ai_enabled:false` を見てボタン自体を非表示にする）。過去事例テキストはプロンプト埋め込み前に150字で切り詰める（コスト・暴走防止）
+- **使用部品（部品在庫から選択）**: 入力画面の「使用部品」で、部品在庫を検索して選び数量を入れて「＋ 追加」すると、**保存したあと**にその数ぶん出庫して（在庫を自動で減らす）トラブルに紐づける（`js/used-parts.js`。業務依頼03の使用部品と同じ仕組み＝`POST /api/parts/:id/transaction`・`type=out`・`related_table='trouble_record'`・`client_tx_id` で二重反映防止）。保存前は在庫は変わらない。在庫不足などで出庫できなかった部品があってもトラブルは保存済みで、理由を出して詳細画面から追加し直せる。オフラインで新規を保存するときは使用部品は記録されない（送信待ちはトラブルだけ・確認ダイアログを出す）。詳細画面（`GET /api/troubles/:id` の `used_parts`）にも一覧と「記録」欄があり、editor 以上は後から追加できる（在庫を超える数量は断る）。記録済みの取り消しは部品在庫の入出庫で行う
+- **設備が一覧に無いとき**: 設備欄（`buildEquipSelect`。`.unmatchedText`＝入力したのに一覧のどれにも一致しない文字）に一覧に無い名前を入れると、「設備台帳に追加してください」の案内（別タブで台帳を開く＋「🔄 追加したので一覧を更新」＝`setEquipment`）を出し、**そのままでは保存させない**（黙って設備なしの記録になるのを防ぐ）
+- **AI（原因・対策の提案）は廃止**: 入力欄のボタンと `/api/ai/suggest-trouble`・`ai_enabled` は削除した。過去事例の確認は、入力欄の類似トラブル事例の自動表示と、トラブル一覧の上の「🔎 過去のトラブルを探す」＝横断検索11（`/pages/search?type=trouble&q=`）で行う。画像を読むAI（計器・銘板。`AI_VISION_ENABLED=1` のときだけ）は別機能として残る
 - **帳票出力（トラブル報告書）**: 記録詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（後述「帳票テンプレート」）。トラブル編集ページに「トラブル報告書（帳票）の入力」欄があり、調査対象・休止時間・休止区分(○選択)・処置・有効性の確認・特記事項・担当者印(苗字)などを入力して `form_values_json` に保存→出力時に自動差込（出力時の再入力不要。標準項目は `js/permit-fields.js` の `TROUBLE_REPORT_FIELDS`）。**入力欄が空のものは、トラブル記録の内容で補う**（調査対象←設備名／トラブル名←現象／処置←対策／担当者印←記録者の苗字。入力欄に値があればそちらを優先。整理NO・休止時間・休止区分・有効性の確認・特記事項は該当する入力が無いため手入力のまま。`js/report-autofill.js` の `applyReportFallbacks`。出力時にだけ補い、データは二重に持たない。差込タグ名は変わらないので用紙の作り直しは不要。画面の入力欄には「空欄なら『対策』を使います」のように補い元を表示。単体テスト `tests/unit-autofill.mjs`）
 **テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, form_values_json, +監査列）、`trouble_category`（ジャンルマスタ）
 ### 05. 部品在庫管理（PowerAppsからのデータ移行あり）
@@ -176,7 +178,7 @@
 - **役割分担（機能重複の解消）**: ダッシュボードは「**見る（グラフ）**」に専念する。データの絞り込み抽出→一覧表→CSV出力は**横断検索（11）に集約**した。以前あった「抽出レポート」タブは廃止し、同等のフィルタ＋CSV出力を横断検索側へ移設済み（探す＆出す=横断検索／見る=ダッシュボード）
 - **例外: トラブル記録CSV**: ダッシュボード上部の「トラブル記録（期間内）📥 CSV」で、集計期間（FROM〜TO）のトラブル記録をそのままCSV出力できる（UTF-8/BOM・Shift_JIS）。列は04トラブル一覧のCSVと共通（`js/trouble-csv.js` の `TROUBLE_CSV_COLUMNS`／`exportTroubleCsv`。取得は既存 `GET /api/troubles?from=&to=` でAPI変更なし）
 - **保全レポート（印刷用1枚）＝ダッシュボードの「📄 レポート（印刷用）」タブ**（`js/report-summary.js` の `renderReport` を `js/dashboard.js` が呼ぶ。以前は別ページ `/pages/report-summary` とホームのタイルだったが、ダッシュボードに統合した。旧URLは `?tab=report` のダッシュボードへ自動移動する移動ページとして残す＝古いブックマーク・ホーム画面用）。**期間はレポートタブ上部の FROM〜TO と「今週〔月〜日〕・先週・今月・先月・直近6ヶ月〔5ヶ月前の1日〜今月末〕」ボタンで、レポートの期間。初期値は今月（1日〜月末）**（`js/report-period.js`。プリセットと一致している間だけボタンを強調。月別推移など長い期間を見たいときは「直近6ヶ月」）。レポートは、概要（トラブル・業務依頼〔新規〕・点検記録・日報の件数、点検計画の実施率、未完了の業務依頼）・ジャンル別トラブル・トラブル月別推移・業務依頼ステータス内訳（全期間）・設備別の故障件数（全設備・上限なし）・期間内のトラブル一覧・未完了の業務依頼・期限超過の保全計画を1枚にまとめ、「印刷 / PDF保存」でA4縦に出す（レポートタブのときだけ `body.rpt-page` を付け、印刷時はヘッダー・期間・CSV・タブ・操作欄＝`.rpt-controls` を隠す。`@page`〔A4縦・余白12mm〕は `pages/dashboard.html` の `<style media="print">` に置く＝`css/style.css` の `@page` はラベル台紙用の余白0の1つだけ）。**新規APIなし**（`/api/stats`・`/api/troubles`・`/api/repairs`・`/api/plans` の読み取りのみ。全員が閲覧可）。期間の計算は JST の日付文字列で `js/report-period.js`（他の import なし＝単体テスト `tests/unit-report-period.mjs`）。一覧は件数を絞って「ほかN件」と出す。**期限超過の保全計画は年間計画表専用の予定を含まない**（カレンダーの予定のみ）。点検実施率は08ダッシュボードと同じ（`/api/stats`）
-- **更新のお知らせ（ホーム）**: 新しい版（`sw.js` の `CACHE_VERSION`）が出たあとの最初のホーム表示で、上に「🆕 更新しました」カードを出し、「確認した」で閉じる（端末ごと＝localStorage `updates:seen`。初めての端末は最新1件、何版も見逃していても新しい3件まで）。過去の更新はホーム下の「🆕 更新履歴」から見られる。内容は `js/updates.js` の `UPDATES`（新しい順・現場向けの言葉で書く）、表示は `js/update-notice.js`。**`CACHE_VERSION` を上げたら `UPDATES` の先頭に同じ版のお知らせを必ず足す**（`tests/unit-updates.mjs` が一致を確認する＝足し忘れるとテストが失敗する）。端末が新しい版を取り込むのは（キャッシュ優先＋裏で更新のため）デプロイ後の2回目の起動なので、お知らせもそのときから出る
+- **更新のお知らせ（ホーム）**: 新しい版（`sw.js` の `CACHE_VERSION`）が出たあとの最初のホーム表示で、ホームの上のタブ（期限超過・直近・通知）に「🆕 更新」タブが出る（期限超過が無いときは最初から開く）。変わった点を読んで「確認した」を押すとタブごと消える（端末ごと＝localStorage `updates:seen`。初めての端末は最新1件、何版も見逃していても新しい3件まで。`js/update-notice.js`・`js/home-tabs.js`）。**過去の更新は、ホームの「管理」タイルの隣の「🆕 更新履歴」タイル＝`/pages/updates`（`js/updates-page.js`）で全部見られる**。内容は `js/updates.js` の `UPDATES`（新しい順・現場向けの言葉で書く）。**`CACHE_VERSION` を上げたら `UPDATES` の先頭に同じ版のお知らせを必ず足す**（`tests/unit-updates.mjs` が一致を確認する＝足し忘れるとテストが失敗する）。端末が新しい版を取り込むのは（キャッシュ優先＋裏で更新のため）デプロイ後の2回目の起動なので、お知らせもそのときから出る
 - **アプリ内の使い方ガイド**: ホームのタイル「❓ 使い方」（`/pages/help`・`js/help.js`）。機能ごとの短い手順を折りたたみで表示し、検索（全角半角を吸収）と `#parts` のような項目指定に対応。SW のキャッシュ対象なので電波が無くても読める。本文は `js/help.js` の `HELP` 配列（DOM で組み立てる＝innerHTML 不使用）。**機能を変えたときは `HELP` と `docs/現場向け使い方ガイド.md` の両方を直す**（内容は同じ方針・アプリ内は短縮版）
 - **PDF出力**: 一覧・帳票はクライアント側で印刷用CSS + `window.print()` を基本とし、整形帳票が必要な箇所は jsPDF + 日本語フォント埋め込みを使用
 ### 09. 管理機能
@@ -250,7 +252,7 @@
 - **スコープ外**: オフライン送信キュー、未入力リマインド通知
 **テーブル**: `utility_item`（section, name, input_type[number/select/multi/time/text], unit, min_value, max_value, options_json, alert_options_json, sort_order, +共通監査列）、`utility_report`（report_date, inspected_at, reporter_name, has_abnormal, values_json, note, +共通監査列）
 ### 14. AIサポート（廃止）
-- 専用画面（`/pages/ai-support`・`js/ai-support.js`）とホームのタイルは**不要のため削除済み**。過去事例の検索は横断検索11、類似トラブルの表示・AIによる原因・対策の提案は 04 トラブル記録の登録・編集フォームで行う（`/api/troubles/similar`・`/api/ai/suggest-trouble` は 04 が使うため残す）
+- 専用画面（`/pages/ai-support`・`js/ai-support.js`）とホームのタイルは**不要のため削除済み**。過去事例の検索は横断検索11、類似トラブルの表示は 04 トラブル記録の登録・編集フォームで行う（`/api/troubles/similar` は 04 が使うため残す）。テキストのAI（原因・対策の提案）も廃止した
 ---
 ## ディレクトリ構成
 ```
@@ -299,7 +301,7 @@
 │   ├── stats/              # 集計
 │   ├── files/              # R2アップロード/取得
 │   ├── print-templates/    # 帳票テンプレート
-│   ├── ai/                 # Workers AI（suggest-trouble / read-meter / extract-equipment）。画面から呼ばれない API（analyze-trouble / parse-search / parse-trouble-pdf / chat）と AI アシスタント FAB は削除済み
+│   ├── ai/                 # Workers AI（read-meter / extract-equipment＝画像を読むAIのみ）。画面から呼ばれない API（analyze-trouble / parse-search / parse-trouble-pdf / chat）と AI アシスタント FAB は削除済み
 │   ├── users/
 │   └── admin/              # audit/ restore/ masters/ users/ backup.js usage.js normalize.js
 ├── tests/                  # E2Eテスト（実ブラウザ検証。cd tests && npm test）
@@ -325,7 +327,7 @@
 - **期間予定の分割（1日削除・1日完了）は同時操作を 409 で止める**（batch の先頭を `guardedPlanUpdate`＝読んだ時点の日程・状態のままのときだけ元の予定を書き換える条件付き UPDATE にし、後続の INSERT・監査は `ifPrevChanged`（`WHERE changes() = 1`）で連鎖させる。競合した側は何も作らない。2回押しで完了済みの単日レコードが2件できるのを防ぐ。updated_at は秒精度で同じ秒の2回押しを区別できないため使わない）。分割した予定には工事連絡書の印刷日（`printed_at`/`printed_by`）も引き継ぐ
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
 ### AI機能（Workers AI）の出し分け
-- テキスト系AI（トラブルの原因・対策提案など）は `env.AI` 未構成なら `/api/me` の `ai_enabled:false` でボタンを出さない
+- テキスト系AI（原因・対策の提案）は廃止した。残るAIは画像を読むもの（計器・銘板）だけ
 - **AI の API（`functions/api/ai/*`）はすべて Functions 側で入力可（editor）以上に限る**（閲覧のみのユーザーが直接呼んで Workers AI の無料枠を使い切れないように）。プロンプトに入る入力には長さの上限を設ける（会話履歴の各発言・現象・原因・対策など）。画像AI（`read-meter`・`extract-equipment`）はサーバー側でも `AI_VISION_ENABLED=1` でなければ 403
 - **画像を読むAI（計器の📷自動読み取り＝`/api/ai/read-meter`・設備銘板の自動読み取り＝`/api/ai/extract-equipment`）は既定で非表示**。既定モデル `@cf/meta/llama-3.2-11b-vision-instruct` は Cloudflare アカウントでの**ライセンス同意が必要**で、未同意だと実行時に `5016: … you must submit the prompt 'agree'` で失敗し、現場の入力画面に英文のライセンス文がそのまま出てしまうため（実際に発生）。表示するには Cloudflare ダッシュボード → Pages → 設定 → 環境変数に **`AI_VISION_ENABLED=1`** を設定する（`/api/me` の `ai_vision_enabled`／`js/auth.js` の `getAiVisionEnabled()`／`js/inspection-items.js`・`js/ledger.js`。再デプロイ不要）
 - ライセンス同意が不要なモデルに変えたい場合は `AI_VISION_MODEL` を設定する（`functions/api/_lib/ai-models.js`）
