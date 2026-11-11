@@ -922,7 +922,7 @@ for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api
   }
   const st = (await api('/api/stats?from=2032-03-01&to=2032-03-31')).json;
   check('統計API: 設備別の故障件数は全設備を返す（上位10件で切らない）',
-    st?.equipment_trouble_counts?.length === 12 && st?.equipment_ranking?.length === 10
+    st?.equipment_trouble_counts?.length === 12 && st?.equipment_ranking === undefined
       && st.equipment_trouble_counts[0].trouble_count === 3 && st.equipment_trouble_counts[0].equipment_id === ids[11],
     JSON.stringify(st?.equipment_trouble_counts?.length));
   await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
@@ -2397,13 +2397,18 @@ check('工事連絡書: 工事概要は備考で補われ、会社名（該当�
   !!cnXml && cnXml.includes('工事概要=[E2E備考の内容]') && cnXml.includes('会社名=[]'), (cnXml || 'no download').slice(0, 300));
 
 // ---------- 9.25 保全レポート（印刷用1枚） ----------
-section('9.25 保全レポート（概要・ジャンル別・一覧・印刷表示）');
+section('9.25 保全レポート（ダッシュボードのレポートタブ：概要・ジャンル別・一覧・印刷表示）');
 const rptEq = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-RPT', name: 'E2Eレポート設備' } });
 const rptNowIso = new Date().toISOString();
 const rptTr = await api('/api/troubles', { method: 'POST', body: { equipment_id: rptEq.json?.id, category_id: 1, occurred_at: rptNowIso, phenomenon: 'E2Eレポート異音' } });
 const rptRp = await api('/api/repairs', { method: 'POST', body: { equipment_id: rptEq.json?.id, title: 'E2Eレポート依頼' } });
+// 旧URL（/pages/report-summary）はダッシュボードのレポートタブ（今月）へ移動する
 await page.goto(`${BASE}/pages/report-summary`, { waitUntil: 'networkidle' });
 await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
+check('保全レポート: 旧URLはダッシュボードのレポートタブへ移動する',
+  page.url().includes('/pages/dashboard') && page.url().includes('tab=report')
+    && await page.evaluate(() => document.getElementById('tab-btn-report').classList.contains('is-active')), page.url());
+check('保全レポート: 今月のチップが強調される', await page.evaluate(() => document.querySelector('.chip[data-kind="month"]').classList.contains('is-active')));
 const rptText = await page.evaluate(() => document.getElementById('report-doc').innerText);
 check('保全レポート: 今月の概要・トラブル一覧・未完了の依頼が出る',
   rptText.includes('保全レポート') && rptText.includes('E2Eレポート異音') && rptText.includes('E2Eレポート依頼') && rptText.includes('ジャンル別トラブル') && rptText.includes('期限超過の保全計画'),
@@ -2415,9 +2420,9 @@ check('保全レポート: 先月に切り替えると今月のトラブルは�
 await page.click('.chip[data-kind="month"]');
 await page.waitForFunction(() => document.getElementById('report-doc').innerText.includes('E2Eレポート異音'), { timeout: 8000 });
 // 不正な期間（開始 > 終了）は案内を出す
-await page.fill('.rpt-range input[aria-label="開始日"]', '2026-12-31');
-await page.fill('.rpt-range input[aria-label="終了日"]', '2026-01-01');
-await page.click('.rpt-range button:has-text("表示")');
+await page.fill('.period-bar input[type="date"] >> nth=0', '2026-12-31');
+await page.fill('.period-bar input[type="date"] >> nth=1', '2026-01-01');
+await page.click('.period-bar button.btn-sm:text-is("集計")');
 check('保全レポート: 開始日が終了日より後ならエラー案内', await page.evaluate(() => document.getElementById('report-doc').innerText.includes('期間を正しく指定')));
 await page.click('.chip[data-kind="month"]');
 await page.waitForFunction(() => document.getElementById('report-doc').innerText.includes('E2Eレポート異音'), { timeout: 8000 });
@@ -2425,11 +2430,12 @@ await page.waitForFunction(() => document.getElementById('report-doc').innerText
 await page.emulateMedia({ media: 'print' });
 const rptPrint = await page.evaluate(() => ({
   header: getComputedStyle(document.querySelector('.app-header')).display,
-  controls: getComputedStyle(document.querySelector('.rpt-controls')).display,
+  controls: [...document.querySelectorAll('.rpt-controls')].map((c) => getComputedStyle(c).display).join(','),
+  tabs: getComputedStyle(document.querySelector('.tab-bar')).display,
   doc: getComputedStyle(document.getElementById('report-doc')).display,
 }));
 await page.emulateMedia({ media: 'screen' });
-check('保全レポート: 印刷表示ではヘッダーと操作欄が隠れ、レポート本体は残る', rptPrint.header === 'none' && rptPrint.controls === 'none' && rptPrint.doc !== 'none', JSON.stringify(rptPrint));
+check('保全レポート: 印刷表示ではヘッダーと操作欄が隠れ、レポート本体は残る', rptPrint.header === 'none' && rptPrint.tabs === 'none' && rptPrint.controls.split(',').every((d) => d === 'none') && rptPrint.doc !== 'none', JSON.stringify(rptPrint));
 await page.setViewportSize({ width: 375, height: 720 });
 await page.waitForTimeout(300);
 check('保全レポート: スマホ幅（375px）で横にはみ出さない', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));

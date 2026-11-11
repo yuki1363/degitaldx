@@ -1,27 +1,18 @@
-// 08 保全レポート（印刷用1枚）— /pages/report-summary
-//   期間（今週・先週・今月・先月・任意）を選ぶと、概要・ジャンル別・設備別ランキング・トラブル一覧・
-//   未完了の業務依頼・期限超過の保全計画をA4 1ページ前後にまとめる。「印刷」でブラウザの印刷（PDF保存も可）。
+// 08 保全レポート（印刷用1枚）— ダッシュボードの「📄 レポート」タブ（js/dashboard.js から呼ぶ）
+//   期間を渡すと、概要・ジャンル別・設備別の故障件数・トラブル一覧・未完了の業務依頼・期限超過の保全計画を
+//   A4 1ページ前後にまとめて描画する（印刷は dashboard.js 側のボタン。PDF保存も可）。
 //   既存の API（/api/stats・/api/troubles・/api/repairs・/api/plans）の読み取りだけを使う。
 //   ※ 点検実施率は /api/stats と同じ（期間内の「点検」計画のうち完了したものの割合）。
 import { api } from '/js/api.js';
-import { getCurrentUser } from '/js/auth.js';
 import { el, render, formatDate, jstTodayStr, toJstDateStr } from '/js/util.js';
-import { periodFor, isValidPeriod, shiftDate } from '/js/report-period.js';
+import { isValidPeriod, shiftDate } from '/js/report-period.js';
 
-document.body.classList.add('rpt-page'); // 印刷用CSSをこのページだけに効かせる
-const app = document.getElementById('app');
 const REPAIR_STATUS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
 const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
-const KINDS = [['week', '今週'], ['lastweek', '先週'], ['month', '今月'], ['lastmonth', '先月']];
 const TROUBLE_ROWS = 40;   // 一覧に出す件数（超えたら「ほかN件」）
 const REPAIR_ROWS = 25;
 const PLAN_ROWS = 25;
-
-let user = null;
-let from = '';
-let to = '';
-let activeKind = 'month';
-const docBox = el('div', { id: 'report-doc', class: 'rpt-doc' });
+const EQUIP_ROWS = 15;     // 設備別の故障件数に出す設備数（超えたら「ほかN設備」）
 
 const trunc = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
 const cell = (v, cls) => el('td', cls ? { class: cls } : {}, v == null || v === '' ? '—' : String(v));
@@ -35,7 +26,8 @@ function table(headers, rows, emptyText) {
 }
 const section = (title, body) => el('section', { class: 'rpt-section' }, [el('h3', { class: 'rpt-h3' }, title), body]);
 
-async function load() {
+/** docBox に from〜to（JSTの日付・両端を含む）のレポートを描く。user は出力者名の表示用（無くてもよい） */
+export async function renderReport(docBox, from, to, user) {
   render(docBox, el('p', { class: 'loading' }, '読み込み中…'));
   if (!isValidPeriod(from, to)) { render(docBox, el('p', { class: 'empty' }, '期間を正しく指定してください（開始日 ≦ 終了日）。')); return; }
   // /api/plans の to は「含まない」ため、終了日の翌日を渡す
@@ -51,6 +43,7 @@ async function load() {
   const overduePlans = (plansRes.plans || []).filter((p) => p.status === 'overdue');
   const rate = stats.inspection_rate || {};
   const act = stats.activity || {};
+  const equipCounts = stats.equipment_trouble_counts || [];
   const maxCat = Math.max(1, ...(stats.trouble_by_category || []).map((c) => c.count));
 
   const tile = (label, value, sub) => el('div', { class: 'rpt-tile' }, [
@@ -78,9 +71,12 @@ async function load() {
         cell(c.category_name), cell(c.count, 'rpt-num'),
         el('td', { class: 'rpt-bar-cell' }, el('span', { class: 'rpt-bar', style: `width:${Math.round((c.count / maxCat) * 100)}%` })),
       ])), 'この期間のトラブルはありません。')),
-    section('設備別 故障ランキング（上位）', table(['設備', '件数'],
-      (stats.equipment_ranking || []).map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
-      'この期間のトラブルはありません。')),
+    section('設備別 故障件数', el('div', {}, [
+      table(['設備', '件数'],
+        equipCounts.slice(0, EQUIP_ROWS).map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
+        'この期間のトラブルはありません。'),
+      equipCounts.length > EQUIP_ROWS ? el('p', { class: 'rpt-more' }, `ほか ${equipCounts.length - EQUIP_ROWS} 設備（全設備の件数はダッシュボードの「設備ごとの件数を見る」で確認できます）`) : null,
+    ])),
     section(`期間内のトラブル（${troubles.length}件）`, el('div', {}, [
       table(['発生日', '設備', 'ジャンル', '現象'],
         troubles.slice(0, TROUBLE_ROWS).map((t) => el('tr', {}, [
@@ -106,39 +102,3 @@ async function load() {
     ])),
   ]);
 }
-
-function setPeriod(kind) {
-  activeKind = kind;
-  const p = periodFor(kind, jstTodayStr());
-  from = p.from; to = p.to;
-  fromInput.value = from; toInput.value = to;
-  chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('is-active', c.dataset.kind === kind));
-}
-
-const fromInput = el('input', { type: 'date', 'aria-label': '開始日' });
-const toInput = el('input', { type: 'date', 'aria-label': '終了日' });
-const chips = el('div', { class: 'chip-row' }, KINDS.map(([kind, label]) =>
-  el('button', { class: 'chip', type: 'button', 'data-kind': kind, onclick: () => { setPeriod(kind); load().catch(showError); } }, label)));
-const showError = (err) => render(docBox, el('p', { class: 'empty' }, `レポートを作成できませんでした: ${err.message}`));
-
-(async () => {
-  try { user = await getCurrentUser(); } catch { user = null; }
-  render(app, [
-    el('div', { class: 'card rpt-controls' }, [
-      chips,
-      el('div', { class: 'rpt-range' }, [
-        fromInput, el('span', {}, '〜'), toInput,
-        el('button', { class: 'btn btn-sm', type: 'button', onclick: () => {
-          activeKind = ''; from = fromInput.value; to = toInput.value;
-          chips.querySelectorAll('.chip').forEach((c) => c.classList.remove('is-active'));
-          load().catch(showError);
-        } }, '表示'),
-        el('button', { class: 'btn btn-sm btn-primary', type: 'button', id: 'rpt-print', onclick: () => window.print() }, '🖨 印刷 / PDF保存'),
-      ]),
-      el('p', { class: 'hint' }, '印刷ダイアログで「PDFに保存」を選ぶと、PDFとして残せます（A4・縦）。'),
-    ]),
-    docBox,
-  ]);
-  setPeriod('month');
-  await load().catch(showError);
-})();
