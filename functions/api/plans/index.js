@@ -329,15 +329,25 @@ export async function onRequestGet({ request, env }) {
 
   if (rangeStart && rangeEnd) {
     // 範囲と重なるもの（繰り返し予定の展開は廃止済み。recurrence_rule 列に値が残っていても、
-    // 開始日〜終了日の1回だけの予定として扱う＝他の予定と同じ条件で絞り込む）
+    // 開始日〜終了日の1回だけの予定として扱う＝他の予定と同じ条件で絞り込む）。
+    // 単日の予定は「予定日が範囲内」、複数日の予定は「開始が範囲の終わりより前で、終了が範囲の始めより後」。
+    // 以前は「開始が範囲の終わりより前」だけが索引に効いたため、過去の予定を全部読んでいた
+    // （2年分で1か月表示でも約1,500行）。OR で1本にまとめると実行計画が元の形（予定日の上限だけ）に戻るため、
+    // 単日（予定日の範囲）と複数日（終了日の索引）を別々に探して合わせる。
+    // 複数日側の「+p.planned_date」は意図したもの（単項プラスで予定日の索引を選べなくし、終了日の索引へ誘導する。
+    // SQLite の版によっては、統計が無いと予定日の索引を先頭から読む計画を選んでしまうため。索引が無くても結果は同じ）。
     const { results: rows } = await db.prepare(`
-      SELECT p.*
-      FROM maintenance_plan p
-      WHERE p.deleted_at IS NULL
-        AND p.planned_date < ?
-        AND COALESCE(p.planned_end_date, p.planned_date) >= ?
-      ORDER BY p.planned_date ASC, p.id ASC
-    `).bind(rangeEnd, rangeStart).all();
+      SELECT * FROM (
+        SELECT p.* FROM maintenance_plan p
+         WHERE p.deleted_at IS NULL AND p.planned_end_date IS NULL
+           AND p.planned_date >= ?1 AND p.planned_date < ?2
+        UNION ALL
+        SELECT p.* FROM maintenance_plan p
+         WHERE p.deleted_at IS NULL AND p.planned_end_date IS NOT NULL
+           AND p.planned_end_date >= ?1 AND +p.planned_date < ?2
+      )
+      ORDER BY planned_date ASC, id ASC
+    `).bind(rangeStart, rangeEnd).all();
     results = rows ?? [];
   } else {
     const { results: rows } = await db.prepare(`

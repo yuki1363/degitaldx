@@ -1057,3 +1057,15 @@ CREATE TABLE IF NOT EXISTS parts_equipment (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_equipment_pair
   ON parts_equipment (part_id, equipment_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_parts_equipment_equipment ON parts_equipment (equipment_id);
+
+-- ============================================================
+-- 性能索引（読み取り行数の節約）— functions/api/_lib/perf-indexes.js と同じ内容
+--   本番の D1 には API の入口で自動作成される（IF NOT EXISTS）。新規DBではここで作る。
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_chat_messages_pinned ON chat_messages (channel, pinned_at) WHERE pinned_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_related ON notifications (related_table, related_id, type);
+CREATE INDEX IF NOT EXISTS idx_inspection_result_inspected ON inspection_result (inspected_at);
+CREATE INDEX IF NOT EXISTS idx_maintenance_plan_end ON maintenance_plan (planned_end_date) WHERE planned_end_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_log_table_action ON audit_log (table_name, action);
+CREATE INDEX IF NOT EXISTS idx_parts_inventory_updated ON parts_inventory (updated_at);

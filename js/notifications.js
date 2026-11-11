@@ -152,6 +152,7 @@ async function load(ctx) {
   if (currentFromMonth) sp.set('from_month', currentFromMonth);
   if (currentToMonth) sp.set('to_month', currentToMonth);
   if (currentAssignee) sp.set('assignee', currentAssignee);
+  sp.set('facets', '1'); // 月・担当者の選択肢（全件から集計するため、この画面だけが頼む）
 
   let data;
   try {

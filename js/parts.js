@@ -19,15 +19,25 @@ import qrcode from '/js/vendor/qrcode.mjs';
 //   （E2E では window.__PARTS_REFRESH_MS__ で短くして確認する）
 const AUTO_REFRESH_MS = Number(window.__PARTS_REFRESH_MS__) || 20_000;
 
-// 長時間操作が無ければ自動更新も止める（タブレットを開いたまま放置される等で、
-// D1 の読み取り枠（無料枠 500万行/日）を無駄に消費しないように）。
-// タップ・キー操作・スクロールがあれば自動更新を再開する（E2E では __PARTS_IDLE_MS__ で短縮）。
+// 長時間操作が無ければ自動更新（変更の確認）も止める（タブレットを開いたまま放置される等で、
+// D1 の読み取り枠〈無料枠 500万行/日〉を無駄に消費しないように）。
+// タップ・キー操作・スクロールがあれば再開し、止まっていたときはその瞬間に1回確認する
+// （次の確認まで最大20秒待たせない）。E2E では __PARTS_IDLE_MS__ で短縮する。
 const IDLE_STOP_MS = Number(window.__PARTS_IDLE_MS__) || 5 * 60_000;
 let lastActivityAt = Date.now();
-['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
-  window.addEventListener(ev, () => { lastActivityAt = Date.now(); }, { passive: true })
-);
+let resumeHook = null; // 表示中の画面（一覧/詳細）が「いま確認する」処理を登録する
 const isIdle = () => Date.now() - lastActivityAt > IDLE_STOP_MS;
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
+  window.addEventListener(ev, () => {
+    const wasIdle = isIdle();
+    lastActivityAt = Date.now();
+    if (wasIdle && resumeHook) resumeHook();
+  }, { passive: true })
+);
+// 裏に回っていたタブ・アプリに戻ったときも、すぐ確認する
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && resumeHook && !isIdle()) resumeHook();
+});
 
 // 1回の入出庫の識別番号。押し直し・送信待ちの再送でも同じ番号を送り、サーバーは2回反映しない
 const newTxId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
@@ -614,10 +624,19 @@ async function renderList() {
     const resp = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
     allParts = resp.parts;
     similarParts = resp.similar || [];
+    listVersion = resp.version ?? null;
     refreshLineOptions();
     refreshEquipOptions();
     renderParts();
-    refreshedEl.textContent = `${formatDateTime(new Date().toISOString())} 時点（${AUTO_REFRESH_MS / 1000}秒ごとに自動更新）`;
+    setRefreshedLabel();
+  };
+  // 自動更新の状態表示。止まっているとき（放置・電波なし）は、そう分かるように出す
+  let listVersion = null;
+  let lastCheckedAt = new Date();
+  const setRefreshedLabel = (state = 'active') => {
+    if (state === 'idle') { refreshedEl.textContent = `${formatDateTime(lastCheckedAt.toISOString())} 時点（自動更新は一時停止中。画面を触ると再開します）`; return; }
+    lastCheckedAt = new Date();
+    refreshedEl.textContent = `${formatDateTime(lastCheckedAt.toISOString())} 時点（他の人の入出庫を${AUTO_REFRESH_MS / 1000}秒ごとに確認して反映します）`;
   };
   const refreshedEl = el('span', { class: 'hint parts-refreshed' }, '');
 
@@ -695,15 +714,26 @@ async function renderList() {
   ]);
   await load();
 
-  // 自動更新: 画面を開いている間は一定間隔で在庫を取り直す（他の人の入出庫を反映）。
-  // 棚卸中・入力中は入力を消さないよう更新しない。裏に回っている間・オフラインの間も止める
-  setInterval(() => {
-    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode || isIdle()) return;
+  // 自動更新: 画面を開いている間は一定間隔で「変わったか」だけを確かめ、変わっていたときだけ在庫を取り直す
+  // （他の人の入出庫を反映するため。一覧を毎回全件読むと D1 の読み取り枠を使うので、軽い「版」で確認する）。
+  // 棚卸中・入力中は入力を消さないよう更新しない。裏に回っている間・オフライン・放置の間も止める
+  let checking = false;
+  const checkForChanges = async () => {
+    if (checking) return;
+    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode) return;
+    if (isIdle()) { setRefreshedLabel('idle'); return; }
     const active = document.activeElement;
     if (active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)) return;
     if (document.querySelector('.modal-backdrop, .sheet-backdrop, .order-dialog')) return;
-    load({ quiet: true }).catch(() => { /* 次の回に再試行 */ });
-  }, AUTO_REFRESH_MS);
+    checking = true;
+    try {
+      const { version } = await api.get('/api/parts?version=1');
+      if (version !== listVersion) await load({ quiet: true });
+      else setRefreshedLabel();
+    } catch { /* 次の回に再試行 */ } finally { checking = false; }
+  };
+  setInterval(checkForChanges, AUTO_REFRESH_MS);
+  resumeHook = checkForChanges;
 }
 
 // ---------------- 詳細（入出庫履歴） ----------------
@@ -814,7 +844,7 @@ async function renderDetail(id) {
   qr.addData(partUrl);
   qr.make();
 
-  const refreshedEl = el('span', { class: 'hint parts-refreshed' }, `${formatDateTime(updatedAt.toISOString())} 時点の在庫（${AUTO_REFRESH_MS / 1000}秒ごとに自動更新）`);
+  const refreshedEl = el('span', { class: 'hint parts-refreshed' }, `${formatDateTime(updatedAt.toISOString())} 時点の在庫（他の人の入出庫を${AUTO_REFRESH_MS / 1000}秒ごとに確認して反映します）`);
 
   render(app, [
     queued.length
@@ -920,16 +950,27 @@ async function renderDetail(id) {
     ]),
   ]);
 
-  // 自動更新: 画面を開いている間は一定間隔で取り直す（他の人の入出庫を反映）。入力中は邪魔しない
+  // 自動更新: 画面を開いている間は一定間隔で「変わったか」だけを確かめ、変わっていたときだけ取り直す
+  // （他の人の入出庫を反映するため。毎回読み直すと D1 の読み取り枠を使うので、軽い「版」で確認する）。
+  // 入力中は邪魔しない。放置・裏に回っている間・電波なしの間は止める
   clearInterval(detailTimer);
-  detailTimer = setInterval(() => {
+  const detailVersion = data.version ?? null;
+  let detailChecking = false;
+  const checkDetail = async () => {
+    if (detailChecking) return;
     if (document.visibilityState !== 'visible' || navigator.onLine === false || isIdle()) return;
     const active = document.activeElement;
     const typing = active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
     const touched = txQtyEl.value !== '1' || txNoteEl.value !== '' || txTypeEl.value !== 'in';
     if (typing || touched || txBtn.disabled || document.querySelector('.quick-qty-value')?.textContent !== '1') return;
-    renderDetail(id).catch(() => { /* 次の回に再試行 */ });
-  }, AUTO_REFRESH_MS);
+    detailChecking = true;
+    try {
+      const { version } = await api.get(`/api/parts/${id}?version=1`);
+      if (version !== detailVersion) await renderDetail(id);
+    } catch { /* 次の回に再試行 */ } finally { detailChecking = false; }
+  };
+  detailTimer = setInterval(checkDetail, AUTO_REFRESH_MS);
+  resumeHook = checkDetail;
 }
 
 // ---------------- 登録・編集フォーム ----------------

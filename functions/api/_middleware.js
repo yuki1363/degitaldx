@@ -9,6 +9,7 @@
 
 import { resolveUser } from './_lib/auth.js';
 import { jsonError } from './_lib/http.js';
+import { ensurePerfIndexes } from './_lib/perf-indexes.js';
 
 export async function onRequest(context) {
   return withSecurityHeaders(await handle(context));
@@ -21,6 +22,8 @@ async function handle(context) {
     const { user, error } = await resolveUser(context.request, context.env);
     if (error) return error;
     context.data.user = user;
+    // 読み取り行数を減らす索引を（無ければ）作る。1プロセスにつき1回だけ実行し、失敗しても処理は続ける
+    await ensurePerfIndexes(context.env.DB).catch(() => {});
     return await context.next();
   } catch (err) {
     console.error('API error:', err && err.stack ? err.stack : err);
