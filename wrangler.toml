@@ -44,3 +44,5 @@ bucket_name = "mainte-files"
 #       AI_TEXT_MODEL   = <現行のテキスト生成モデルID>
 #       AI_VISION_MODEL = <現行の画像→テキストモデルID>
 # ---------------------------------------------------------------------
+[ai]
+binding = "AI"

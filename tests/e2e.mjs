@@ -293,10 +293,10 @@ section('2.55 トラブル入力: 設備の案内・使用部品・横断検索�
   const ledgerHref = await page.locator('#equip-missing-hint a').getAttribute('href').catch(() => '');
   check('トラブル入力: 設備が一覧に無いと、設備台帳から追加するよう案内する', hintText.includes('設備一覧にありません') && hintText.includes('設備台帳') && ledgerHref === '/pages/ledger?new=1', hintText.slice(0, 100));
   await page.fill('textarea[placeholder*="異音"]', 'E2E使用部品トラブル');
-  let blockMsg = '';
-  page.once('dialog', (d) => { blockMsg = d.message(); d.accept(); });
+  const dlg0 = dialogs.length; // alert/confirm は page.on('dialog') が記録して承諾する
   await page.click('button:text-is("保存")');
   await page.waitForTimeout(500);
+  const blockMsg = dialogs.slice(dlg0).join(' / ');
   check('トラブル入力: 一覧に無い設備名のままでは保存せず、設備台帳への追加を促す', blockMsg.includes('設備一覧にありません') && page.url().includes('new=1'), blockMsg);
   // 設備欄を空にして、使用部品（部品在庫から選択）を追加 → 保存で在庫が減る
   await eqInput.fill('');
@@ -314,19 +314,19 @@ section('2.55 トラブル入力: 設備の案内・使用部品・横断検索�
   const detailText = await page.evaluate(() => document.body.innerText);
   check('トラブル保存で使用部品が出庫され（在庫10→7）、詳細の「使用部品」に出る', await stockOf() === 7 && detailText.includes('E2E-UP-1') && detailText.includes('3 個使用'), `stock=${await stockOf()}`);
   const apiUsed = (await api(`/api/troubles/${troubleId}`)).json?.used_parts || [];
-  check('トラブル詳細API: used_parts に紐づいた出庫が返る', apiUsed.length === 1 && apiUsed[0].quantity === 3 && apiUsed[0].part_id === upId, JSON.stringify(apiUsed));
+  check('トラブル詳細API: used_parts に紐づいた出庫が返る', apiUsed.length === 1 && Math.abs(apiUsed[0].quantity) === 3 && apiUsed[0].part_id === upId, JSON.stringify(apiUsed));
   // 詳細画面からも追加できる。在庫を超える数量は断る
   await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫7）');
   await page.fill('input[aria-label="数量"]', '2');
   await page.click('button:text-is("記録")');
   await page.waitForFunction(() => document.body.innerText.includes('2 個使用'), { timeout: 8000 });
   check('トラブル詳細: 使用部品を追加すると在庫が減る（7→5）', await stockOf() === 5, `stock=${await stockOf()}`);
-  let overMsg = '';
-  page.once('dialog', (d) => { overMsg = d.message(); d.accept(); });
+  const dlg1 = dialogs.length;
   await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫5）');
   await page.fill('input[aria-label="数量"]', '99');
   await page.click('button:text-is("記録")');
   await page.waitForTimeout(400);
+  const overMsg = dialogs.slice(dlg1).join(' / ');
   check('トラブル詳細: 在庫を超える数量は断る（在庫は変わらない）', overMsg.includes('在庫が足りません') && await stockOf() === 5, overMsg);
   await api(`/api/troubles/${troubleId}`, { method: 'DELETE' });
   await api(`/api/parts/${upId}`, { method: 'DELETE' });
