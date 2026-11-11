@@ -29,6 +29,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, 'カテゴリが見つかりません');
 
   const body = await readJson(request);
+  if (!body) return jsonError(400, 'リクエストボディが不正です。');
   const { name, sort_order } = body;
 
   if ('name' in body && (!name || !name.trim())) {

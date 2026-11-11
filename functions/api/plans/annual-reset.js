@@ -81,7 +81,7 @@ export async function onRequestPost({ request, env, data }) {
   if (denied) return denied;
 
   const db = env.DB;
-  const body = await readJson(request);
+  const body = (await readJson(request)) ?? {};
   try {
     await ensurePlanResetLogTable(db);
   } catch (err) {

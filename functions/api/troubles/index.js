@@ -100,6 +100,7 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
   const db = env.DB;
   await ensureTroubleColumns(db); // form_values_json 列を自動で用意（未マイグレーション対応）
   const body = await readJson(request);
+  if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   const { occurred_at: occurredRaw, phenomenon, equipment_id, category_id, cause, countermeasure, custom_fields_json, form_values_json, file_ids, reporter_name } = body;
 

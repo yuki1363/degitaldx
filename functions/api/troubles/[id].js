@@ -92,9 +92,10 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, 'トラブル記録が見つかりません');
 
   const body = await readJson(request);
+  if (!body) return jsonError(400, 'リクエストボディが不正です。');
   const conflict = checkEditConflict(body, existing);
   if (conflict) return conflict; // 同時編集ガード
-  const UPDATABLE = ['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json', 'form_values_json', 'reporter_name'];
+  const UPDATABLE =['occurred_at', 'phenomenon', 'equipment_id', 'category_id', 'cause', 'countermeasure', 'custom_fields_json', 'form_values_json', 'reporter_name'];
 
   const setClauses = [];
   const binds = [];

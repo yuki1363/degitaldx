@@ -51,6 +51,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (!existing) return jsonError(404, '保全計画が見つかりません');
 
   const body = await readJson(request);
+  if (!body) return jsonError(400, 'リクエストボディが不正です。');
   const conflict = checkEditConflict(body, existing);
   if (conflict) return conflict; // 同時編集ガード
   const now = nowIso();

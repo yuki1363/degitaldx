@@ -373,6 +373,7 @@ export async function onRequestPost({ request, env, data }) {
   if (denied) return denied;
   const db = env.DB;
   const body = await readJson(request);
+  if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   const {
     title, planned_date, planned_end_date, plan_type,

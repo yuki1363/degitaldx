@@ -19,6 +19,7 @@ export async function onRequestPost({ request, env, data }) {
   if (denied) return denied;
   const db = env.DB;
   const body = await readJson(request);
+  if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   const { name, sort_order } = body;
   if (!name || !name.trim()) return jsonError(400, 'name は必須です');
