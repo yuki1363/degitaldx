@@ -216,6 +216,19 @@ export async function renderFileManager(container) {
     }
   };
 
+  // 論理削除したファイルを元に戻す（R2 の実体は残っているので、元のレコードの添付に再び出る）
+  const restore = async (f) => {
+    if (!confirm(`「${f.file_name}」を元に戻します。\n元の記録（点検・トラブル・日報など）の添付に再び表示されます。\nよろしいですか？`)) return;
+    try {
+      await api.put(`/api/files/${f.id}`, { restore: true });
+      await fetchData();
+      renderUsage();
+      renderList();
+    } catch (err) {
+      alert(`元に戻せませんでした: ${err.message}`);
+    }
+  };
+
   const renderList = () => {
     let list = files;
     if (filterMode === 'deleted') list = files.filter((f) => f.deleted_at);
@@ -240,7 +253,11 @@ export async function renderFileManager(container) {
             el('td', {}, f.deleted_at
               ? el('span', { class: 'cat-badge', title: `${maskEmail(f.deleted_by) || ''} ${formatDateTime(f.deleted_at)}` }, '削除済み')
               : '使用中'),
-            el('td', {}, el('button', { class: 'btn btn-sm btn-danger', onclick: () => purge(f) }, '完全削除')),
+            el('td', { style: 'white-space:nowrap' }, [
+              f.deleted_at ? el('button', { class: 'btn btn-sm', onclick: () => restore(f) }, '元に戻す') : null,
+              ' ',
+              el('button', { class: 'btn btn-sm btn-danger', onclick: () => purge(f) }, '完全削除'),
+            ]),
           ]))),
         ]),
       ]),
@@ -258,7 +275,8 @@ export async function renderFileManager(container) {
   render(container, [
     el('p', { class: 'hint' },
       'R2に保存されたファイルの一覧です。「完全削除」するとR2の実体を削除して容量を空けます（復元不可）。'
-      + '「削除済み」は一覧から隠れているだけでR2には残り容量を消費しているため、ここで完全削除できます。'),
+      + '「削除済み」は一覧から隠れているだけでR2には残り容量を消費しているため、ここで完全削除できます。'
+      + '間違えて消した写真・ファイルは、完全削除する前なら「元に戻す」で、元の記録の添付に戻せます。'),
     usageBox,
     el('div', { class: 'filter-bar' }, [el('label', { class: 'filter-label' }, ['表示 ', filterSel])]),
     listBox,

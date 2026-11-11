@@ -8,7 +8,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
@@ -386,6 +386,7 @@ function field(label, input) {
 }
 
 async function renderForm(existing, prefill = null) {
+  const requestId = newRequestId(); // 二重登録の防止（この入力フォーム1つにつき1つ。送信待ちに入れても同じ番号）
   const [{ equipment }, { users }] = await Promise.all([
     api.get('/api/equipment?limit=2000'),
     api.get('/api/users'),
@@ -434,6 +435,7 @@ async function renderForm(existing, prefill = null) {
       body.source_table = prefill.source_table;
       body.source_id = prefill.source_id;
     }
+    if (!existing) body.client_request_id = requestId;
     if (!body.title) { alert('タイトルは必須です。'); return; }
     // 保存中はボタンを無効化（遅い回線で2回タップすると依頼が2件できるため）
     if (saveBtn.disabled) return;

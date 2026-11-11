@@ -74,7 +74,7 @@ export async function onRequestPost({ env, data, request }) {
       errors.push({ row: i + 1, reason: `${qtyBad === 'quantity' ? '在庫数' : '安全在庫'}が範囲外です（0〜${MAX_PART_QTY.toLocaleString('en-US')}）。` });
       continue;
     }
-    validRows.push({ row, name });
+    validRows.push({ row, name, rowNo: i + 1 });
   }
 
   if (validRows.length === 0) {
@@ -152,23 +152,54 @@ async function doReplace(DB, userEmail, now, validRows, skipped, errors) {
 
 // --- 差分マージモード ---
 async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
-  // 既存部品を型番（model_no）でインデックス化
+  const totalRows = validRows.length + skipped; // 取り込み対象の総行数（ここで決められずに飛ばす行は skipped に足すが、総数は変えない）
+  // 既存部品を型番（model_no）ごとに束ねる。同じ型番を別のライン・機器で別々に登録できる設計のため、
+  // 1つの型番に複数の部品があり得る（以前は型番だけで突き合わせ、最後に登録された1件だけが更新され、
+  // CSV側でも2件目以降の行が黙って捨てられていた）。
   const { results: existing } = await DB.prepare(
-    `SELECT id, model_no, quantity FROM parts_inventory WHERE deleted_at IS NULL AND model_no IS NOT NULL`
+    `SELECT id, model_no, line_name, equipment_name, quantity FROM parts_inventory WHERE deleted_at IS NULL AND model_no IS NOT NULL`
   ).all();
-  const existingByModelNo = new Map((existing ?? []).map((r) => [r.model_no, r.id]));
+  const byModelNo = new Map();
+  for (const r of existing ?? []) {
+    if (!byModelNo.has(r.model_no)) byModelNo.set(r.model_no, []);
+    byModelNo.get(r.model_no).push(r);
+  }
   const qtyById = new Map((existing ?? []).map((r) => [r.id, r.quantity]));
   const qtyChanges = []; // 監査用: 在庫数が変わった部品 { id, from, to }
+  const touched = new Set(); // この取り込みで既に更新した既存部品（同じ部品に2行が当たらないように）
 
   const statements = [];
   let inserted = 0;
   let updated = 0;
+  const has = (row, key) => Object.prototype.hasOwnProperty.call(row, key);
 
-  for (const { row, name } of validRows) {
+  for (const { row, name, rowNo } of validRows) {
     const modelNo = cell(row.model_no);
-    const existingId = modelNo ? existingByModelNo.get(modelNo) : null;
+
+    // 更新先の決め方: 型番が同じ既存部品のうち、CSV に設備名・機器名があればそれも一致するもの。
+    //   1件に決まる → 更新 / 0件 → 新規追加（別のライン・機器の部品）/ 2件以上 → 決められないので取り込まず理由を返す
+    //   （CSV に設備名・機器名の列が無いのに、同じ型番の部品が複数あるとき。黙って1件だけ更新しない）
+    let target = null;
+    if (modelNo) {
+      let cands = byModelNo.get(modelNo) ?? [];
+      if (has(row, 'line_name')) { const v = cell(row.line_name); cands = cands.filter((c) => (c.line_name ?? null) === v); }
+      if (has(row, 'equipment_name')) { const v = cell(row.equipment_name); cands = cands.filter((c) => (c.equipment_name ?? null) === v); }
+      if (cands.length === 1) target = cands[0];
+      else if (cands.length > 1) {
+        skipped++;
+        errors.push({ row: rowNo, reason: `型番「${modelNo}」の部品が${cands.length}件あり、どれを更新するか決められません。CSV に設備名・機器名の列も対応付けて取り込んでください。` });
+        continue;
+      }
+    }
+    const existingId = target?.id ?? null;
+    if (existingId && touched.has(existingId)) {
+      skipped++;
+      errors.push({ row: rowNo, reason: `型番「${modelNo}」は、この取り込みの別の行で既に更新した部品です（同じ型番・設備名・機器名の行が重複しています）。` });
+      continue;
+    }
 
     if (existingId) {
+      touched.add(existingId);
       // UPDATE: 既存レコードを上書き。ただし CSV で対応付けた列（＝行にキーがある列）だけを更新する。
       // 画面は対応付けていない列をキーごと送らないため、全列を更新すると未対応付けの列が
       // 0／空で上書きされ、型番と部品名だけのマージで在庫数・場所・仕入先などが消えてしまう。
@@ -176,7 +207,7 @@ async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
       const sets = ['name = ?'];
       const binds = [name];
       for (const [col, conv] of MERGE_UPDATABLE) {
-        if (!Object.prototype.hasOwnProperty.call(row, col)) continue;
+        if (!has(row, col)) continue;
         sets.push(`${col} = ?`);
         binds.push(conv(row[col]));
       }
@@ -184,7 +215,7 @@ async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
       binds.push(userEmail, now, existingId);
       // 在庫数を対応付けていれば、変わる分を入出庫履歴に「調整」として残す（増減は書き込む瞬間の在庫から計算）。
       // 入出庫画面を通さずに在庫数が変わると、履歴の合計と在庫が合わなくなり原因を追えなかった
-      if (Object.prototype.hasOwnProperty.call(row, 'quantity')) {
+      if (has(row, 'quantity')) {
         const to = num(row.quantity);
         statements.push(DB.prepare(
           `INSERT INTO parts_transaction (part_id, type, quantity, note, created_by, created_at)
@@ -233,7 +264,7 @@ async function doMerge(DB, userEmail, now, validRows, skipped, errors) {
     action: 'update',
     changedBy: userEmail,
     // 在庫数の変更は誰が・どれを・いくつからいくつにしたかを残す（肥大化しないよう最大100件まで）
-    diff: { mode: 'merge', inserted, updated, skipped, total: validRows.length + skipped, quantity_changes: qtyChanges.slice(0, 100) },
+    diff: { mode: 'merge', inserted, updated, skipped, total: totalRows, quantity_changes: qtyChanges.slice(0, 100) },
   }));
   try {
     await DB.batch(statements);

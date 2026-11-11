@@ -10,6 +10,7 @@ import { writeAuditLog } from '../_lib/audit.js';
 import { notifyTeam } from '../_lib/notify.js';
 import { nowIso, jstDayStartUtc, jstNextDayStartUtc } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
+import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 
 const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z$/;
 
@@ -186,10 +187,20 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
   if (parsed.error) return jsonError(400, parsed.error);
   const v = parsed.value;
 
+  // 同じ識別番号（client_request_id）が登録済みなら、二重に作らず最初の記録を返す
+  // （電波が不安定で「届いたのに返事が届かず、送信待ちから再送された」場合など）
+  const idem = await beginIdempotent(env.DB, body, 'inspection_result');
+  if (idem.error) return jsonError(400, idem.error);
+  if (idem.dup?.conflict) return jsonError(409, DEDUPE_CONFLICT_MESSAGE);
+  if (idem.dup) {
+    const prev = await env.DB.prepare('SELECT has_abnormal FROM inspection_result WHERE id = ?1').bind(idem.dup.record_id).first();
+    return json({ id: idem.dup.record_id, has_abnormal: prev?.has_abnormal === 1, duplicate: true });
+  }
+
   const now = nowIso();
   // assignee_id は NOT NULL 制約が残るため、ログインユーザーのIDで埋める
   // （担当者の表示・入力は自由入力の assignee_name に一本化）。
-  const result = await env.DB.prepare(
+  const insertStmt = env.DB.prepare(
     `INSERT INTO inspection_result
        (equipment_id, assignee_id, assignee_name, inspected_at, items_json, has_abnormal, note, created_by, created_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
@@ -197,10 +208,21 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
     .bind(
       v.equipment_id, data.user.id, v.assignee_name, v.inspected_at,
       JSON.stringify(v.items), v.has_abnormal, v.note, data.user.email, now
-    )
-    .run();
-
-  const id = result.meta.last_row_id;
+    );
+  let id;
+  if (idem.key) {
+    // 記録と識別番号は同じ batch（同時に2回届いたら片方は丸ごと取り消される）
+    try {
+      const results = await env.DB.batch([insertStmt, dedupeStatement(env.DB, idem.key, 'inspection_result', data.user.email, now)]);
+      id = results[0].meta.last_row_id;
+    } catch (err) {
+      const existingId = isDedupeConflict(err) ? await resolveRaceDuplicate(env.DB, idem.key, 'inspection_result') : null;
+      if (!existingId) throw err;
+      return json({ id: existingId, has_abnormal: v.has_abnormal === 1, duplicate: true });
+    }
+  } else {
+    id = (await insertStmt.run()).meta.last_row_id;
+  }
 
   // 先にアップロード済みの写真・動画をこの記録に紐づける
   const attached = await attachFiles(env, {

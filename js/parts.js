@@ -1113,7 +1113,9 @@ async function renderImport() {
   let mapping = {};
   // 全置き換え（全部品を作り直す）は管理者のみ。入力可（editor）は差分マージだけ使える（サーバー側でも403）
   const canReplace = hasRole(currentUser, 'admin');
-  let importMode = canReplace ? 'replace' : 'merge'; // 'replace' | 'merge'
+  // 既定は差分マージ（管理者でも）。全置き換えは部品の番号（ID）が全部付け替わり、印刷済みの部品QRラベルが
+  // すべて読めなくなる等の影響が大きいため、既定にせず、選んだときだけ強い警告を出す
+  let importMode = 'merge'; // 'replace' | 'merge'
 
   const mappingBox = el('div', {}, []);
   const previewBox = el('div', {}, []);
@@ -1153,16 +1155,24 @@ async function renderImport() {
     });
   };
 
-  // CSV内で重複する型番（model_no）を検出する
+  // CSV内で重複する行を検出する。同じ型番でも、設備名・機器名が違えば別の部品（別のライン・機器で使う部品）。
+  // 以前は型番だけで見て、2件目以降を黙って捨てていた。型番・設備名・機器名がすべて同じ行だけを重複とする
+  const cellOf = (row, field) => (mapping[field] === '' || mapping[field] === undefined ? '' : (row[Number(mapping[field])] ?? '').trim());
+  const partKey = (row) => [cellOf(row, 'model_no'), cellOf(row, 'line_name'), cellOf(row, 'equipment_name')].join('\u0001');
   const detectDuplicates = () => {
     const modelNoIdx = mapping['model_no'];
     if (modelNoIdx === '' || modelNoIdx === undefined) return [];
     const counts = new Map();
     for (const row of csvRows) {
-      const v = row[Number(modelNoIdx)]?.trim();
-      if (v) counts.set(v, (counts.get(v) || 0) + 1);
+      const model = cellOf(row, 'model_no');
+      if (!model) continue;
+      const k = partKey(row);
+      counts.set(k, (counts.get(k) || 0) + 1);
     }
-    return [...counts.entries()].filter(([, n]) => n > 1).map(([v, n]) => `${v}（${n}件）`);
+    return [...counts.entries()].filter(([, n]) => n > 1).map(([k, n]) => {
+      const [model, line, equip] = k.split('\u0001');
+      return `${model}${line || equip ? `（${[line, equip].filter(Boolean).join(' / ')}）` : ''}（${n}件）`;
+    });
   };
 
   const buildPreview = () => {
@@ -1178,7 +1188,7 @@ async function renderImport() {
     const dups = detectDuplicates();
     const dupWarn = dups.length > 0
       ? el('p', { class: 'notice is-error', style: 'margin:8px 0;font-size:12px' },
-          `⚠ CSV内で型番が重複しています: ${dups.join(' / ')}（先着の行を優先します）`)
+          `⚠ CSV内で同じ部品（型番・設備名・機器名がすべて同じ）の行が重複しています: ${dups.join(' / ')}（先着の行だけ取り込みます）`)
       : null;
 
     render(previewBox, [
@@ -1222,7 +1232,8 @@ async function renderImport() {
   };
 
   importBtn.onclick = async () => {
-    // 型番重複を除去（先着優先）
+    // 同じ部品（型番・設備名・機器名がすべて同じ）の重複行を除去（先着優先）。
+    // 型番だけが同じで設備名・機器名が違う行は、別のライン・機器の部品なので残す
     const seen = new Set();
     const rows = csvRows.map((row) => {
       const obj = {};
@@ -1232,9 +1243,10 @@ async function renderImport() {
       return obj;
     }).filter((r) => {
       if (!r.name) return false;
-      const key = r.model_no || '';
-      if (key && seen.has(key)) return false;
-      if (key) seen.add(key);
+      if (!r.model_no) return true; // 型番が空の行は常に新規追加（重複判定しない）
+      const key = [r.model_no, r.line_name || '', r.equipment_name || ''].join('\u0001');
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
 
@@ -1242,8 +1254,8 @@ async function renderImport() {
 
     const modeLabel = importMode === 'merge' ? '差分マージ（追加・更新のみ）' : '全置き換え';
     const confirmMsg = importMode === 'merge'
-      ? `差分マージを実行します。\n・型番が一致する既存部品は更新されます\n・CSV に新規型番は追加されます\n・CSV にない既存部品は変更されません\n（CSV ${rows.length}件）\n実行しますか？`
-      : `既存の部品データをすべて削除し、CSV ${rows.length}件で置き換えます。\nこの操作は元に戻せます（削除済みデータから復元可能）が、現在の在庫数は上書きされます。\n実行しますか？`;
+      ? `差分マージを実行します。\n・型番（CSV に設備名・機器名があればそれも）が一致する既存部品は更新されます\n・CSV に新規の部品は追加されます\n・CSV にない既存部品は変更されません\n（CSV ${rows.length}件）\n実行しますか？`
+      : `【全置き換え】既存の部品をすべて削除し、CSV ${rows.length}件で作り直します。\n\n・すべての部品の番号が付け替わり、印刷済みの部品QRラベルがすべて読めなくなります\n・入出庫の履歴や、業務依頼・トラブルへの使用部品の紐づけは旧い部品に残ったまま切り離されます\n・現在の在庫数は CSV の値で上書きされます\n・元に戻すには、管理画面「削除済み」から1件ずつ復元します\n\n本当に実行しますか？（通常は「差分マージ」を使います）`;
     if (!confirm(confirmMsg)) return;
 
     importBtn.disabled = true;
@@ -1280,14 +1292,22 @@ async function renderImport() {
       mergeTipEl.style.display  = importMode === 'merge'   ? '' : 'none';
     },
   }, [
-    canReplace ? el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）') : null,
-    el('option', { value: 'merge' },   '差分マージ（型番一致で更新・新規のみ追加）'),
+    el('option', { value: 'merge' },   '差分マージ（型番一致で更新・新規のみ追加）【通常はこちら】'),
+    canReplace ? el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）※影響が大きい') : null,
   ]);
 
   const modeWarnEl = el('p', { class: 'notice is-error', style: `margin-bottom:8px${importMode === 'replace' ? '' : ';display:none'}` },
-    '⚠ 既存の部品データはすべて置き換えられます。CSVの内容が新しい正データになります（現在の在庫数も上書き）。');
+    '⚠ 全置き換えは、既存の部品をすべて削除して作り直します。次の影響があります。\n'
+    + '・すべての部品の番号（ID）が付け替わるため、印刷済みの部品QRラベルがすべて読めなくなります（読むと「見つかりません」）。\n'
+    + '・入出庫の履歴・業務依頼やトラブルへの使用部品の紐づけ・設備との追加の紐づけ・発注中の印が、旧い部品に残ったまま切り離されます。\n'
+    + '・現在の在庫数も CSV の値で上書きされます。\n'
+    + '通常は「差分マージ」を使ってください。（元に戻すには、管理画面「削除済み」から部品を1件ずつ復元します）');
+  modeWarnEl.style.whiteSpace = 'pre-line';
   const mergeTipEl = el('p', { class: 'notice', style: `margin-bottom:8px${importMode === 'merge' ? '' : ';display:none'}` },
-    'ℹ 型番（model_no）が一致する既存部品は更新されます。CSV にない既存部品はそのまま残ります。型番が空の行は常に新規追加されます。');
+    'ℹ 型番（model_no）が一致する既存部品は更新されます。CSV にない既存部品はそのまま残ります。型番が空の行は常に新規追加されます。\n'
+    + '同じ型番を別のライン・機器で使っている部品は、CSV の「設備名」「機器名」も対応付けると、型番＋設備名＋機器名が一致するものだけが更新されます'
+    + '（対応付けないと、同じ型番の部品が複数あるときは取り込まず、理由を表示します）。');
+  mergeTipEl.style.whiteSpace = 'pre-line';
 
   const fileInput = el('input', {
     type: 'file',

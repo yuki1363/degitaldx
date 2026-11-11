@@ -5,6 +5,7 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso, jstDayStartUtc, jstNextDayStartUtc, normalizeUtcIso } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 import { ensureColumns } from '../_lib/db-compat.js';
+import { beginIdempotent, dedupeBeforeStatement, dedupeFixStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 
 // 後から追加した列を、未マイグレーションのDBに対しても自動で用意する（自己修復マイグレーション）。
 //   新しい列を trouble_record に足すときは schema.sql への追記と合わせてここに ALTER 文を1行足す。
@@ -17,17 +18,19 @@ export async function ensureTroubleColumns(db) {
 // trouble_record へ INSERT する。form_values_json 等の列が無い旧DBでは、該当列を外して再試行する
 // （未マイグレーション環境でもトラブル登録が壊れないようにする）。
 //   after: 同じ batch（1トランザクション）で INSERT の直後に実行する文（監査ログ等）。INSERT の結果を返す
-export async function insertTroubleRecord(db, cols, vals, after = []) {
+//   before: 同じ batch で INSERT の前に実行する文（二重登録防止の識別番号など）
+export async function insertTroubleRecord(db, cols, vals, after = [], before = []) {
   let c = [...cols];
   let v = [...vals];
   for (let attempt = 0; attempt < 4; attempt++) {
     const placeholders = c.map(() => '?').join(', ');
     try {
-      const [inserted] = await db.batch([
+      const results = await db.batch([
+        ...before,
         db.prepare(`INSERT INTO trouble_record (${c.join(', ')}) VALUES (${placeholders})`).bind(...v),
         ...after,
       ]);
-      return inserted;
+      return results[before.length];
     } catch (err) {
       const m = /(?:has no column named|no such column):?\s*([A-Za-z_]\w*)/i.exec(String(err?.message || ''));
       const idx = m ? c.indexOf(m[1]) : -1;
@@ -109,6 +112,13 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
   if (!occurred_at) return jsonError(400, 'occurred_at は日時（ISO 8601・タイムゾーン付き。例 2026-10-27T01:30:00Z）で指定してください');
   if (!phenomenon || !phenomenon.trim()) return jsonError(400, 'phenomenon（現象）は必須です');
 
+  // 同じ識別番号（client_request_id）が登録済みなら、二重に作らず最初の記録を返す（電波が不安定で
+  // 「届いたのに返事が届かず、送信待ちから再送された」場合など）
+  const idem = await beginIdempotent(db, body, 'trouble_record');
+  if (idem.error) return jsonError(400, idem.error);
+  if (idem.dup?.conflict) return jsonError(409, DEDUPE_CONFLICT_MESSAGE);
+  if (idem.dup) return json({ id: idem.dup.record_id, duplicate: true });
+
   const now = nowIso();
   const userEmail = data.user.email;
   const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;
@@ -131,16 +141,29 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
     userEmail,
     now,
   ];
-  // 記録と監査ログは同じ batch で（記録だけ残って「誰が登録したか」が無い状態を作らない）
-  const result = await insertTroubleRecord(db, cols, vals, [
-    auditStatement(db, {
-      tableName: 'trouble_record',
-      recordId: LAST_INSERT_ID,
-      action: 'create',
-      changedBy: userEmail,
-      diff: { occurred_at, phenomenon: phenomenon.trim(), equipment_id, category_id, cause, countermeasure },
-    }),
-  ]);
+  // 記録・識別番号・監査ログは同じ batch で（記録だけ残って「誰が登録したか」が無い状態を作らない）。
+  // 監査ログは last_insert_rowid() で記録のIDを取るので、識別番号は 記録の前に入れ→記録のあとにIDを直す順にする
+  // （記録の直後に別の表へ INSERT すると、監査ログのIDがずれる。_lib/request-dedupe.js の説明を参照）
+  let result;
+  try {
+    result = await insertTroubleRecord(db, cols, vals, [
+      ...(idem.key ? [dedupeFixStatement(db, idem.key)] : []),
+      auditStatement(db, {
+        tableName: 'trouble_record',
+        recordId: LAST_INSERT_ID,
+        action: 'create',
+        changedBy: userEmail,
+        diff: { occurred_at, phenomenon: phenomenon.trim(), equipment_id, category_id, cause, countermeasure },
+      }),
+    ], idem.key ? [dedupeBeforeStatement(db, idem.key, 'trouble_record', userEmail, now)] : []);
+  } catch (err) {
+    // 同時に同じ番号が2回届いた（片方は丸ごと取り消された）。先に登録された記録を返す
+    if (idem.key && isDedupeConflict(err)) {
+      const existingId = await resolveRaceDuplicate(db, idem.key, 'trouble_record');
+      if (existingId) return json({ id: existingId, duplicate: true });
+    }
+    throw err;
+  }
 
   const id = result.meta?.last_row_id;
 

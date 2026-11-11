@@ -1069,3 +1069,19 @@ CREATE INDEX IF NOT EXISTS idx_inspection_result_inspected ON inspection_result 
 CREATE INDEX IF NOT EXISTS idx_maintenance_plan_end ON maintenance_plan (planned_end_date) WHERE planned_end_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_audit_log_table_action ON audit_log (table_name, action);
 CREATE INDEX IF NOT EXISTS idx_parts_inventory_updated ON parts_inventory (updated_at);
+
+-- ============================================================
+-- 二重登録の防止（client_request_id）— functions/api/_lib/request-dedupe.js
+--   電波が不安定で「登録できたのに返事が届かず、送信待ちから再送された」ときに、同じトラブル・点検・
+--   業務依頼・日報・ユーティリティ日報が2件できないようにする。画面が新規フォームごとに作る識別番号を
+--   記録し、同じ番号が再び来たら最初の記録のIDを返す。業務データではなく技術的な表のため、共通監査列
+--   （deleted_* 等）は持たない（誰が・いつ登録したかは created_by/created_at と各記録の監査ログにある）。
+--   本番の D1 には API が初めて使うときに自動作成される（IF NOT EXISTS）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS request_dedupe (
+  client_request_id TEXT PRIMARY KEY,
+  kind              TEXT NOT NULL,   -- trouble_record / inspection_result / repair_request / daily_report / utility_report
+  record_id         INTEGER NOT NULL,
+  created_by        TEXT,
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);

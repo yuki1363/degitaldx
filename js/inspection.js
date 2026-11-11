@@ -9,7 +9,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, ACTION_LABELS, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
@@ -108,6 +108,7 @@ async function renderList(presetEquipmentId) {
 
 
 async function renderEntry({ equipmentId, existing, planId, planDay, plannedDate, assigneeName }) {
+  const requestId = newRequestId(); // 二重登録の防止（この入力フォーム1つにつき1つ。送信待ちに入れても同じ番号）
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
   // 未保存ガード: 実際のユーザー入力があったら、ページ離脱時に「内容が消える」旨を警告する
@@ -301,6 +302,7 @@ async function renderEntry({ equipmentId, existing, planId, planDay, plannedDate
       inspected_at: inspectedAt,
       note: noteInput.value.trim(),
       items,
+      ...(existing ? {} : { client_request_id: requestId }),
     };
     const fileIds = [];
     try {

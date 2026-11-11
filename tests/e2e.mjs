@@ -2829,6 +2829,87 @@ check('台帳の設備名を変えると、新しい名前に一致する部品�
   alRen.json?.part?.equipment_id === alEq.json?.id && (await api(`/api/parts/${alPart.json?.id}`)).json?.part?.equipment_id === alEq.json?.id);
 for (const [t, id] of [['parts', alPart.json?.id], ['parts', alPart2.json?.id], ['equipment', alEq.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
 
+// ---------- 9.31 データ保護（二重登録の防止・ファイルの復元・CSV取込の既定） ----------
+section('9.31 データ保護（二重登録の防止・削除した写真の復元・部品CSV取込の既定は差分マージ）');
+{
+  // 同じ識別番号（client_request_id）の再送は、2件目を作らず最初の記録を返す（電波が不安定で返事が届かなかったとき）
+  const rid = () => crypto.randomUUID();
+  const kinds = [
+    ['トラブル', '/api/troubles', (k) => ({ occurred_at: new Date().toISOString(), phenomenon: `E2E二重防止トラブル${k}`, client_request_id: k }), (r) => r.json?.troubles],
+    ['業務依頼', '/api/repairs', (k) => ({ title: `E2E二重防止依頼${k}`, client_request_id: k }), (r) => r.json?.repairs],
+    ['日報', '/api/reports', (k) => ({ report_date: '2031-02-03', body: `E2E二重防止日報${k}`, client_request_id: k }), (r) => r.json?.reports],
+  ];
+  for (const [label, url, mk, list] of kinds) {
+    const key = rid();
+    const a = await api(url, { method: 'POST', body: mk(key) });
+    const b = await api(url, { method: 'POST', body: mk(key) });
+    check(`二重登録の防止（${label}）: 同じ識別番号の再送は新しく作らず、最初の記録を返す`,
+      a.status === 201 && b.status === 200 && b.json?.duplicate === true && b.json?.id === a.json?.id, JSON.stringify([a.status, b.status, a.json, b.json]));
+    const all = list(await api(url + (url === '/api/reports' ? '?from=2031-02-03&to=2031-02-03' : ''))) || [];
+    const mine = all.filter((x) => JSON.stringify(x).includes(key));
+    check(`二重登録の防止（${label}）: 記録は1件だけ`, mine.length === 1, `n=${mine.length}`);
+  }
+  const badKey = await api('/api/repairs', { method: 'POST', body: { title: 'x', client_request_id: '短い' } });
+  check('二重登録の防止: 識別番号の形式が不正なら400', badKey.status === 400, `status=${badKey.status}`);
+
+  // 画面から送る: 新規トラブルの保存は識別番号（UUID）つきで POST される
+  await page.goto(`${BASE}/pages/trouble?new=1`, { waitUntil: 'networkidle' });
+  await page.evaluate(() => localStorage.removeItem('draft:trouble-new'));
+  const sentKeys = [];
+  const onReq = (req) => {
+    if (req.method() === 'POST' && /\/api\/troubles$/.test(new URL(req.url()).pathname)) {
+      try { sentKeys.push(JSON.parse(req.postData() || '{}').client_request_id || null); } catch { sentKeys.push(null); }
+    }
+  };
+  page.on('request', onReq);
+  await page.fill('textarea[placeholder*="異音"]', 'E2E識別番号つき保存');
+  await page.click('button:text-is("保存")');
+  await page.waitForURL(/\/pages\/trouble\?id=\d+/, { timeout: 10000 }).catch(() => {});
+  page.off('request', onReq);
+  check('画面: 新規トラブルの保存は識別番号（UUID）つきで送られる', sentKeys.length === 1 && /^[0-9a-f-]{36}$/.test(String(sentKeys[0])), JSON.stringify(sentKeys));
+  const savedId = Number(new URL(page.url()).searchParams.get('id'));
+  if (savedId) await api(`/api/troubles/${savedId}`, { method: 'DELETE' });
+
+  // 削除した写真・ファイルは、管理画面から元に戻せる（以前は「復元できます」と案内しながら戻す手段が無かった）
+  const png = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 4; canvas.height = 4;
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+    const res = await fetch('/api/files?filename=e2e-restore.png', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  });
+  const fid = png.json?.file?.id;
+  const del = await api(`/api/files/${fid}`, { method: 'DELETE' });
+  check('ファイルの復元: 論理削除すると取得できない（404）', del.status === 200 && (await api(`/api/files/${fid}?meta=1`)).status === 404);
+  const restoreByEditor = await apiAs(editorEmail, `/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 入力可（editor）は403（管理者のみ）', restoreByEditor.status === 403, `status=${restoreByEditor.status}`);
+  const restored = await api(`/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 管理者が元に戻せる', restored.status === 200 && (await api(`/api/files/${fid}?meta=1`)).status === 200, JSON.stringify(restored));
+  const restoredAgain = await api(`/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 2回目（既に戻っている）は409', restoredAgain.status === 409, `status=${restoredAgain.status}`);
+  const auditRestore = await api('/api/admin/audit?table=files&action=restore');
+  check('ファイルの復元: 監査ログに restore が残る', (auditRestore.json?.logs || []).some((l) => l.table_name === 'files' && Number(l.record_id) === fid && l.action === 'restore'), JSON.stringify((auditRestore.json?.logs || []).slice(0, 2)));
+  await api(`/api/files/${fid}`, { method: 'DELETE' });
+  await api(`/api/files/${fid}?physical=1`, { method: 'DELETE' });
+  const restorePurged = await api(`/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 完全削除（R2から削除済み）したものは戻せない（409）', restorePurged.status === 409, `status=${restorePurged.status}`);
+
+  // 部品CSV取込: 管理者でも既定は「差分マージ」（全置き換えは部品のIDが付け替わりQRラベルが無効になるため）
+  await page.goto(`${BASE}/pages/parts?import=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('select', { timeout: 10000 });
+  const importUi = await page.evaluate(() => {
+    const sel = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => /差分マージ/.test(o.textContent)));
+    return {
+      value: sel?.value,
+      firstLabel: sel?.options[0]?.textContent || '',
+      hasReplace: [...(sel?.options || [])].some((o) => o.value === 'replace'),
+    };
+  });
+  check('部品CSV取込: 管理者でも既定は差分マージ', importUi.value === 'merge' && /差分マージ/.test(importUi.firstLabel) && importUi.hasReplace, JSON.stringify(importUi).slice(0, 200));
+  await page.selectOption('select:has(option[value="replace"])', 'replace');
+  const warnShown = await page.evaluate(() => [...document.querySelectorAll('.notice.is-error')].some((n) => n.style.display !== 'none' && /QRラベル/.test(n.textContent)));
+  check('部品CSV取込: 全置き換えを選ぶと、QRラベルが読めなくなる旨の強い警告が出る', warnShown);
+}
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);
