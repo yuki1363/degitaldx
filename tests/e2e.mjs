@@ -398,6 +398,15 @@ await page.evaluate(() => {
 await page.waitForTimeout(1500);
 const rpCount = ((await api('/api/repairs')).json?.repairs || []).filter((r) => r.title === 'E2E連打防止依頼').length;
 check('業務依頼: 保存ボタンを2回押しても1件だけ登録される', rpCount === 1, `件数=${rpCount}`);
+await page.goto(`${BASE}/pages/ledger?new=1`, { waitUntil: 'networkidle' });
+await page.fill('input[list="ledger-line-options"]', 'E2E連打防止設備');
+await page.evaluate(() => {
+  const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存');
+  btn.click(); btn.click(); // 新規は設備番号を自動採番するため、2回目は別番号で登録されていた
+});
+await page.waitForTimeout(1500);
+const eqDblCount = ((await api('/api/equipment?limit=2000')).json?.equipment || []).filter((e) => e.line_name === 'E2E連打防止設備').length;
+check('設備台帳: 保存ボタンを2回押しても1件だけ登録される', eqDblCount === 1, `件数=${eqDblCount}`);
 const dblPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E連打防止部品', quantity: 5, safety_stock: 0 } });
 await page.goto(`${BASE}/pages/parts?id=${dblPart.json?.id}`, { waitUntil: 'networkidle' });
 await page.evaluate(() => {
