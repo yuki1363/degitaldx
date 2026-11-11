@@ -615,12 +615,9 @@ async function renderForm(existing, prefill = null, usedParts = []) {
   // 帳票入力欄は再描画できる箱にしておく（下書き復元時に reportValues を反映し直すため）
   const reportBox = el('div', {});
   const renderReportSection = () => {
-    if (reportFields.length === 0) { render(reportBox, []); return; }
-    render(reportBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
-      el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, 'トラブル報告書（帳票）の入力'),
-      el('p', { class: 'hint', style: 'margin:0 0 8px' }, '設備・現象・原因・対策・記録者は、上の入力がそのまま帳票に入ります（ここには出しません）。ここで入力した内容も「帳票出力」でExcelに差し込まれます。'),
-      ...reportFields.map(reportInput),
-    ]));
+    // トラブルの入力と区分けしない（別の枠・見出しにせず、ほかの入力欄と同じように並べる）。
+    // 帳票に必要な項目も、ここに入れた内容が「帳票出力」でExcelに差し込まれる
+    render(reportBox, reportFields.map(reportInput));
   };
   renderReportSection();
 
