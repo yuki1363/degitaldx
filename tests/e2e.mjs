@@ -318,22 +318,13 @@ section('2.55 トラブル入力: 設備の案内・使用部品');
   const troubleId = Number(new URL(page.url()).searchParams.get('id'));
   await page.waitForTimeout(500);
   const detailText = await page.evaluate(() => document.body.innerText);
-  check('トラブル保存で使用部品が出庫され（在庫10→7）、詳細の「使用部品」に出る', await stockOf() === 7 && detailText.includes('E2E-UP-1') && detailText.includes('3 個使用'), `stock=${await stockOf()}`);
+  check('トラブル保存で使用部品が出庫される（在庫10→7）', await stockOf() === 7, `stock=${await stockOf()}`);
   const apiUsed = (await api(`/api/troubles/${troubleId}`)).json?.used_parts || [];
   check('トラブル詳細API: used_parts に紐づいた出庫が返る', apiUsed.length === 1 && Math.abs(apiUsed[0].quantity) === 3 && apiUsed[0].part_id === upId, JSON.stringify(apiUsed));
-  // 詳細画面からも追加できる。在庫を超える数量は断る
-  await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫7）');
-  await page.fill('input[aria-label="数量"]', '2');
-  await page.click('button:text-is("記録")');
-  await page.waitForFunction(() => document.body.innerText.includes('2 個使用'), { timeout: 8000 });
-  check('トラブル詳細: 使用部品を追加すると在庫が減る（7→5）', await stockOf() === 5, `stock=${await stockOf()}`);
-  const dlg1 = dialogs.length;
-  await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫5）');
-  await page.fill('input[aria-label="数量"]', '99');
-  await page.click('button:text-is("記録")');
-  await page.waitForTimeout(400);
-  const overMsg = dialogs.slice(dlg1).join(' / ');
-  check('トラブル詳細: 在庫を超える数量は断る（在庫は変わらない）', overMsg.includes('在庫が足りません') && await stockOf() === 5, overMsg);
+  // 詳細画面には使用部品の欄を置かない（入力画面で記録する。出庫の履歴は部品在庫側に残る）
+  // 現象の題名に「使用部品」が入っているため、本文ではなくカードの見出しで確かめる
+  const hasPartsCard = await page.evaluate(() => [...document.querySelectorAll('.card-title')].some((h) => h.textContent.trim() === '使用部品'));
+  check('トラブル詳細: 使用部品の欄は出さない', !hasPartsCard && await page.locator('input[placeholder*="部品名・型番"]').count() === 0);
   await api(`/api/troubles/${troubleId}`, { method: 'DELETE' });
   await api(`/api/parts/${upId}`, { method: 'DELETE' });
   // 一覧トップに「過去のトラブルを探す」欄は置かない（検索はホームの横断検索）

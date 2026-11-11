@@ -36,7 +36,7 @@ export async function embedHankos(zip, items) {
   const placements = [];
   for (const it of list) {
     const loc = findTagCell(it.tag, sharedTexts, sheetPaths, sheetXmls);
-    if (loc) placements.push({ ...loc, base64: it.base64 });
+    if (loc) placements.push({ ...loc, base64: it.base64, rowShift: Number(it.rowShift) || 0 });
   }
   if (!placements.length) return;
 
@@ -63,7 +63,11 @@ export async function embedHankos(zip, items) {
     const imgs = pls.map((pl) => {
       const name = `hanko${mediaSeq++}.png`;
       zip.file(`xl/media/${name}`, pl.base64, { base64: true });
-      return { name, col: pl.col, row: pl.row };
+      // rowShift（EMU・マイナス=上へ）で押印位置を上下に調整する。セルより上へはみ出す分は1つ上の行へ移す
+      let row = pl.row;
+      let off = STAMP_ROW_OFF + pl.rowShift;
+      if (off < 0 && row > 0) { row -= 1; off += rowHeightEmu(sheetXml, row + 1); }
+      return { name, col: pl.col, row, rowOff: Math.max(0, off) };
     });
 
     // 既存 drawing を探す
@@ -89,7 +93,7 @@ export async function embedHankos(zip, items) {
       let relsAdd = '';
       for (const img of imgs) {
         const r = `rId${rnum++}`;
-        anchors += anchorXml(img.col, img.row, cid++, r);
+        anchors += anchorXml(img.col, img.row, cid++, r, img.rowOff);
         relsAdd += imageRel(r, img.name);
       }
       zip.file(drawingPath, insertBefore(dXml, '</xdr:wsDr>', anchors));
@@ -105,7 +109,7 @@ export async function embedHankos(zip, items) {
       let rels = '';
       for (const img of imgs) {
         const r = `rId${rnum++}`;
-        anchors += anchorXml(img.col, img.row, cid++, r);
+        anchors += anchorXml(img.col, img.row, cid++, r, img.rowOff);
         rels += imageRel(r, img.name);
       }
       zip.file(dPath, drawingDoc(anchors));
@@ -207,9 +211,16 @@ function decodeXml(s) {
     .replace(/&amp;/g, '&');
 }
 
-function anchorXml(col, row, cid, rid) {
+// 行の高さ（EMU）。<row r="N" ht="…"> のポイント値（1pt = 12700 EMU）。無ければ Excel の既定 15pt
+function rowHeightEmu(sheetXml, rowNo) {
+  const m = new RegExp(`<row\\b[^>]*\\br="${rowNo}"[^>]*>`).exec(sheetXml);
+  const ht = m && /\bht="([\d.]+)"/.exec(m[0]);
+  return Math.round((ht ? Number(ht[1]) : 15) * 12700);
+}
+
+function anchorXml(col, row, cid, rid, rowOff = STAMP_ROW_OFF) {
   return '<xdr:oneCellAnchor>'
-    + `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>${STAMP_COL_OFF}</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>${STAMP_ROW_OFF}</xdr:rowOff></xdr:from>`
+    + `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>${STAMP_COL_OFF}</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>${rowOff}</xdr:rowOff></xdr:from>`
     + `<xdr:ext cx="${STAMP_EMU}" cy="${STAMP_EMU}"/>`
     + '<xdr:pic>'
     + `<xdr:nvPicPr><xdr:cNvPr id="${cid}" name="hanko${cid}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>`

@@ -112,6 +112,9 @@ function buildValues(type, r) {
   };
 }
 
+// トラブル報告書の押印を上へ上げる量（EMU。1mm = 36000）。工事連絡書の位置は変えない
+const TROUBLE_STAMP_UP = -180000; // 5mm 上
+
 function xmlEscape(s) {
   return String(s == null ? '' : s)
     .replace(/[\r\n]+/g, ' ')   // セル内改行は空白に（書式崩れ防止）
@@ -355,7 +358,7 @@ async function fillAndDownload(template, type, record, inputValues) {
     for (const tag of ['担当者印', '担当印', '担当社印']) {
       if (hankoItems.some((h) => h.tag === tag)) continue;
       values[tag] = ''; // 用紙に残る {{…印}} のタグ文字は消す（印影画像で表現するため）
-      if (png) hankoItems.push({ tag, base64: png });
+      if (png) hankoItems.push({ tag, base64: png, rowShift: TROUBLE_STAMP_UP }); // トラブル報告書は押印を少し上へ
     }
   }
 
