@@ -7,7 +7,6 @@ import { normalizeFormValues, deriveOverdue, getAnnualFyState } from './index.js
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
-const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 
 async function getPlan(db, id) {
   // 設備名・担当者名は予定に保存（自由入力）。旧FK用のJOINは廃止。
@@ -57,28 +56,9 @@ export async function onRequestPut({ request, params, env, data }) {
   const binds = [];
   const diff = {};
 
-  // recurrence_rule を個別処理（JSON文字列の正規化が必要）
-  if ('recurrence_rule' in body) {
-    let recRule = null;
-    const rv = body.recurrence_rule;
-    if (rv) {
-      try {
-        const parsed = typeof rv === 'string' ? JSON.parse(rv) : rv;
-        if (!VALID_FREQS.includes(parsed.freq)) return jsonError(400, 'recurrence_rule.freq が不正です');
-        const interval = Number(parsed.interval) || 1;
-        const clean = { freq: parsed.freq, interval };
-        if (parsed.until) clean.until = String(parsed.until);
-        recRule = JSON.stringify(clean);
-      } catch {
-        return jsonError(400, 'recurrence_rule の形式が不正です');
-      }
-    }
-    if (String(existing.recurrence_rule ?? '') !== String(recRule ?? '')) {
-      diff['recurrence_rule'] = { from: existing.recurrence_rule, to: recRule };
-    }
-    setClauses.push('recurrence_rule = ?');
-    binds.push(recRule);
-  }
+  // recurrence_rule（繰り返し予定）は廃止済み。ボディに含まれていても無視する
+  // （画面側が送ってくる recurrence_rule: null で、過去に登録された値を黙って消していた不具合の修正。
+  // 列自体は残っているので、旧データの値はそのまま触れずに残る＝1回だけの予定として扱われる）
 
   for (const field of UPDATABLE) {
     if (!(field in body)) continue;

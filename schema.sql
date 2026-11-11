@@ -233,7 +233,8 @@ WHERE NOT EXISTS (
 -- maintenance_plan — 保全計画（01）
 --   plan_type: inspection=点検 / parts=部品交換 / construction=工事 / other=その他
 --   status: pending=未実施 / done=完了 / overdue=期限超過
---   recurrence_rule: 繰り返しルール（例 'monthly', 'yearly', 'every:7'）
+--   recurrence_rule: 繰り返しルール（廃止済み・未使用。新規登録・編集では一切読み書きしない。
+--     旧データに値が残っていても、1回だけの予定として扱う＝展開しない。列は残すが新しい意味は持たない）
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS maintenance_plan (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,

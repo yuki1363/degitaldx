@@ -6,7 +6,6 @@ import { linkRowToEquipment } from '../_lib/equipment-link.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
 const STATUSES = ['pending', 'done', 'overdue'];
-const VALID_FREQS = ['daily', 'weekly', 'monthly', 'yearly'];
 
 // 期限超過の自動判定（表示専用）: pending のまま予定日（期間予定は終了日）を過ぎた予定を
 // overdue として返す。DB の status は書き換えない（完了にすれば done になる）。
@@ -125,50 +124,6 @@ export async function getAnnualFyState(db) {
   }
   const current = Math.min(last + 1, clockFy + 1);
   return { current, resetTarget: current, lastReset: last, clockFy, resetAvailable: nowYm >= `${current + 1}-09` };
-}
-
-// 繰り返し予定を指定範囲内に展開して返す
-function expandRecurring(plan, rangeStart, rangeEnd) {
-  let rule;
-  try { rule = JSON.parse(plan.recurrence_rule); } catch { return []; }
-  const { freq, interval = 1, until } = rule;
-  if (!VALID_FREQS.includes(freq)) return [];
-
-  const msDay = 86400000;
-  const rStart = new Date(rangeStart + 'T00:00:00Z');
-  const rEnd = new Date(rangeEnd + 'T00:00:00Z'); // exclusive
-  const untilDate = until ? new Date(until + 'T00:00:00Z') : new Date('2099-12-31T00:00:00Z');
-  let cur = new Date(plan.planned_date.slice(0, 10) + 'T00:00:00Z');
-
-  // 範囲開始付近まで高速早送り（ループ回数を最小化）
-  if (cur < rStart) {
-    if (freq === 'daily') {
-      const steps = Math.floor((rStart - cur) / (interval * msDay));
-      cur.setUTCDate(cur.getUTCDate() + steps * interval);
-    } else if (freq === 'weekly') {
-      const steps = Math.floor((rStart - cur) / (interval * 7 * msDay));
-      cur.setUTCDate(cur.getUTCDate() + steps * interval * 7);
-    }
-    // monthly/yearly はステップ数が少ないので単純ループ
-    while (cur < rStart) advance();
-  }
-
-  function advance() {
-    switch (freq) {
-      case 'daily':   cur.setUTCDate(cur.getUTCDate() + interval); break;
-      case 'weekly':  cur.setUTCDate(cur.getUTCDate() + interval * 7); break;
-      case 'monthly': cur.setUTCMonth(cur.getUTCMonth() + interval); break;
-      case 'yearly':  cur.setUTCFullYear(cur.getUTCFullYear() + interval); break;
-    }
-  }
-
-  const instances = [];
-  let guard = 0;
-  while (cur < rEnd && cur <= untilDate && guard++ < 200) {
-    instances.push({ ...plan, planned_date: cur.toISOString().slice(0, 10) });
-    advance();
-  }
-  return instances;
 }
 
 // 年間計画表からの一括登録（/api/plans/batch）で作られた予定のID集合を返す。
@@ -357,32 +312,17 @@ export async function onRequestGet({ request, env }) {
   let results;
 
   if (rangeStart && rangeEnd) {
-    // 非繰り返し: 範囲と重なるもの
-    // 繰り返し  : 基準日が範囲終了より前（until 判定はJS側）
+    // 範囲と重なるもの（繰り返し予定の展開は廃止済み。recurrence_rule 列に値が残っていても、
+    // 開始日〜終了日の1回だけの予定として扱う＝他の予定と同じ条件で絞り込む）
     const { results: rows } = await db.prepare(`
       SELECT p.*
       FROM maintenance_plan p
       WHERE p.deleted_at IS NULL
-        AND (
-          (p.recurrence_rule IS NULL
-            AND p.planned_date < ?
-            AND COALESCE(p.planned_end_date, p.planned_date) >= ?)
-          OR
-          (p.recurrence_rule IS NOT NULL AND p.planned_date < ?)
-        )
+        AND p.planned_date < ?
+        AND COALESCE(p.planned_end_date, p.planned_date) >= ?
       ORDER BY p.planned_date ASC, p.id ASC
-    `).bind(rangeEnd, rangeStart, rangeEnd).all();
-
-    const plans = [];
-    for (const plan of rows ?? []) {
-      if (!plan.recurrence_rule) {
-        plans.push(plan);
-      } else {
-        plans.push(...expandRecurring(plan, rangeStart, rangeEnd));
-      }
-    }
-    plans.sort((a, b) => a.planned_date.localeCompare(b.planned_date) || a.id - b.id);
-    results = plans;
+    `).bind(rangeEnd, rangeStart).all();
+    results = rows ?? [];
   } else {
     const { results: rows } = await db.prepare(`
       SELECT p.* FROM maintenance_plan p
@@ -421,7 +361,7 @@ export async function onRequestPost({ request, env, data }) {
   const {
     title, planned_date, planned_end_date, plan_type,
     line_name, equipment_name, assignee_name, inspector_name, status, note,
-    recurrence_rule, unscheduled, annual_only, on_calendar,
+    unscheduled, annual_only, on_calendar,
   } = body;
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
@@ -431,29 +371,15 @@ export async function onRequestPost({ request, env, data }) {
     return jsonError(400, '終了日は開始日以降にしてください');
   }
 
-  // recurrence_rule の検証・正規化
-  let recRule = null;
-  if (recurrence_rule) {
-    try {
-      const parsed = typeof recurrence_rule === 'string' ? JSON.parse(recurrence_rule) : recurrence_rule;
-      if (!VALID_FREQS.includes(parsed.freq)) return jsonError(400, 'recurrence_rule.freq が不正です');
-      const interval = Number(parsed.interval) || 1;
-      const clean = { freq: parsed.freq, interval };
-      if (parsed.until) clean.until = String(parsed.until);
-      recRule = JSON.stringify(clean);
-    } catch {
-      return jsonError(400, 'recurrence_rule の形式が不正です');
-    }
-  }
-
   const resolvedStatus = STATUSES.includes(status) ? status : 'pending';
   const now = nowIso();
   const userEmail = data.user.email;
 
   // 列名は固定の許可リストのみ。inspector_name / unscheduled は値があるときだけ列に含める
   // （列を追加するマイグレーション前でも通常の登録が壊れないようにするため）。
+  // recurrence_rule（繰り返し予定）は廃止済みのため新規登録では一切書かない。
   const cols = ['title', 'planned_date', 'planned_end_date', 'plan_type', 'line_name',
-    'equipment_name', 'assignee_name', 'status', 'note', 'recurrence_rule'];
+    'equipment_name', 'assignee_name', 'status', 'note'];
   const vals = [
     title.trim(),
     planned_date,
@@ -464,7 +390,6 @@ export async function onRequestPost({ request, env, data }) {
     assignee_name?.trim() || null,
     resolvedStatus,
     note ?? null,
-    recRule,
   ];
   const inspector = inspector_name ? String(inspector_name).trim() : '';
   if (inspector) { cols.push('inspector_name'); vals.push(inspector); }
@@ -494,7 +419,7 @@ export async function onRequestPost({ request, env, data }) {
     recordId: String(id),
     action: 'create',
     changedBy: userEmail,
-    diff: { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status: resolvedStatus, note, recurrence_rule: recRule },
+    diff: { title, planned_date, planned_end_date, plan_type, line_name, equipment_name, assignee_name, status: resolvedStatus, note },
   });
 
   return json({ id }, 201);
