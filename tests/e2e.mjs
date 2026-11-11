@@ -1106,6 +1106,23 @@ check('ホーム: タイルは「計画・点検／記録・依頼／在庫・�
     && homeSecs[2].tiles.join(',') === '部品在庫,設備台帳'
     && homeSecs[3].tiles.join(',') === 'ダッシュボード・保全レポート,横断検索'
     && homeSecs[4].tiles.join(',') === '使い方,管理,更新履歴', homeJson);
+// 「見る・探す」は「在庫・設備」の右に並ぶ（同じ高さで、右側）
+const rowPos = await page.evaluate(() => {
+  const r = (sel) => document.querySelector(sel)?.getBoundingClientRect();
+  const a = r('.tile-section.sec-stock'), b = r('.tile-section.sec-view');
+  return a && b ? { aTop: Math.round(a.top), bTop: Math.round(b.top), aLeft: Math.round(a.left), bLeft: Math.round(b.left) } : null;
+});
+check('ホーム: 「見る・探す」は「在庫・設備」の右側に並ぶ', !!rowPos && rowPos.aTop === rowPos.bTop && rowPos.bLeft > rowPos.aLeft, JSON.stringify(rowPos));
+// 下にまだ続きがあるとき「▼ 下にもあります」が出て、一番下まで来ると消える
+await page.setViewportSize({ width: 375, height: 500 });
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.waitForTimeout(400);
+const hintTop = await page.locator('#scroll-hint').isVisible();
+await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+await page.waitForTimeout(500);
+const hintBottom = await page.locator('#scroll-hint').isVisible();
+await page.setViewportSize({ width: 1280, height: 720 });
+check('ホーム: 下に続きがあるときは「下にもあります」の目印が出て、一番下まで来ると消える', hintTop === true && hintBottom === false, `top=${hintTop} bottom=${hintBottom}`);
 check('ホーム: 通知のタイルは出さない（ベルのアイコンから開く）',
   !homeSecs.some((x) => x.tiles.includes('通知')) && await page.locator('#notif-bell[href="/pages/notifications"]').count() === 1);
 const tileOrder = await page.evaluate(() => { const t = [...document.querySelectorAll('.tile-grid a.tile')].map((a) => a.querySelector('.tile-name')?.textContent.trim()); return t; });
