@@ -2522,7 +2522,7 @@ const exportFilled = async (type, record, savedInputs) => {
       await new Promise((resolve) => { const sc = document.createElement('script'); sc.src = '/js/vendor/jszip.min.js'; sc.onload = resolve; document.head.appendChild(sc); });
       const tags = type === 'trouble_report'
         ? ['調査対象', 'トラブル名', '処置', '調査日時', '調査日付', '整理NO', '休止時間']
-        : ['担当', '工事概要', '会社名'];
+        : ['担当', '責任者', '工事概要', '会社名'];
       const z = new window.JSZip();
       z.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
       z.file('xl/workbook.xml', '<?xml version="1.0"?><workbook/>');
@@ -2582,9 +2582,22 @@ const trbXml2 = await exportFilled('trouble_report',
   { '調査対象': '手入力の対象' });
 check('トラブル報告書: 記録の内容が優先される（以前の帳票入力があっても設備名が入る）', !!trbXml2 && trbXml2.includes('調査対象=[E2E設備]') && !trbXml2.includes('手入力の対象'));
 const cnXml = await exportFilled('construction_notice',
-  { id: 9003, title: 'E2E配管工事', planned_date: '2026-11-05', note: 'E2E備考の内容' }, null);
-check('工事連絡書: 工事概要は備考で補われ、会社名（該当する入力が無い）は空欄のまま',
-  !!cnXml && cnXml.includes('工事概要=[E2E備考の内容]') && cnXml.includes('会社名=[]'), (cnXml || 'no download').slice(0, 300));
+  { id: 9003, title: 'E2E配管工事', planned_date: '2026-11-05', note: 'E2E備考の内容', assignee_name: '山田 一郎', inspector_name: '鈴木 次郎' },
+  { '担当': '古い担当', '責任者': '古い責任者' });
+check('工事連絡書: 工事概要＝タイトル＋備考、担当＝担当者、責任者＝点検者（以前の帳票入力があっても計画の内容が入る）。会社名（該当する入力が無い）は空欄のまま',
+  !!cnXml && cnXml.includes('工事概要=[E2E配管工事 E2E備考の内容]') && cnXml.includes('担当=[山田 一郎]') && cnXml.includes('責任者=[鈴木 次郎]') && !cnXml.includes('古い') && cnXml.includes('会社名=[]'), (cnXml || 'no download').slice(0, 300));
+{
+  // 計画の入力画面: 工事連絡書の入力は別の枠にせず、重複する項目（工事概要・担当・責任者）は出さない
+  await page.goto(`${BASE}/pages/plan?new=1`, { waitUntil: 'networkidle' });
+  const pl = await page.evaluate(() => ({
+    labels: [...document.querySelectorAll('.card .field label')].map((l) => l.textContent.trim()),
+    heading: document.body.innerText.includes('帳票（工事連絡許可書）の入力'),
+  }));
+  check('保全計画の入力: 点検者は「点検者・工事責任者」、担当者は「担当者（シーバイエス担当）」の1つずつ',
+    pl.labels.includes('点検者・工事責任者') && pl.labels.includes('担当者（シーバイエス担当）'), JSON.stringify(pl.labels));
+  check('保全計画の入力: 工事連絡書の入力は別の枠・見出しにしない（区分けしない）。工事概要・シーバイエス担当名・工事業者 責任者は出さない',
+    !pl.heading && !pl.labels.includes('工事概要') && !pl.labels.includes('シーバイエス担当名') && !pl.labels.includes('工事業者 責任者') && pl.labels.includes('工事業者 会社名'), JSON.stringify(pl));
+}
 
 // ---------- 9.25 保全レポート（印刷用1枚） ----------
 section('9.25 保全レポート（ダッシュボードのレポートタブ：概要・ジャンル別・一覧・印刷表示）');

@@ -31,20 +31,26 @@ ok('整理NO・休止区分・有効性の確認・特記事項は補わない�
 ok('帳票の入力欄に出さないタグ（記録から入るタグ）に 調査対象・トラブル名・処置・担当者印・原因・調査日時 が含まれる',
   ['調査対象', 'トラブル名', '処置', '担当者印', '原因', '対策', '現象', '調査日時', '調査日付', '調査年月日'].every((t) => RECORD_TAGS.trouble_report.includes(t)));
 
-const plan = { assignee_name: '山田 一郎', note: '配管の交換', title: 'A棟配管工事' };
+const plan = { assignee_name: '山田 一郎', inspector_name: '鈴木 次郎', note: '配管の交換', title: 'A棟配管工事' };
 v = applyReportFallbacks('construction_notice', plan, {});
-ok('工事連絡書: 担当←担当者・工事概要←備考', v['担当'] === '山田 一郎' && v['工事概要'] === '配管の交換', JSON.stringify(v));
-ok('工事概要は備考が空ならタイトル', applyReportFallbacks('construction_notice', { note: ' ', title: 'A棟配管工事' }, {})['工事概要'] === 'A棟配管工事');
-ok('工事連絡書: 会社名・責任者・TEL・安全チェックは補わない',
-  !('会社名' in v) && !('責任者' in v) && !('担当TEL' in v) && !('高所作業' in v));
+ok('工事連絡書: 工事概要←タイトル＋備考・担当←担当者・責任者←点検者', v['工事概要'] === 'A棟配管工事\n配管の交換' && v['担当'] === '山田 一郎' && v['責任者'] === '鈴木 次郎', JSON.stringify(v));
+ok('工事概要は備考が空ならタイトルだけ', applyReportFallbacks('construction_notice', { note: ' ', title: 'A棟配管工事' }, {})['工事概要'] === 'A棟配管工事');
+v = applyReportFallbacks('construction_notice', plan, { '担当': '別の人', '責任者': '古い入力', '会社名': '○○工業' });
+ok('工事連絡書: 計画の内容を優先して反映する（古い帳票入力があっても計画が勝つ）。会社名などの入力はそのまま', v['担当'] === '山田 一郎' && v['責任者'] === '鈴木 次郎' && v['会社名'] === '○○工業', JSON.stringify(v));
+v = applyReportFallbacks('construction_notice', { title: 'x' }, { '担当': '以前の担当' });
+ok('計画の値が空のときだけ、以前に保存した帳票入力が使われる', v['担当'] === '以前の担当' && v['工事概要'] === 'x', JSON.stringify(v));
+ok('工事連絡書: 会社名・TEL・安全チェックは補わない（該当する入力が無い）',
+  !('会社名' in applyReportFallbacks('construction_notice', plan, {})) && !('責任者TEL' in v) && !('担当TEL' in v) && !('高所作業' in v));
+ok('帳票の入力欄に出さないタグ（計画から入るタグ）に 工事概要・担当・責任者 が含まれる',
+  ['工事概要', '担当', '責任者'].every((t) => RECORD_TAGS.construction_notice.includes(t)));
 
 const input = { '担当': '' };
 applyReportFallbacks('construction_notice', plan, input);
 ok('元の入力値は変更しない', input['担当'] === '' && Object.keys(input).length === 1);
 ok('補える値が無ければ空のまま（undefined を文字列にしない）',
   !('調査対象' in applyReportFallbacks('trouble_report', { phenomenon: 'x' }, {})) && JSON.stringify(applyReportFallbacks('other', trouble, { a: '1' })) === '{"a":"1"}');
-ok('画面用の説明（placeholder）: 工事連絡書は補う項目すべてにある。トラブル報告書は入力欄を出さないので無い',
-  Object.keys(AUTOFILL_HINTS.trouble_report).length === 0 && ['担当', '工事概要'].every((t) => AUTOFILL_HINTS.construction_notice[t]));
+ok('画面用の説明（placeholder）: どちらも入力欄を出さないので無い',
+  Object.keys(AUTOFILL_HINTS.trouble_report).length === 0 && Object.keys(AUTOFILL_HINTS.construction_notice).length === 0);
 
 console.log(`\n========== 単体（帳票の自動補完）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

@@ -308,15 +308,13 @@ async function fillAndDownload(template, type, record, inputValues) {
   }
   // トラブル報告書: 記録から入るタグ（調査対象・トラブル名・処置・担当者印など）は、記録が空でも
   // {{タグ}} を用紙に残さないよう空を既定にしておく（入力欄は出さないため base に無い）
-  if (type === 'trouble_report') for (const t of RECORD_TAGS.trouble_report) if (!(t in auto)) base[t] = '';
+  for (const t of (RECORD_TAGS[type] || [])) if (!(t in auto)) base[t] = '';
   // 入力欄が空のタグは、記録／計画の内容で補う（トラブル報告書は記録の内容を優先して反映）
   const inputs = applyReportFallbacks(type, record, inputValues);
   const values = { ...auto, ...base, ...inputs };
-  // トラブル報告書: 記録から入るタグ（調査日時など）は、以前に保存した帳票入力があっても記録の値を優先する
-  if (type === 'trouble_report') {
-    for (const t of RECORD_TAGS.trouble_report) {
-      if (auto[t] != null && String(auto[t]).trim() !== '') values[t] = auto[t];
-    }
+  // 記録／計画から入るタグ（調査日時・タイトルなど）は、以前に保存した帳票入力があっても記録の値を優先する
+  for (const t of (RECORD_TAGS[type] || [])) {
+    if (auto[t] != null && String(auto[t]).trim() !== '') values[t] = auto[t];
   }
 
   // ○で1つ選択: 群タグ（例 休止種別）→選んだ選択肢名。各選択肢セル（例 {{故障休止}}）は
