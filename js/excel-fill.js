@@ -15,7 +15,7 @@ import { el, formatDate, formatDateTime } from '/js/util.js';
 import { CONSTRUCTION_NOTICE_FIELDS, TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
 import { makeHankoPngBase64 } from '/js/hanko.js';
 import { embedHankos } from '/js/xlsx-image.js';
-import { applyReportFallbacks } from '/js/report-autofill.js';
+import { applyReportFallbacks, RECORD_TAGS } from '/js/report-autofill.js';
 
 // 種別ごとの標準入力項目（テンプレートの fields_json が不完全でも choice(○)/hanko 等を認識するため）
 const STANDARD_FIELDS = {
@@ -301,7 +301,10 @@ async function fillAndDownload(template, type, record, inputValues) {
       base[f.tag] = '';
     }
   }
-  // 入力欄が空のタグは、記録／計画の内容で補う（設備名・現象・対策・記録者・担当者・備考など）
+  // トラブル報告書: 記録から入るタグ（調査対象・トラブル名・処置・担当者印など）は、記録が空でも
+  // {{タグ}} を用紙に残さないよう空を既定にしておく（入力欄は出さないため base に無い）
+  if (type === 'trouble_report') for (const t of RECORD_TAGS.trouble_report) if (!(t in auto)) base[t] = '';
+  // 入力欄が空のタグは、記録／計画の内容で補う（トラブル報告書は記録の内容を優先して反映）
   const inputs = applyReportFallbacks(type, record, inputValues);
   const values = { ...auto, ...base, ...inputs };
 
@@ -333,6 +336,13 @@ async function fillAndDownload(template, type, record, inputValues) {
       values['担当印'] = ''; // 用紙に残る {{担当印}} タグ文字は消す（印影画像で表現するため）
       hankoItems.push({ tag: '担当印', base64: makeHankoPngBase64(surname) });
     }
+  }
+
+  // トラブル報告書: 担当者印（記録者の苗字）は、入力欄を設けず記録から自動で押す
+  if (type === 'trouble_report' && !hankoItems.some((h) => h.tag === '担当者印')) {
+    const surname = String(inputs['担当者印'] || '').trim();
+    values['担当者印'] = ''; // 用紙に残る {{担当者印}} のタグ文字は消す（印影画像で表現するため）
+    if (surname) hankoItems.push({ tag: '担当者印', base64: makeHankoPngBase64(surname) });
   }
 
   if (hankoItems.length) {
