@@ -2326,6 +2326,24 @@ const rtListAfter = await rtRowQty();
 check('自動更新: 部品一覧も一定間隔で取り直し、他の人の入庫が反映される', rtListBefore === '5' && rtListAfter === '6', `${rtListBefore} → ${rtListAfter}`);
 await page.evaluate(() => { delete window.__PARTS_REFRESH_MS__; });
 
+// 自動更新: 長時間操作が無ければ自動更新も止まる（放置されたタブレット等でD1の読み取り枠を浪費しない）
+await page.addInitScript(() => { window.__PARTS_REFRESH_MS__ = 1500; window.__PARTS_IDLE_MS__ = 1000; });
+await page.goto(`${BASE}/pages/parts?id=${rtId}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.quick-record', { timeout: 10000 });
+await page.waitForTimeout(1500); // IDLE_STOP_MS（1秒）を超えて放置
+await rtTx({ type: 'out', quantity: 1 });
+await page.waitForTimeout(2000); // AUTO_REFRESH_MS（1.5秒）を跨いでも取り直されないはず
+check('自動更新: 長時間操作が無いと自動更新が止まる（在庫6のまま）',
+  await page.evaluate(() => [...document.querySelectorAll('.info-row')].some((r) => /在庫数\s*6/.test(r.textContent))));
+// 操作（ポインター操作）があれば自動更新が再開する
+await page.mouse.move(10, 10);
+await page.mouse.down();
+await page.mouse.up();
+await page.waitForFunction(() => [...document.querySelectorAll('.info-row')].some((r) => /在庫数\s*5/.test(r.textContent)), { timeout: 8000 }).catch(() => {});
+check('自動更新: 操作があれば自動更新が再開する（在庫5に反映）',
+  await page.evaluate(() => [...document.querySelectorAll('.info-row')].some((r) => /在庫数\s*5/.test(r.textContent))));
+await page.evaluate(() => { delete window.__PARTS_REFRESH_MS__; delete window.__PARTS_IDLE_MS__; });
+
 // 部品ラベル: 同じ40mm台紙。部品詳細から開くとその部品だけが選ばれている
 await page.goto(`${BASE}/pages/labels?type=parts&ids=${rtId}`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.label-page .label-cell', { timeout: 10000 });
