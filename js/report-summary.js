@@ -43,6 +43,7 @@ export async function renderReport(docBox, from, to, user) {
   const rate = stats.inspection_rate || {};
   const act = stats.activity || {};
   const equipCounts = stats.equipment_trouble_counts || [];
+  const maxTrend = Math.max(1, ...(stats.trouble_trend || []).map((m) => m.count));
   const maxCat = Math.max(1, ...(stats.trouble_by_category || []).map((c) => c.count));
 
   const tile = (label, value, sub) => el('div', { class: 'rpt-tile' }, [
@@ -70,6 +71,14 @@ export async function renderReport(docBox, from, to, user) {
         cell(c.category_name), cell(c.count, 'rpt-num'),
         el('td', { class: 'rpt-bar-cell' }, el('span', { class: 'rpt-bar', style: `width:${Math.round((c.count / maxCat) * 100)}%` })),
       ])), 'この期間のトラブルはありません。')),
+    section('トラブル月別推移', table(['月', '件数', ''],
+      (stats.trouble_trend || []).map((m) => el('tr', {}, [
+        cell(m.month.replace('-', '/')), cell(m.count, 'rpt-num'),
+        el('td', { class: 'rpt-bar-cell' }, el('span', { class: 'rpt-bar', style: `width:${Math.round((m.count / maxTrend) * 100)}%` })),
+      ])), 'この期間のトラブルはありません。')),
+    section('業務依頼 ステータス内訳（全期間）', table(['状況', '件数'],
+      ['open', 'in_progress', 'waiting_parts', 'done'].map((k) => el('tr', {}, [cell(REPAIR_STATUS[k]), cell((stats.repair_summary || {})[k] ?? 0, 'rpt-num')])),
+      '')),
     section(`設備別 故障件数（${equipCounts.length}設備）`, table(['設備', '件数'],
       equipCounts.map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
       'この期間のトラブルはありません。')),
