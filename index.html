@@ -40,9 +40,6 @@
     <p class="notice is-error" id="auth-notice" hidden></p>
     <p class="notice is-warning" id="storage-alert" hidden></p>
 
-    <!-- 更新のお知らせ（新しい版が出たときだけ。js/update-notice.js） -->
-    <div id="update-notice"></div>
-
     <!-- ホーム概要（期限超過 / 直近 / 最近の動き をタブで切り替え。js/home-tabs.js） -->
     <div id="home-overview"></div>
 
@@ -124,9 +121,12 @@
         <span class="tile-name">管理</span>
         <span class="tile-no">09 マスタ・監査ログ</span>
       </a>
+      <a class="tile" href="/pages/updates">
+        <span class="tile-icon">🆕</span>
+        <span class="tile-name">更新履歴</span>
+        <span class="tile-no">アプリの更新内容</span>
+      </a>
     </nav>
-
-    <div id="update-history-box"></div>
 
     <p class="phase-note">
       全機能が利用できます（Phase 6 横断検索まで完了）。
@@ -138,7 +138,6 @@
     import { getCurrentUser, hasRole, ROLE_LABELS } from '/js/auth.js';
     import { api } from '/js/api.js';
     import { loadHomeTabs } from '/js/home-tabs.js';
-    import { showUpdateNotice } from '/js/update-notice.js';
 
     // Service Worker 登録（PWA: オフラインでもアプリが起動する）
     if ('serviceWorker' in navigator) {
@@ -146,9 +145,6 @@
         console.warn('Service Worker の登録に失敗:', err);
       });
     }
-
-    // 更新のお知らせ（新しい版のあとの最初の表示だけ。ログイン確認を待たずに出す）
-    showUpdateNotice(document.getElementById('update-notice'), document.getElementById('update-history-box'));
 
     // オフライン表示
     const offlineBanner = document.getElementById('offline-banner');
