@@ -18,7 +18,6 @@ export const ROLE_LABELS = {
 
 let currentUser = null;
 let vapidPublicKey = null;
-let aiEnabled = false;
 let aiVisionEnabled = false;
 
 /** ログインユーザーを取得する（結果はモジュール内にキャッシュ） */
@@ -28,7 +27,6 @@ export async function getCurrentUser(force = false) {
     currentUser = data.user;
     try { localStorage.setItem('auth:role', String(currentUser?.role || '')); } catch { /* 保存できなくても動く */ }
     vapidPublicKey = data.vapid_public_key || null;
-    aiEnabled = Boolean(data.ai_enabled);
     aiVisionEnabled = Boolean(data.ai_vision_enabled);
   }
   return currentUser;
@@ -42,11 +40,6 @@ export function getCachedRole() {
 /** Web Push の VAPID公開鍵（未構成なら null）。getCurrentUser() 実行後に使えるようになる */
 export function getVapidPublicKey() {
   return vapidPublicKey;
-}
-
-/** Workers AI が構成されているか（未構成ならAI機能のボタンを出さない）。getCurrentUser() 実行後に使える */
-export function getAiEnabled() {
-  return aiEnabled;
 }
 
 /**

@@ -1506,12 +1506,9 @@ input.is-abnormal {
   padding: 12px;
   margin-bottom: 12px;
 }
-.update-notice h2 { margin: 0 0 6px; font-size: 15px; }
 .update-notice ul { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; }
 .update-notice .update-entry + .update-entry { margin-top: 8px; border-top: 1px dashed #93c5fd; padding-top: 8px; }
-.update-history { margin: 12px 0; font-size: 13px; }
-.update-history summary { cursor: pointer; color: var(--color-primary); font-weight: 600; padding: 4px 0; }
-.update-history .update-entry { margin: 8px 0; }
+.update-history-card { margin-bottom: 10px; }
 .update-entry-title { font-weight: 600; }
 .update-entry-date { color: var(--color-text-muted); font-size: 12px; margin-left: 6px; }
 

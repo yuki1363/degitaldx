@@ -82,12 +82,12 @@ await page.waitForFunction(async () => {
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
   'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications',
-  'report-summary', 'help'];
+  'report-summary', 'help', 'updates'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
 }
-check('全18ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
+check('全19ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
 
 // ---------- 2. トラブル: 登録→一覧自動表示→編集 ----------
 section('2. トラブル記録の基本フロー');
@@ -103,7 +103,7 @@ await page.waitForTimeout(800);
 // 検索するまで一覧は表示しない（設備指定なしで開いた場合）
 const beforeSearch = await page.evaluate(() => document.body.innerText);
 check('トラブル一覧: 検索するまで表示しない', !beforeSearch.includes('E2E現象テスト') && beforeSearch.includes('検索'));
-await page.click('button:has-text("検索")');
+await page.click('button:has-text("🔍 検索")');
 await page.waitForFunction(() => document.body.innerText.includes('E2E現象テスト'), { timeout: 10000 }).catch(() => {});
 const afterSearch = await page.evaluate(() => document.body.innerText.includes('E2E現象テスト'));
 check('トラブル一覧: 検索で表示される', afterSearch);
@@ -263,19 +263,80 @@ await page.fill('textarea[placeholder*="異音"]', 'コンプレッサ 異音');
 await page.waitForFunction(() => document.body.innerText.includes('類似のトラブル事例'), { timeout: 5000 }).catch(() => {});
 check('類似トラブル: フォームにパネルが表示される', await page.evaluate(() => document.body.innerText.includes('類似のトラブル事例')));
 
-// [ai] 未構成のE2E環境では ai_enabled:false → AIボタンを出さない
+// テキストのAI（原因・対策の提案）は廃止した。/api/me に ai_enabled は無い
 const meAiRes = await api('/api/me');
-check('/api/me: ai_enabled が false（[ai]未構成）', meAiRes.json?.ai_enabled === false, `ai_enabled=${meAiRes.json?.ai_enabled}`);
+check('/api/me: ai_enabled は返さない（テキストのAIは廃止）', meAiRes.json && !('ai_enabled' in meAiRes.json), JSON.stringify(Object.keys(meAiRes.json || {})));
 // 画像AI（計器の📷読み取り・銘板読み取り）は既定オフ（AI_VISION_ENABLED=1 のときだけ出す）
 check('/api/me: ai_vision_enabled が既定で false',
   meAiRes.json?.ai_vision_enabled === false, `ai_vision_enabled=${meAiRes.json?.ai_vision_enabled}`);
-check('類似トラブル: AI未構成ならAIボタンを出さない',
-  !(await page.evaluate(() => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('AIに原因・対策')))));
+check('トラブル入力: 入力欄にAIのボタンは出さない（過去事例は類似事例の自動表示で確認する）',
+  !(await page.evaluate(() => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('AI')))));
 
-// POST /api/ai/suggest-trouble は [ai] 未構成なら 503
+// 廃止したAPI（原因・対策のAI提案）は存在しない
 const aiRes = await api('/api/ai/suggest-trouble', { method: 'POST', body: { phenomenon: 'コンプレッサ 異音' } });
-check('AI提案: [ai]未構成なら503', aiRes.status === 503, `status=${aiRes.status}`);
+check('AI提案APIは廃止（404）', aiRes.status === 404, `status=${aiRes.status}`);
 await page.evaluate(() => localStorage.removeItem('draft:trouble-new')); // 後続の下書きテストに影響させない
+
+// ---------- 2.55 トラブル: 設備が一覧に無いときの案内・使用部品・横断検索への入口 ----------
+section('2.55 トラブル入力: 設備の案内・使用部品・横断検索の入口');
+{
+  const upPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E使用部品', model_no: 'E2E-UP-1', quantity: 10, safety_stock: 0 } });
+  const upId = upPart.json?.id;
+  const stockOf = async () => (await api(`/api/parts/${upId}`)).json?.part?.quantity;
+  await page.goto(`${BASE}/pages/trouble?new=1`, { waitUntil: 'networkidle' });
+  await page.evaluate(() => localStorage.removeItem('draft:trouble-new'));
+  // 設備欄に一覧に無い名前 → 設備台帳へ追加するよう案内し、そのままでは保存させない
+  const eqInput = page.locator('input.equip-picker').first();
+  await eqInput.fill('E2E存在しない設備XYZ');
+  await eqInput.blur();
+  const hintText = await page.locator('#equip-missing-hint').innerText().catch(() => '');
+  const ledgerHref = await page.locator('#equip-missing-hint a').getAttribute('href').catch(() => '');
+  check('トラブル入力: 設備が一覧に無いと、設備台帳から追加するよう案内する', hintText.includes('設備一覧にありません') && hintText.includes('設備台帳') && ledgerHref === '/pages/ledger?new=1', hintText.slice(0, 100));
+  await page.fill('textarea[placeholder*="異音"]', 'E2E使用部品トラブル');
+  const dlg0 = dialogs.length; // alert/confirm は page.on('dialog') が記録して承諾する
+  await page.click('button:text-is("保存")');
+  await page.waitForTimeout(500);
+  const blockMsg = dialogs.slice(dlg0).join(' / ');
+  check('トラブル入力: 一覧に無い設備名のままでは保存せず、設備台帳への追加を促す', blockMsg.includes('設備一覧にありません') && page.url().includes('new=1'), blockMsg);
+  // 設備欄を空にして、使用部品（部品在庫から選択）を追加 → 保存で在庫が減る
+  await eqInput.fill('');
+  await eqInput.blur();
+  check('トラブル入力: 設備欄を空にすると案内が消える', await page.locator('#equip-missing-hint').count() === 0);
+  await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫10）');
+  await page.fill('input[aria-label="数量"]', '3');
+  await page.click('button:text-is("＋ 追加")');
+  const pendText = await page.evaluate(() => document.body.innerText);
+  check('トラブル入力: 選んだ使用部品が「在庫10 → 7」で並ぶ（保存前は在庫は変わらない）', pendText.includes('在庫10 → 7') && await stockOf() === 10, `stock=${await stockOf()}`);
+  await page.click('button:text-is("保存")');
+  await page.waitForURL(/\/pages\/trouble\?id=\d+/, { timeout: 10000 });
+  const troubleId = Number(new URL(page.url()).searchParams.get('id'));
+  await page.waitForTimeout(500);
+  const detailText = await page.evaluate(() => document.body.innerText);
+  check('トラブル保存で使用部品が出庫され（在庫10→7）、詳細の「使用部品」に出る', await stockOf() === 7 && detailText.includes('E2E-UP-1') && detailText.includes('3 個使用'), `stock=${await stockOf()}`);
+  const apiUsed = (await api(`/api/troubles/${troubleId}`)).json?.used_parts || [];
+  check('トラブル詳細API: used_parts に紐づいた出庫が返る', apiUsed.length === 1 && Math.abs(apiUsed[0].quantity) === 3 && apiUsed[0].part_id === upId, JSON.stringify(apiUsed));
+  // 詳細画面からも追加できる。在庫を超える数量は断る
+  await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫7）');
+  await page.fill('input[aria-label="数量"]', '2');
+  await page.click('button:text-is("記録")');
+  await page.waitForFunction(() => document.body.innerText.includes('2 個使用'), { timeout: 8000 });
+  check('トラブル詳細: 使用部品を追加すると在庫が減る（7→5）', await stockOf() === 5, `stock=${await stockOf()}`);
+  const dlg1 = dialogs.length;
+  await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫5）');
+  await page.fill('input[aria-label="数量"]', '99');
+  await page.click('button:text-is("記録")');
+  await page.waitForTimeout(400);
+  const overMsg = dialogs.slice(dlg1).join(' / ');
+  check('トラブル詳細: 在庫を超える数量は断る（在庫は変わらない）', overMsg.includes('在庫が足りません') && await stockOf() === 5, overMsg);
+  await api(`/api/troubles/${troubleId}`, { method: 'DELETE' });
+  await api(`/api/parts/${upId}`, { method: 'DELETE' });
+  // 一覧トップ: 過去のトラブルは横断検索で探す（AIは使わない）
+  await page.goto(`${BASE}/pages/trouble`, { waitUntil: 'networkidle' });
+  await page.fill('input[aria-label="キーワード"]', 'コンプレッサ 異音');
+  await page.click('#trouble-kw-go');
+  await page.waitForURL(/\/pages\/search/, { timeout: 8000 });
+  check('トラブル一覧: キーワードで横断検索（トラブル種別）へ移動する', page.url().includes('type=trouble') && decodeURIComponent(page.url()).includes('q=コンプレッサ 異音'), page.url());
+}
 
 // ---------- 2.6 類似部品検索（あいまい） ----------
 section('2.6 類似部品検索（あいまい）');
@@ -990,20 +1051,26 @@ section('8. ダッシュボード・保全レポート');
   for (const id of ids.filter(Boolean)) await api(`/api/equipment/${id}`, { method: 'DELETE' });
 }
 
-// ホームの「更新のお知らせ」: 新しい版のあとに出て、「確認した」で閉じ、次回からは出ない。更新履歴はいつでも見られる
+// ホームの「更新のお知らせ」: 新しい版のあと、ホームのタブに「🆕 更新」が出て、「確認した」でタブごと消える。
+//   過去の更新は、管理タイルの隣の「更新履歴」ページで見られる
 await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 await page.evaluate(() => localStorage.removeItem('updates:seen'));
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
 const swVer = (await (await page.request.get(`${BASE}/sw.js`)).text()).match(/CACHE_VERSION = 'v([\d.]+)'/)?.[1];
-const noticeText = await page.locator('#update-notice-card').innerText().catch(() => '');
-check('ホーム: 新しい版のあとに「更新しました」のお知らせが出る（最新の版の内容）', noticeText.includes('更新しました') && noticeText.includes(`v${swVer}`), noticeText.slice(0, 120));
+await page.waitForSelector('.home-tab:has-text("更新")', { timeout: 8000 }).catch(() => {});
+if (await page.locator('#update-tab-card').count() === 0) await page.click('.home-tab:has-text("更新")').catch(() => {});
+const noticeText = await page.locator('#update-tab-card').innerText().catch(() => '');
+check('ホーム: 新しい版のあと「🆕 更新」タブに更新内容が出る（最新の版）', noticeText.includes(`v${swVer}`) && noticeText.includes('確認した'), noticeText.slice(0, 120));
 await page.click('#update-notice-ok');
-check('ホーム: 「確認した」でお知らせが消える', await page.locator('#update-notice-card').count() === 0);
+check('ホーム: 「確認した」で更新タブが消える', await page.locator('.home-tab:has-text("更新")').count() === 0 && await page.locator('#update-tab-card').count() === 0);
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-check('ホーム: 確認したあとの再表示では出ない', await page.locator('#update-notice-card').count() === 0);
-await page.click('#update-history summary');
-const histCount = await page.locator('#update-history .update-entry').count();
-check('ホーム: 更新履歴から過去の更新も見られる', histCount >= 2, `entries=${histCount}`);
+check('ホーム: 確認したあとの再表示では更新タブは出ない', await page.locator('.home-tab:has-text("更新")').count() === 0);
+const tileOrder = await page.evaluate(() => { const t = [...document.querySelectorAll('.tile-grid a.tile')].map((a) => a.querySelector('.tile-name')?.textContent.trim()); return t; });
+check('ホーム: 「管理」タイルの隣に「更新履歴」タイルがある', tileOrder.indexOf('更新履歴') === tileOrder.indexOf('管理') + 1 && tileOrder.indexOf('管理') >= 0, JSON.stringify(tileOrder.slice(-4)));
+await page.click('a.tile[href="/pages/updates"]');
+await page.waitForSelector('.update-history-card', { timeout: 8000 });
+const histCount = await page.locator('.update-history-card').count();
+check('更新履歴ページ: 過去の更新も新しい順に全部見られる', histCount >= 2 && (await page.locator('.update-history-card').first().innerText()).includes(`v${swVer}`), `entries=${histCount}`);
 
 // レポートタブからもトラブル記録CSV（集計期間・04一覧と同じ列）を出力できる
 await page.goto(`${BASE}/pages/dashboard?tab=report`, { waitUntil: 'networkidle' });
@@ -1813,10 +1880,8 @@ section('9.14 AIの権限・件数上限・検索ハイライト・電気設定�
 // AI: 閲覧のみ（viewer）は無料枠を消費する AI API を呼べない。画像AIは AI_VISION_ENABLED=1 のときだけ
 const viewerEmail = 'e2e-viewer@example.com';
 await api('/api/admin/users', { method: 'POST', body: { email: viewerEmail, name: 'E2E閲覧者', role: 'viewer' } });
-for (const ep of ['suggest-trouble']) {
-  const r = await apiAs(viewerEmail, `/api/ai/${ep}`, { method: 'POST', body: { message: 'x', phenomenon: 'x', text: 'x', query: 'x' } });
-  check(`AI: 閲覧のみは /api/ai/${ep} を呼べない（403）`, r.status === 403, `status=${r.status}`);
-}
+const viewerVision = await apiAs(viewerEmail, '/api/ai/read-meter', { method: 'POST', body: { file_id: 1 } });
+check('AI: 閲覧のみは画像AI（read-meter）を呼べない（403）', viewerVision.status === 403, `status=${viewerVision.status}`);
 const visionRes = await api('/api/ai/read-meter', { method: 'POST', body: { file_id: 1 } });
 check('AI: 画像の読み取りは AI_VISION_ENABLED 未設定なら403（管理者でも）', visionRes.status === 403, `status=${visionRes.status}`);
 

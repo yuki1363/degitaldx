@@ -22,7 +22,7 @@ ok('各お知らせに 版・日付(YYYY-MM-DD)・見出し・1件以上の項�
   UPDATES.every((u) => /^\d+\.\d+\.\d+$/.test(u.version) && /^\d{4}-\d{2}-\d{2}$/.test(u.date) && u.title && Array.isArray(u.items) && u.items.length > 0));
 const vkey = (v) => v.split('.').map(Number).reduce((a, n) => a * 1000 + n, 0);
 ok('新しい順（版が降順）で、版の重複がない', UPDATES.every((u, i) => i === 0 || vkey(UPDATES[i - 1].version) > vkey(u.version)));
-ok('sw.js のキャッシュ対象に updates.js / update-notice.js がある（オフラインでもホームが動く）', swSrc.includes("'/js/updates.js'") && swSrc.includes("'/js/update-notice.js'"));
+ok('sw.js のキャッシュ対象に 更新のお知らせ・更新履歴ページがある（オフラインでもホームが動く）', ['/js/updates.js', '/js/update-notice.js', '/js/updates-page.js', '/pages/updates'].every((u) => swSrc.includes(`'${u}'`)));
 
 console.log(`\n========== 単体（更新のお知らせ）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

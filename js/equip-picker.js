@@ -31,6 +31,19 @@ export function buildEquipSelect(equipment, opts = {}) {
     return id;
   };
 
+  // 入力欄に文字があるのに設備一覧のどれにも一致しない（＝このまま保存すると設備なしになる）
+  Object.defineProperty(wrap, 'unmatchedText', {
+    configurable: true,
+    get() { const t = input.value.trim(); return t !== '' && !byLabel.has(t) ? t : ''; },
+  });
+  // 設備台帳に設備を追加したあとなど、一覧を取り直して差し替える（入力中の文字は保つ）
+  wrap.setEquipment = (list) => {
+    byLabel.clear(); idToLabel.clear();
+    for (const e of list) { byLabel.set(labelOf(e), String(e.id)); idToLabel.set(String(e.id), labelOf(e)); }
+    datalist.replaceChildren(...list.map((e) => el('option', { value: labelOf(e) })));
+    resolve();
+  };
+
   Object.defineProperty(wrap, 'value', {
     configurable: true,
     get() { return resolve(); },

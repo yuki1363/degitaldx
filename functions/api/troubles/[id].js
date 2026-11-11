@@ -48,7 +48,7 @@ export async function onRequestGet({ params, env }) {
   const trouble = await getTrouble(db, id);
   if (!trouble) return jsonError(404, 'トラブル記録が見つかりません');
 
-  const [filesResult, historyResult] = await Promise.all([
+  const [filesResult, historyResult, usedPartsResult] = await Promise.all([
     db.prepare(`
       SELECT * FROM files
       WHERE related_table = 'trouble_record' AND related_id = ? AND deleted_at IS NULL
@@ -59,12 +59,23 @@ export async function onRequestGet({ params, env }) {
       WHERE table_name = 'trouble_record' AND record_id = ?
       ORDER BY changed_at ASC
     `).bind(String(id)).all(),
+    // 使用部品（このトラブルに紐づく出庫履歴）。related_* 列が未追加の環境でも詳細が開けるよう、失敗時は空配列
+    db.prepare(`
+      SELECT pt.id, pt.part_id, pt.quantity, pt.created_by, pt.created_at,
+             p.name AS part_name, p.model_no AS part_model_no,
+             p.quantity AS part_stock, p.safety_stock AS part_safety_stock
+        FROM parts_transaction pt
+        JOIN parts_inventory p ON p.id = pt.part_id
+       WHERE pt.related_table = 'trouble_record' AND pt.related_id = ?1 AND pt.type = 'out'
+       ORDER BY pt.created_at ASC
+    `).bind(id).all().catch(() => ({ results: [] })),
   ]);
 
   return json({
     trouble,
     files: filesResult.results ?? [],
     history: historyResult.results ?? [],
+    used_parts: usedPartsResult.results ?? [],
   });
 }
 
