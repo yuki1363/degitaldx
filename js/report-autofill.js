@@ -20,6 +20,8 @@ const RECORD_VALUES = {
     '処置': (r) => r.countermeasure,                            // 対策
     '対策': (r) => r.countermeasure,
     '担当者印': (r) => surnameOf(r.reporter_name || r.creator_name), // 記録者の苗字
+    '担当印': (r) => surnameOf(r.reporter_name || r.creator_name),   // 用紙のタグ名が違っても同じ印（工事連絡書と同じ名前）
+    '担当社印': (r) => surnameOf(r.reporter_name || r.creator_name),
   },
 };
 
