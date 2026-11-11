@@ -1093,6 +1093,21 @@ check('ホーム: 「確認した」でダイアログが消える', await page.
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(400);
 check('ホーム: 確認したあとの再表示ではダイアログは出ない', await page.locator('#update-dialog').count() === 0);
+// ホームのタイルは用途ごとのまとまり（見出し付き）。通知はタイルにせず、右上のベルから開く
+const homeSecs = await page.evaluate(() => [...document.querySelectorAll('.tile-section')].map((sec) => ({
+  title: sec.querySelector('.tile-section-title')?.textContent.trim(),
+  tiles: [...sec.querySelectorAll('a.tile .tile-name')].map((n) => n.textContent.trim()),
+})));
+const homeJson = JSON.stringify(homeSecs);
+check('ホーム: タイルは「計画・点検／記録・依頼／在庫・設備／見る・探す／その他」のまとまりに分かれる',
+  homeSecs.map((x) => x.title).join('/') === '計画・点検/記録・依頼/在庫・設備/見る・探す/その他'
+    && homeSecs[0].tiles.join(',') === '保全計画,点検実施,電気設備点検,ユーティリティ日報'
+    && homeSecs[1].tiles.join(',') === 'トラブル記録,業務依頼,日報,チャット'
+    && homeSecs[2].tiles.join(',') === '部品在庫,設備台帳'
+    && homeSecs[3].tiles.join(',') === 'ダッシュボード・保全レポート,横断検索'
+    && homeSecs[4].tiles.join(',') === '使い方,管理,更新履歴', homeJson);
+check('ホーム: 通知のタイルは出さない（ベルのアイコンから開く）',
+  !homeSecs.some((x) => x.tiles.includes('通知')) && await page.locator('#notif-bell[href="/pages/notifications"]').count() === 1);
 const tileOrder = await page.evaluate(() => { const t = [...document.querySelectorAll('.tile-grid a.tile')].map((a) => a.querySelector('.tile-name')?.textContent.trim()); return t; });
 check('ホーム: 「管理」タイルの隣に「更新履歴」タイルがある', tileOrder.indexOf('更新履歴') === tileOrder.indexOf('管理') + 1 && tileOrder.indexOf('管理') >= 0, JSON.stringify(tileOrder.slice(-4)));
 await page.click('a.tile[href="/pages/updates"]');
