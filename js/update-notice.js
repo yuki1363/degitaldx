@@ -1,6 +1,6 @@
 // 更新のお知らせ（js/updates.js の内容）
-//   ・新しい版が出たあとの最初のホーム表示で、ホームの上のタブ（期限超過・直近・通知）に「🆕 更新」タブが出る。
-//     中を読んで「確認した」を押すとタブごと消える（端末ごと＝localStorage）。js/home-tabs.js が使う。
+//   ・新しい版が出たあとの最初のホーム表示で、画面の真ん中にダイアログ（ウィンドウ）で出す。
+//     読んで「確認した」を押すと閉じて、次回からは出ない（端末ごと＝localStorage）。「あとで」は今回だけ閉じる。
 //   ・過去の更新は、ホームのタイル「🆕 更新履歴」（/pages/updates）でいつでも見られる。
 //   ・localStorage が使えない環境（プライベートモード等）でも、表示はできる（毎回出る）。
 import { el } from '/js/util.js';
@@ -39,14 +39,31 @@ export function pendingUpdates() {
   return seen === LATEST_VERSION ? [] : unseenUpdates(seen);
 }
 
-/** 「🆕 更新」タブの中身。「確認した」で onConfirm が呼ばれる（タブを消すのは呼び出し側） */
-export function updatesTabContent(list, onConfirm) {
-  return el('div', { class: 'update-notice', id: 'update-tab-card' }, [
-    ...list.map((u) => entryNode(u)),
-    el('div', { class: 'action-row', style: 'margin-top:8px' }, [
-      el('button', { class: 'btn btn-sm btn-primary', type: 'button', id: 'update-notice-ok',
-        onclick: () => { writeSeen(LATEST_VERSION); onConfirm(); } }, '確認した'),
-      el('a', { class: 'btn btn-sm', href: '/pages/updates' }, 'これまでの更新履歴'),
+/**
+ * 更新のお知らせをダイアログ（画面の真ん中のウィンドウ）で出す。
+ *   「確認した」＝確認済みにして閉じる（次回からは出ない）／「あとで」＝今回だけ閉じる（次に開いたときまた出る）。
+ *   背景のタップ・Esc は「あとで」と同じ。何も出すものが無ければ何もしない。
+ */
+export function showUpdateDialog() {
+  const list = pendingUpdates();
+  if (list.length === 0 || document.getElementById('update-dialog')) return;
+
+  const backdrop = el('div', { class: 'modal-backdrop', id: 'update-dialog' });
+  const close = () => { backdrop.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  document.addEventListener('keydown', onKey);
+
+  backdrop.appendChild(el('div', { class: 'modal update-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'update-dialog-title' }, [
+    el('h3', { class: 'modal-title', id: 'update-dialog-title' }, '🆕 アプリが更新されました'),
+    el('div', { class: 'modal-body update-dialog-body' }, list.map((u) => entryNode(u))),
+    el('div', { class: 'modal-actions' }, [
+      el('a', { class: 'btn', href: '/pages/updates', id: 'update-history-link' }, 'これまでの更新履歴'),
+      el('button', { class: 'btn', type: 'button', id: 'update-later', onclick: close }, 'あとで'),
+      el('button', { class: 'btn btn-primary', type: 'button', id: 'update-notice-ok',
+        onclick: () => { writeSeen(LATEST_VERSION); close(); } }, '確認した'),
     ]),
-  ]);
+  ]));
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#update-notice-ok').focus();
 }

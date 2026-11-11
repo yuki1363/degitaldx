@@ -278,7 +278,7 @@ check('AI提案APIは廃止（404）', aiRes.status === 404, `status=${aiRes.sta
 await page.evaluate(() => localStorage.removeItem('draft:trouble-new')); // 後続の下書きテストに影響させない
 
 // ---------- 2.55 トラブル: 設備が一覧に無いときの案内・使用部品・横断検索への入口 ----------
-section('2.55 トラブル入力: 設備の案内・使用部品・横断検索の入口');
+section('2.55 トラブル入力: 設備の案内・使用部品');
 {
   const upPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E使用部品', model_no: 'E2E-UP-1', quantity: 10, safety_stock: 0 } });
   const upId = upPart.json?.id;
@@ -330,12 +330,9 @@ section('2.55 トラブル入力: 設備の案内・使用部品・横断検索�
   check('トラブル詳細: 在庫を超える数量は断る（在庫は変わらない）', overMsg.includes('在庫が足りません') && await stockOf() === 5, overMsg);
   await api(`/api/troubles/${troubleId}`, { method: 'DELETE' });
   await api(`/api/parts/${upId}`, { method: 'DELETE' });
-  // 一覧トップ: 過去のトラブルは横断検索で探す（AIは使わない）
+  // 一覧トップに「過去のトラブルを探す」欄は置かない（検索はホームの横断検索）
   await page.goto(`${BASE}/pages/trouble`, { waitUntil: 'networkidle' });
-  await page.fill('input[aria-label="キーワード"]', 'コンプレッサ 異音');
-  await page.click('#trouble-kw-go');
-  await page.waitForURL(/\/pages\/search/, { timeout: 8000 });
-  check('トラブル一覧: キーワードで横断検索（トラブル種別）へ移動する', page.url().includes('type=trouble') && decodeURIComponent(page.url()).includes('q=コンプレッサ 異音'), page.url());
+  check('トラブル一覧: 上に「過去のトラブルを探す」欄は出さない', await page.locator('#trouble-kw-go').count() === 0 && !(await page.evaluate(() => document.body.innerText.includes('過去のトラブルを探す'))));
 }
 
 // ---------- 2.6 類似部品検索（あいまい） ----------
@@ -1051,20 +1048,26 @@ section('8. ダッシュボード・保全レポート');
   for (const id of ids.filter(Boolean)) await api(`/api/equipment/${id}`, { method: 'DELETE' });
 }
 
-// ホームの「更新のお知らせ」: 新しい版のあと、ホームのタブに「🆕 更新」が出て、「確認した」でタブごと消える。
-//   過去の更新は、管理タイルの隣の「更新履歴」ページで見られる
+// ホームの「更新のお知らせ」: 新しい版のあと、画面の真ん中にダイアログで出る。「確認した」で閉じて次回から出ない。
+//   「あとで」は今回だけ閉じる。過去の更新は、管理タイルの隣の「更新履歴」ページで見られる
 await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 await page.evaluate(() => localStorage.removeItem('updates:seen'));
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
 const swVer = (await (await page.request.get(`${BASE}/sw.js`)).text()).match(/CACHE_VERSION = 'v([\d.]+)'/)?.[1];
-await page.waitForSelector('.home-tab:has-text("更新")', { timeout: 8000 }).catch(() => {});
-if (await page.locator('#update-tab-card').count() === 0) await page.click('.home-tab:has-text("更新")').catch(() => {});
-const noticeText = await page.locator('#update-tab-card').innerText().catch(() => '');
-check('ホーム: 新しい版のあと「🆕 更新」タブに更新内容が出る（最新の版）', noticeText.includes(`v${swVer}`) && noticeText.includes('確認した'), noticeText.slice(0, 120));
-await page.click('#update-notice-ok');
-check('ホーム: 「確認した」で更新タブが消える', await page.locator('.home-tab:has-text("更新")').count() === 0 && await page.locator('#update-tab-card').count() === 0);
+await page.waitForSelector('#update-dialog', { timeout: 8000 }).catch(() => {});
+const noticeText = await page.locator('#update-dialog').innerText().catch(() => '');
+const dlgBox = await page.locator('#update-dialog .modal').boundingBox().catch(() => null);
+check('ホーム: 新しい版のあと、更新内容がダイアログで出る（最新の版・画面の中央）', noticeText.includes(`v${swVer}`) && noticeText.includes('確認した') && !!dlgBox && Math.abs(dlgBox.x + dlgBox.width / 2 - 640) < 40, `${noticeText.slice(0, 80)} box=${JSON.stringify(dlgBox)}`);
+await page.click('#update-later');
+check('ホーム: 「あとで」で閉じる', await page.locator('#update-dialog').count() === 0);
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-check('ホーム: 確認したあとの再表示では更新タブは出ない', await page.locator('.home-tab:has-text("更新")').count() === 0);
+await page.waitForSelector('#update-dialog', { timeout: 8000 }).catch(() => {});
+check('ホーム: 「あとで」にしたら、次に開いたときまた出る', await page.locator('#update-dialog').count() === 1);
+await page.click('#update-notice-ok');
+check('ホーム: 「確認した」でダイアログが消える', await page.locator('#update-dialog').count() === 0);
+await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+check('ホーム: 確認したあとの再表示ではダイアログは出ない', await page.locator('#update-dialog').count() === 0);
 const tileOrder = await page.evaluate(() => { const t = [...document.querySelectorAll('.tile-grid a.tile')].map((a) => a.querySelector('.tile-name')?.textContent.trim()); return t; });
 check('ホーム: 「管理」タイルの隣に「更新履歴」タイルがある', tileOrder.indexOf('更新履歴') === tileOrder.indexOf('管理') + 1 && tileOrder.indexOf('管理') >= 0, JSON.stringify(tileOrder.slice(-4)));
 await page.click('a.tile[href="/pages/updates"]');
