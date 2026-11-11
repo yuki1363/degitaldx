@@ -23,6 +23,7 @@ ok('今月は1日〜月末', is(periodFor('month', '2026-10-29'), { from: '2026-
 ok('先月: 年をまたぐ（1月→前年12月）', is(periodFor('lastmonth', '2027-01-15'), { from: '2026-12-01', to: '2026-12-31' }));
 ok('月末の算出（2月・うるう年）', is(periodFor('month', '2028-02-10'), { from: '2028-02-01', to: '2028-02-29' }) && is(periodFor('month', '2027-02-10'), { from: '2027-02-01', to: '2027-02-28' }));
 ok('週が月をまたぐ・年をまたぐ', is(periodFor('week', '2026-12-31'), { from: '2026-12-28', to: '2027-01-03' }));
+ok('直近6ヶ月は5ヶ月前の1日〜今月末（年をまたぐ）', is(periodFor('last6months', '2026-10-29'), { from: '2026-05-01', to: '2026-10-31' }) && is(periodFor('last6months', '2027-02-10'), { from: '2026-09-01', to: '2027-02-28' }));
 ok('不正な日付・種類は null', periodFor('week', 'abc') === null && periodFor('year', '2026-10-29') === null && periodFor('month', '2026-02-30') === null);
 ok('shiftDate: 翌日（月末・年末）', shiftDate('2026-10-31', 1) === '2026-11-01' && shiftDate('2026-12-31', 1) === '2027-01-01' && shiftDate('x', 1) === null);
 ok('isValidPeriod: 開始≦終了で、存在する日付のみ', isValidPeriod('2026-10-01', '2026-10-31') && isValidPeriod('2026-10-01', '2026-10-01') && !isValidPeriod('2026-10-31', '2026-10-01') && !isValidPeriod('', '2026-10-01') && !isValidPeriod('2026-02-30', '2026-03-01'));
