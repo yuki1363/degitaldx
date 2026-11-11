@@ -7,25 +7,11 @@
   <title>保全レポート — 設備保全アプリ</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" href="/icons/icon-192.png">
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="/css/style.css">
-  <style media="print">@page { size: A4 portrait; margin: 12mm; }</style>
+  <meta http-equiv="refresh" content="0; url=/pages/dashboard?tab=report">
 </head>
 <body>
-  <header class="app-header">
-    <div class="nav-left">
-      <a class="back-link" href="/" aria-label="ホームへ戻る">← 戻る</a>
-      <a class="home-link" href="/" aria-label="ホームへ戻る">🏠</a>
-    </div>
-    <h1 class="app-title">保全レポート</h1>
-    <div class="header-spacer"></div>
-  </header>
-  <main class="container">
-    <div id="app"></div>
-  </main>
-  <script type="module" src="/js/report-summary.js"></script>
-  <script type="module" src="/js/nav.js"></script>
+  <!-- 保全レポートはダッシュボードの「レポート」タブへ統合した。古いブックマーク・ホーム画面のURL用の移動ページ -->
+  <p>保全レポートはダッシュボードの「レポート」タブに移動しました。<a href="/pages/dashboard?tab=report">開く</a></p>
+  <script>location.replace('/pages/dashboard?tab=report');</script>
 </body>
 </html>

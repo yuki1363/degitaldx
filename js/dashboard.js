@@ -1,4 +1,4 @@
-// 08 ダッシュボード — サマリー/グラフ・カスタムグラフ
+// 08 ダッシュボード — サマリー/グラフ・カスタムグラフ・レポート（印刷用1枚）
 //   （抽出→表→CSV/PDF は横断検索(11)へ集約。ダッシュボードは「見る（グラフ）」に専念。
 //    例外としてトラブル記録だけは、集計期間のまま CSV を出せる＝04 一覧と同じ列）
 
@@ -7,6 +7,8 @@ import { getCurrentUser } from '/js/auth.js';
 import { el, render, toJstDateStr, jstTodayStr } from '/js/util.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
+import { periodFor } from '/js/report-period.js';
+import { renderReport } from '/js/report-summary.js';
 
 const app = document.getElementById('app');
 
@@ -382,6 +384,22 @@ async function renderDashboard() {
   const toInput   = el('input', { type: 'date', value: defaultTo });
   const applyBtn  = el('button', { class: 'btn btn-sm', onclick: () => loadTab() }, '集計');
 
+  // 期間のプリセット（今週・先週・今月・先月）。全タブ共通の FROM〜TO を書き換えて取り直す
+  const KINDS = [['week', '今週'], ['lastweek', '先週'], ['month', '今月'], ['lastmonth', '先月']];
+  const chips = el('div', { class: 'chip-row' }, KINDS.map(([kind, label]) =>
+    el('button', { class: 'chip', type: 'button', 'data-kind': kind, onclick: () => { setPreset(kind); loadTab(); } }, label)));
+  const setPreset = (kind) => {
+    const p = periodFor(kind, jstTodayStr());
+    if (p) { fromInput.value = p.from; toInput.value = p.to; }
+  };
+  // いまの FROM〜TO がプリセットと一致するチップだけ強調する（手で日付を変えたら全部消える）
+  const syncChips = () => {
+    chips.querySelectorAll('.chip').forEach((c) => {
+      const p = periodFor(c.dataset.kind, jstTodayStr());
+      c.classList.toggle('is-active', !!p && p.from === fromInput.value && p.to === toInput.value);
+    });
+  };
+
   // トラブル記録CSV: 画面の FROM〜TO（集計期間）で /api/troubles を取得して出力（列は 04 一覧と共通）
   const exportTroubles = async (enc, btn) => {
     const from = fromInput.value || defaultFrom;
@@ -403,12 +421,16 @@ async function renderDashboard() {
   const csvUtf8Btn = el('button', { class: 'btn btn-sm', onclick: () => exportTroubles('utf8', csvUtf8Btn) }, '📥 CSV（UTF-8/BOM）');
   const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportTroubles('sjis', csvSjisBtn) }, '📥 CSV（Shift_JIS）');
 
-  let activeTab = 'summary';
+  // ?tab=report（旧「保全レポート」ページからの移動・ブックマーク）はレポートタブを今月で開く
+  const startTab = new URLSearchParams(window.location.search).get('tab');
+  let activeTab = startTab === 'report' ? 'report' : 'summary';
+  if (activeTab === 'report') setPreset('month');
   const tabContent = el('div', { id: 'tab-content' }, []);
 
   const tabs = [
     { id: 'summary',  label: 'サマリー/グラフ' },
     { id: 'custom',   label: 'カスタムグラフ' },
+    { id: 'report',   label: '📄 レポート（印刷用）' },
   ];
   const tabBtns = tabs.map(({ id, label }) =>
     el('button', {
@@ -425,25 +447,51 @@ async function renderDashboard() {
   const loadTab = async () => {
     const from = fromInput.value || defaultFrom;
     const to   = toInput.value   || defaultTo;
+    syncChips();
+    // 印刷用CSS（body.rpt-page）はレポートタブのときだけ効かせる
+    document.body.classList.toggle('rpt-page', activeTab === 'report');
     if (activeTab === 'custom') {
       await renderCustom(from, to);
+    } else if (activeTab === 'report') {
+      await renderReportTab(from, to);
     } else {
       await renderSummary(from, to);
     }
   };
 
+  // レポートタブ: 印刷ボタン＋レポート本体。ユーザー名は出力者として載せる
+  let me = null;
+  try { me = await getCurrentUser(); } catch { me = null; }
+  const renderReportTab = async (from, to) => {
+    const docBox = el('div', { id: 'report-doc', class: 'rpt-doc' });
+    render(tabContent, [
+      el('div', { class: 'rpt-controls' }, [
+        el('button', { class: 'btn btn-sm btn-primary', type: 'button', id: 'rpt-print', onclick: () => window.print() }, '🖨 印刷 / PDF保存'),
+        el('p', { class: 'hint' }, '印刷ダイアログで「PDFに保存」を選ぶと、PDFとして残せます（A4・縦）。期間は上の FROM〜TO（今週・先週・今月・先月ボタン）で選べます。'),
+      ]),
+      docBox,
+    ]);
+    try {
+      await renderReport(docBox, from, to, me);
+    } catch (err) {
+      render(docBox, el('p', { class: 'empty' }, `レポートを作成できませんでした: ${err.message}`));
+    }
+  };
+
+  // 印刷時は期間・CSV・タブの操作欄を隠す（rpt-controls は body.rpt-page の印刷CSSで display:none）
   render(app, [
-    el('div', { class: 'period-bar' }, [
+    el('div', { class: 'period-bar rpt-controls' }, [
+      chips,
       el('label', { class: 'filter-label' }, ['FROM ', fromInput]),
       el('label', { class: 'filter-label' }, ['TO ', toInput]),
       applyBtn,
     ]),
-    el('div', { class: 'period-bar', id: 'trouble-csv-bar' }, [
+    el('div', { class: 'period-bar rpt-controls', id: 'trouble-csv-bar' }, [
       el('span', { class: 'filter-label' }, 'トラブル記録（期間内）'),
       csvUtf8Btn,
       csvSjisBtn,
     ]),
-    el('div', { class: 'tab-bar' }, tabBtns),
+    el('div', { class: 'tab-bar rpt-controls' }, tabBtns),
     tabContent,
   ]);
 

@@ -49,7 +49,7 @@ export async function onRequestGet({ request, env }) {
     `).bind(fromTs, toTsExcl).all(),
 
     // 設備別の故障件数（期間内にトラブルがあった設備すべて。GROUP BYの母数は設備数程度のため
-    // LIMITなしでも軽い）。ダッシュボードは全件を表で表示し、保全レポート(01)は上位10件を使う。
+    // LIMITなしでも軽い）。ダッシュボードは全件を表で、レポートタブは上位15件＋「ほかN設備」で表示する。
     // 同点内の順序をequipment_nameで固定しないと、上位10件のカットラインがSQLite内部順序で変わる
     db.prepare(`
       SELECT
@@ -92,7 +92,7 @@ export async function onRequestGet({ request, env }) {
   const totalPlanned  = Object.values(planCounts).reduce((a, b) => a + b, 0);
   const donePlanned   = planCounts['done'] ?? 0;
 
-  // 全設備の件数（ダッシュボード用）と上位10件（保全レポート用）
+  // 期間内にトラブルがあった全設備の件数（ダッシュボードの表と、印刷用レポートの設備別が使う）
   const equipmentCounts = equipmentRanking ?? [];
 
   return json({
@@ -100,7 +100,6 @@ export async function onRequestGet({ request, env }) {
     trouble_trend:          troubleTrend      ?? [],
     trouble_by_category:    troubleByCategory ?? [],
     equipment_trouble_counts: equipmentCounts,
-    equipment_ranking:      equipmentCounts.slice(0, 10),
     repair_summary:         repairSummary,
     inspection_rate: {
       planned: totalPlanned,
