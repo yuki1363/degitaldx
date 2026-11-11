@@ -56,7 +56,8 @@ const monthOf = (p) => Number((p.planned_date || '').slice(5, 7));
 const typeOf = (pt) => PLAN_TYPES[pt] || PLAN_TYPES.other;
 // 表示中の年度で、その月が属する暦年（10〜12月は開始年、1〜9月は翌年）
 const calYear = (m, f = fy) => (m >= FISCAL_YEAR_START_MONTH ? f : f + 1);
-const fyLabelOf = (f) => `FY${f}（${f}/10〜${f + 1}/09）`;
+// 年度の表記: FY2026～FY2027（2026/10～2027/9）。開始年〜終了年と、10月始まり9月終わりの期間を一緒に示す
+const fyLabelOf = (f) => `FY${f}～FY${f + 1}（${f}/10～${f + 1}/9）`;
 // 完了状態を操作できるのは、完了状態が属する年度（今年度）を表示しているときだけ
 const isCurrentView = () => fy === currentFy;
 const canEditView = () => hasRole(currentUser, 'editor') && isCurrentView();
@@ -591,9 +592,9 @@ function toolbar() {
         ? el('button', {
             class: 'btn btn-sm btn-danger',
             disabled: !resetAvailable,
-            title: resetAvailable ? `FY${resetTargetFy} を締めて未実施に戻します` : `FY${resetTargetFy} の年度リセットは ${resetTargetFy + 1}年9月から実行できます`,
+            title: resetAvailable ? `${fyLabelOf(resetTargetFy)} の完了状態を締めて、全タスクを未実施に戻します` : `${fyLabelOf(resetTargetFy)} の年度リセットは ${resetTargetFy + 1}年9月から実行できます`,
             onclick: () => runAnnualReset(),
-          }, `🔁 年度リセット（FY${resetTargetFy}）`)
+          }, `🔁 年度リセット（FY${resetTargetFy}～FY${resetTargetFy + 1}）`)
         : null,
     ]),
   ]);
@@ -616,7 +617,7 @@ function yearNav() {
 // 今年度以外を表示しているときの案内（完了状態はこの年度のものではない）
 function otherFyNotice() {
   if (isCurrentView()) return null;
-  const back = el('button', { class: 'btn btn-sm', onclick: () => { fy = currentFy; renderYear().catch(showError); } }, `今年度（FY${currentFy}）に戻る`);
+  const back = el('button', { class: 'btn btn-sm', onclick: () => { fy = currentFy; renderYear().catch(showError); } }, `今年度（FY${currentFy}～FY${currentFy + 1}）に戻る`);
   if (fy < currentFy) {
     return el('div', { class: 'notice annual-fy-notice no-print' }, [
       el('span', {}, `${fyLabelOf(fy)} は過去の年度です。表はタスクの配置と点検実績だけを表示しています（完了状態は表示しません）。`),
@@ -627,7 +628,7 @@ function otherFyNotice() {
     ]);
   }
   return el('div', { class: 'notice annual-fy-notice no-print' }, [
-    el('span', {}, `${fyLabelOf(fy)} はまだ始まっていない年度です（完了状態は FY${fy - 1} の年度リセット後に記録します）。`),
+    el('span', {}, `${fyLabelOf(fy)} はまだ始まっていない年度です（完了状態は ${fyLabelOf(fy - 1)} の年度リセット後に記録します）。`),
     ' ', back,
   ]);
 }
@@ -725,7 +726,7 @@ async function renderYear() {
 //   CSV は表示中の年度ではなく、API から取得したままの完了状態（rawPlans）から作る。
 async function runAnnualReset() {
   const target = resetTargetFy;
-  const fyLabel = `FY${target}（${target}年10月〜${target + 1}年9月）`;
+  const fyLabel = fyLabelOf(target);
   if (!confirm(`${fyLabel} の年間計画をリセットします。\n・現在の完了状態をCSVに保存\n・全タスクを「未実施」に戻す\n\n続けますか？`)) return;
 
   // リセット前の完了状態（全種別）。種別フィルターに関係なく全タスクを残す
