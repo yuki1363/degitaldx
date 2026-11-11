@@ -13,6 +13,25 @@ import { getAnnualFyState } from './index.js';
 //   GET /api/plans/annual-reset?fiscal_year=2025&csv=1
 //     → 指定年度の CSV スナップショットを返す
 
+// plan_reset_log が無い環境（このテーブルを足す前に作られたDB）では、リセットのたびに
+// 「no such table: plan_reset_log」で失敗していた。リセットの前に、無ければ作る（あれば何もしない）。
+// 定義は schema.sql と同じ。履歴が無い状態から始まるので、締める年度は getAnnualFyState が決める
+export async function ensurePlanResetLogTable(db) {
+  await db.batch([
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS plan_reset_log (
+         id             INTEGER PRIMARY KEY AUTOINCREMENT,
+         fiscal_year    INTEGER NOT NULL,
+         reset_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+         reset_by       TEXT NOT NULL,
+         plan_count     INTEGER NOT NULL DEFAULT 0,
+         csv_snapshot   TEXT
+       )`
+    ),
+    db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_reset_log_fy ON plan_reset_log (fiscal_year)'),
+  ]);
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
@@ -56,12 +75,18 @@ export async function onRequestGet({ request, env }) {
 //   年度まで締めてしまうのを防ぐ）。
 //   監査（戻す予定と変更前の状態）→ 予定を未実施へ → 履歴の登録 を1つの batch（トランザクション）で行う。
 //   同じ年度の二重実行は plan_reset_log の UNIQUE(fiscal_year) で後の方が丸ごと失敗する。
+//   plan_reset_log が無い古いDBでも動くよう、実行の前に無ければ作る（ensurePlanResetLogTable）。
 export async function onRequestPost({ request, env, data }) {
   const denied = requireRole(data.user, 'admin');
   if (denied) return denied;
 
   const db = env.DB;
   const body = await readJson(request);
+  try {
+    await ensurePlanResetLogTable(db);
+  } catch (err) {
+    return jsonError(500, `リセット履歴の表を用意できませんでした: ${err.message}`);
+  }
   const { resetTarget: fiscalYear, resetAvailable } = await getAnnualFyState(db);
   if (body.fiscal_year != null && Number(body.fiscal_year) !== fiscalYear) {
     return jsonError(409, `年度リセットの対象は FY${fiscalYear} です（画面が古い可能性があります。再読み込みしてください）。`);
