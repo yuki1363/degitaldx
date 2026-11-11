@@ -113,7 +113,7 @@ function buildValues(type, r) {
 }
 
 // トラブル報告書の押印を上へ上げる量（EMU。1mm = 36000）。工事連絡書の位置は変えない
-const TROUBLE_STAMP_UP = -180000; // 5mm 上
+const TROUBLE_STAMP_UP = -72000; // 2mm 上（5mm だと上の行の見出しにかかった）
 
 function xmlEscape(s) {
   return String(s == null ? '' : s)
