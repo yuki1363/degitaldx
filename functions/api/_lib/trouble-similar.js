@@ -7,6 +7,7 @@
 // 呼び出し側がそれぞれの流儀で失敗時処理する（一覧は非表示で継続／AIはAIのみで継続）。
 
 import { keywordVariants } from './fuzzy.js';
+import { LIKE_ESCAPE, likeContains } from './util.js';
 
 const MIN_LEN = 2;        // 1文字だとノイズだらけになるため、2文字未満は検索しない
 const MAX_TOKENS = 5;     // 1語あたり最大8バリアント × 5語 = 40 bind（+設備・自分・件数＝43。D1の上限100に収まる）
@@ -39,7 +40,7 @@ export async function findSimilarTroubles(db, phenomenonText, { excludeId, equip
     const bind = (v) => { binds.push(v); return `?${binds.length}`; }; // 番号つき（?1, ?2…）で、書く順に関係なく対応づける
     // 語ごとに「いずれかの表記ゆれが含まれれば1点」。点数が1以上の記録だけを残す
     const score = tokenVariants
-      .map((vs) => `(CASE WHEN ${vs.map((v) => `x.hay LIKE ${bind(`%${v}%`)}`).join(' OR ')} THEN 1 ELSE 0 END)`)
+      .map((vs) => `(CASE WHEN ${vs.map((v) => `x.hay LIKE ${bind(likeContains(v))}${LIKE_ESCAPE}`).join(' OR ')} THEN 1 ELSE 0 END)`)
       .join(' + ');
     const sameEq = equipmentId ? `(CASE WHEN x.equipment_id = ${bind(Number(equipmentId))} THEN 1 ELSE 0 END)` : '0';
     const exclude = excludeId ? `AND tr.id != ${bind(Number(excludeId))}` : ''; // 編集中のレコード自身は出さない

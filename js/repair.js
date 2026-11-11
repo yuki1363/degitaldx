@@ -8,7 +8,8 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, isoToLocalInputValue, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, isoToLocalInputValue, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
@@ -364,17 +365,7 @@ async function renderDetail(id) {
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      !auditHistory || auditHistory.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : el('div', { class: 'row-list' },
-            auditHistory.map((h) =>
-              el('div', { class: 'history-row' }, [
-                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, maskEmail(h.changed_by)),
-                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-              ])
-            )
-          ),
+      buildHistoryList(auditHistory),
     ]),
   ]);
 }

@@ -9,6 +9,9 @@
 //   ・全角カタカナ ⇄ 半角カタカナ（例「フィルム」で半角登録の「ﾌｨﾙﾑ」がヒット。データが
 //     半角ｶﾀｶﾅで登録されている設備名等に効く。逆方向は NFKC 正規化で吸収）
 //   ・末尾の長音ゆれ（例「コンプレッサー」で「コンプレッサ」もヒット。逆方向は部分一致で元々当たる）
+//   ・検索語の % _ はワイルドカードとして扱わず文字そのものとして探す（util.js の likeContains／LIKE_ESCAPE）
+import { LIKE_ESCAPE, likeContains } from './util.js';
+
 const toHalfWidth = (s) => s
   .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
   .replace(/　/g, ' ');
@@ -79,7 +82,7 @@ export function fitKeywords(keywords, colCount, reserve = 4) {
 // 1キーワードぶんの LIKE 条件（全列 × 全バリアントの OR）
 export function likeOr(cols, variantCount) {
   const parts = [];
-  for (const c of cols) for (let i = 0; i < variantCount; i++) parts.push(`${c} LIKE ?`);
+  for (const c of cols) for (let i = 0; i < variantCount; i++) parts.push(`${c} LIKE ?${LIKE_ESCAPE}`);
   return '(' + parts.join(' OR ') + ')';
 }
 
@@ -94,7 +97,7 @@ export function buildKeywordClauses(keywords, cols) {
   for (const kw of keywords) {
     const variants = keywordVariants(kw);
     clauses.push(likeOr(cols, variants.length));
-    for (const _c of cols) for (const v of variants) binds.push(`%${v}%`);
+    for (const _c of cols) for (const v of variants) binds.push(likeContains(v));
   }
   return { clauses, binds };
 }

@@ -141,6 +141,26 @@ export function buildValues(items, rawValues) {
   return { values, hasAbnormal: values.some((v) => v.abnormal) ? 1 : 0 };
 }
 
+/**
+ * 編集で変わった項目の一覧（監査ログの変更履歴用）。item_id ごとに前後の値を比べ、違うものだけ返す。
+ * 値を消した項目は to が null、新しく入れた項目は from が null。
+ */
+export function diffValues(oldValues, newValues) {
+  const index = (list) => new Map((Array.isArray(list) ? list : []).filter((v) => v && v.item_id !== undefined).map((v) => [Number(v.item_id), v]));
+  const a = index(oldValues);
+  const b = index(newValues);
+  const norm = (v) => (v === undefined ? null : v);
+  const out = [];
+  for (const id of new Set([...a.keys(), ...b.keys()])) {
+    const from = norm(a.get(id)?.value);
+    const to = norm(b.get(id)?.value);
+    if (JSON.stringify(from) === JSON.stringify(to)) continue;
+    const ref = b.get(id) || a.get(id);
+    out.push({ name: ref.name, unit: ref.unit ?? null, from, to });
+  }
+  return out;
+}
+
 /** 保存済みレコードを API レスポンス用に整える（values_json を配列に開く） */
 export function toReport(row, { withValues = true } = {}) {
   const { values_json, ...rest } = row;

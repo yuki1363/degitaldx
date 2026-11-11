@@ -7,7 +7,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { auditStatement, LAST_INSERT_ID } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { insertMaintenancePlanStatement, runPlanBatch } from './index.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
@@ -27,7 +27,7 @@ export async function onRequestPost({ request, env, data }) {
   // 事前検証（1件でも不正なら登録しない）
   for (const it of items) {
     if (!it.title || !String(it.title).trim()) return jsonError(400, 'タイトルは必須です');
-    if (!it.planned_date || !/^\d{4}-\d{2}-\d{2}$/.test(it.planned_date)) {
+    if (!isValidYmd(it.planned_date)) {
       return jsonError(400, 'planned_date（YYYY-MM-DD）が不正です');
     }
     if (!PLAN_TYPES.includes(it.plan_type)) {

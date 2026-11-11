@@ -1,7 +1,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, likeContains, LIKE_ESCAPE, isValidYmd } from '../_lib/util.js';
 import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 
 export async function onRequestGet({ request, env }) {
@@ -38,8 +38,8 @@ export async function onRequestGet({ request, env }) {
   }
   if (categoryId) { sql += ` AND dr.category_id = ?`; binds.push(categoryId); }
   if (reporter) {
-    sql += ` AND COALESCE(dr.reporter_name, u.name) LIKE ?`;
-    binds.push(`%${reporter}%`);
+    sql += ` AND COALESCE(dr.reporter_name, u.name) LIKE ?${LIKE_ESCAPE}`;
+    binds.push(likeContains(reporter));
   }
 
   sql += ` ORDER BY dr.report_date DESC, dr.id DESC LIMIT ?`;
@@ -60,6 +60,7 @@ export async function onRequestPost({ request, env, data }) {
   const { report_date, body: bodyText, category_id, reporter_name } = body ?? {};
 
   if (!report_date) return jsonError(400, 'report_date は必須です');
+  if (!isValidYmd(report_date)) return jsonError(400, 'report_date は YYYY-MM-DD の実在する日付で指定してください');
   // 本文は任意（空でも保存可）。NOT NULL 制約のため空文字で格納する。
   const bodyValue = bodyText ? String(bodyText).trim() : '';
   const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;

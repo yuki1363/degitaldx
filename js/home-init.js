@@ -6,12 +6,7 @@ import { api } from '/js/api.js';
 import { loadHomeTabs } from '/js/home-tabs.js';
 import { showUpdateDialog } from '/js/update-notice.js';
 
-// Service Worker 登録（PWA: オフラインでもアプリが起動する）
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch((err) => {
-    console.warn('Service Worker の登録に失敗:', err);
-  });
-}
+// Service Worker の登録は全ページ共通の js/nav.js で行う（ホームを経由しない直接アクセスでもキャッシュされるように）。
 
 // 更新のお知らせ（新しい版のあとの最初の表示だけ、ダイアログで出す。ログイン確認を待たずに出す）
 showUpdateDialog();

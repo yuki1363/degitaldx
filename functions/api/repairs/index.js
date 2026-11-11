@@ -1,7 +1,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { ensureColumns } from '../_lib/db-compat.js';
 import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 
@@ -19,7 +19,7 @@ export function normPriority(v) {
 export function parseDueDate(v) {
   if (v === undefined || v === null || v === '') return { value: null };
   const s = String(v).trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return { error: '対応期限（due_date）は YYYY-MM-DD 形式で指定してください' };
+  if (!isValidYmd(s)) return { error: '対応期限（due_date）は YYYY-MM-DD 形式（実在する日付）で指定してください' };
   return { value: s };
 }
 

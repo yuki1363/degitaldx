@@ -1,7 +1,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { linkRowToEquipment, describeEquipmentLink } from '../_lib/equipment-link.js';
 import { normalizeFormValues, deriveOverdue, getAnnualFyState } from './index.js';
 
@@ -56,6 +56,10 @@ export async function onRequestPut({ request, params, env, data }) {
   if (conflict) return conflict; // 同時編集ガード
   const now = nowIso();
   const userEmail = data.user.email;
+
+  // 日付の形式チェック（存在しない日付・文字列を保存しない）
+  if ('planned_date' in body && !isValidYmd(body.planned_date)) return jsonError(400, 'planned_date は YYYY-MM-DD の実在する日付で指定してください');
+  if ('planned_end_date' in body && body.planned_end_date && !isValidYmd(body.planned_end_date)) return jsonError(400, 'planned_end_date は YYYY-MM-DD の実在する日付で指定してください');
 
   // 期間の整合性チェック（終了日 < 開始日 はエラー）
   const newStart = ('planned_date' in body) ? body.planned_date : existing.planned_date;

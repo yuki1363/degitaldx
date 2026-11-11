@@ -2910,6 +2910,67 @@ section('9.31 データ保護（二重登録の防止・削除した写真の復
   check('部品CSV取込: 全置き換えを選ぶと、QRラベルが読めなくなる旨の強い警告が出る', warnShown);
 }
 
+// ---------- 9.32 変更履歴に「何が変わったか」を出す／ホームを経由しない直接アクセスでもSWを登録する ----------
+section('9.32 変更履歴の差分表示・SW登録（全ページ）・細かい不具合の修正');
+{
+  // 保全計画: 状態とタイトルを変える → 詳細の変更履歴に「前 → 後」が出る
+  const mk = await api('/api/plans', { method: 'POST', body: { title: 'E2E履歴の計画', plan_type: 'inspection', planned_date: '2031-03-01' } });
+  const planId = mk.json?.id;
+  await api(`/api/plans/${planId}`, { method: 'PUT', body: { title: 'E2E履歴の計画（改）', status: 'done' } });
+  await page.goto(`${BASE}/pages/plan?id=${planId}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.history-diff', { timeout: 10000 }).catch(() => {});
+  const sum = await page.locator('.history-diff > summary').first().innerText().catch(() => '');
+  check('保全計画の変更履歴: 「何を変更したか」の要約が出る（タイトル・状態）', /タイトル/.test(sum) && /状態/.test(sum) && /変更/.test(sum), sum);
+  await page.locator('.history-diff > summary').first().click();
+  const diffText = await page.locator('.history-diff-list').first().innerText().catch(() => '');
+  check('保全計画の変更履歴: 開くと「項目：前 → 後」（状態は未実施 → 完了）', /状態/.test(diffText) && /未実施/.test(diffText) && /完了/.test(diffText) && /E2E履歴の計画（改）/.test(diffText), diffText.replace(/\n/g, ' | '));
+  check('保全計画の変更履歴: 登録の行には変更内容を出さない（登録＝操作だけ）', await page.locator('.history-item').count() >= 2 && await page.locator('.history-item:has(.action-badge.is-create) .history-diff').count() === 0);
+  // 変更内容を開いても、スマホ幅（375px）で横にはみ出さない
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto(`${BASE}/pages/plan?id=${planId}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.history-diff', { timeout: 10000 }).catch(() => {});
+  await page.locator('.history-diff > summary').first().click().catch(() => {});
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check('保全計画の変更履歴: 375px幅で変更内容を開いても横スクロールしない', overflow <= 0, `overflow=${overflow}`);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await api(`/api/plans/${planId}`, { method: 'DELETE' });
+
+  // 日報: 本文を変える → 詳細の変更履歴に本文の前 → 後が出る（以前は新しい値だけを記録していたため出せなかった）
+  const rep = await api('/api/reports', { method: 'POST', body: { report_date: '2031-03-02', body: 'E2E旧本文' } });
+  const repId = rep.json?.id;
+  await api(`/api/reports/${repId}`, { method: 'PUT', body: { report_date: '2031-03-02', body: 'E2E新本文' } });
+  await page.goto(`${BASE}/pages/report?id=${repId}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.history-diff', { timeout: 10000 }).catch(() => {});
+  await page.locator('.history-diff > summary').first().click().catch(() => {});
+  const repDiff = await page.locator('.history-diff-list').first().innerText().catch(() => '');
+  check('日報の変更履歴: 本文が「E2E旧本文 → E2E新本文」で出る', /本文/.test(repDiff) && /E2E旧本文/.test(repDiff) && /E2E新本文/.test(repDiff), repDiff.replace(/\n/g, ' | '));
+  await api(`/api/reports/${repId}`, { method: 'DELETE' });
+
+  // SW: ホームを経由せず、深いページを最初に開いた端末でもオフライン用の登録が行われる
+  const ctxDeep = await browser.newContext();
+  const deep = await ctxDeep.newPage();
+  await deep.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
+  const registered = await deep.waitForFunction(async () => !!(await navigator.serviceWorker.getRegistration()), { timeout: 15000 }).then(() => true).catch(() => false);
+  check('SW登録: ホームを開かず部品在庫ページを直接開いても Service Worker が登録される', registered);
+  await ctxDeep.close();
+
+  // 不正な入力でも500にならない（監査ログの offset・存在しない日付・LIKE記号）
+  const au1 = await api('/api/admin/audit?offset=1.5&limit=2.5');
+  const au2 = await api('/api/admin/audit?offset=1e30');
+  const au3 = await api('/api/admin/audit?from=2026-13-45&to=2026-99-99');
+  check('監査ログ: offset が小数・桁あふれでも200（500にならない）', au1.status === 200 && au2.status === 200, `${au1.status}/${au2.status}`);
+  check('監査ログ: 期間に存在しない日付を指定しても200', au3.status === 200, `status=${au3.status}`);
+  const tr1 = await api('/api/troubles?from=2026-13-45');
+  const st1 = await api('/api/stats?from=2026-13-45&to=2026-13-46');
+  const in1 = await api('/api/inspections?from=2026-13-45');
+  check('一覧・集計: 存在しない日付で絞り込んでも200（トラブル・集計・点検）', tr1.status === 200 && st1.status === 200 && in1.status === 200, `${tr1.status}/${st1.status}/${in1.status}`);
+  const badPlan = await api('/api/plans', { method: 'POST', body: { title: 'x', plan_type: 'inspection', planned_date: '2026-02-31' } });
+  check('保全計画: 存在しない予定日は400', badPlan.status === 400, `status=${badPlan.status}`);
+  const eqPct = await api('/api/equipment?q=' + encodeURIComponent('%'));
+  const eqAll = await api('/api/equipment');
+  check('設備一覧の検索: 「%」は全件一致にならず、%を含む設備だけ', eqPct.status === 200 && (eqPct.json?.equipment?.length ?? 0) < (eqAll.json?.equipment?.length ?? 0), `${eqPct.json?.equipment?.length}/${eqAll.json?.equipment?.length}`);
+}
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

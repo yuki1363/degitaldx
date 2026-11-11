@@ -2014,9 +2014,10 @@ function jsArg(v) {
   return esc(JSON.stringify(v));
 }
 
-// Service Worker 登録（HTTPS環境のみ）
+// Service Worker 登録（HTTPS環境のみ）。アプリ全体で共通の /sw.js を登録する
+//   （以前の './sw.js' は /electrical/sw.js を指し、存在しないため登録に失敗していた）
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 </script>
 

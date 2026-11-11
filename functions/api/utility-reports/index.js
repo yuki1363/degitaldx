@@ -10,7 +10,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { attachFiles } from '../_lib/storage.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 import { ensureUtilitySchema } from './_schema.js';
 import { listItems, buildValues, toReport } from './_values.js';
@@ -58,7 +58,7 @@ export async function onRequestPost({ request, env, data }) {
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   const reportDate = String(body.report_date || '').trim();
-  if (!DATE_RE.test(reportDate)) return jsonError(400, 'report_date は YYYY-MM-DD 形式で指定してください。');
+  if (!DATE_RE.test(reportDate) || !isValidYmd(reportDate)) return jsonError(400, 'report_date は YYYY-MM-DD 形式（実在する日付）で指定してください。');
 
   // 同じ識別番号（client_request_id）が登録済みなら、二重に作らず最初の日報を返す。
   // 1日1件ガードより先に確かめる（再送のとき、最初の登録で「その日」が埋まっているため、先に

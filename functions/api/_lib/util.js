@@ -31,13 +31,37 @@ const toSecondIso = (d) => d.toISOString().replace(/\.\d{3}Z$/, 'Z'); // nowIso 
 /** JST の日付 'YYYY-MM-DD' → その日 0:00（JST）の UTC ISO。「>=」で比べる。日付以外の値はそのまま返す */
 export function jstDayStartUtc(date) {
   if (!DATE_ONLY_RE.test(date || '')) return date;
-  return toSecondIso(new Date(`${date}T00:00:00+09:00`));
+  const d = new Date(`${date}T00:00:00+09:00`);
+  if (Number.isNaN(d.getTime())) return date; // 2026-13-45 のような存在しない日付で例外（500）にしない
+  return toSecondIso(d);
 }
 
 /** JST の日付 'YYYY-MM-DD' → 翌日 0:00（JST）の UTC ISO。「<」で比べる（その日の終わりまでを含む） */
 export function jstNextDayStartUtc(date) {
   if (!DATE_ONLY_RE.test(date || '')) return date;
-  return toSecondIso(new Date(new Date(`${date}T00:00:00+09:00`).getTime() + 24 * 3600_000));
+  const t = new Date(`${date}T00:00:00+09:00`).getTime();
+  if (Number.isNaN(t)) return date; // 存在しない日付で例外（500）にしない
+  return toSecondIso(new Date(t + 24 * 3600_000));
+}
+
+/** 日付だけの値 'YYYY-MM-DD' が実在する日付か（2026-13-45・2026-02-31・文字列「abc」は false） */
+export function isValidYmd(value) {
+  if (typeof value !== 'string' || !DATE_ONLY_RE.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+// ---- LIKE 検索（部分一致）の安全な組み立て ----
+//   検索語に含まれる % _ \ は LIKE のワイルドカード・エスケープ文字なので、そのまま使うと
+//   「100%」で全件が一致する・「A_1」の _ が任意の1文字になる。退避してから使い、
+//   SQL 側は `LIKE ? ESCAPE '\'` と書く（LIKE_ESCAPE）。
+export const LIKE_ESCAPE = " ESCAPE '\\'";
+export function escapeLike(value) {
+  return String(value ?? '').replace(/[\\%_]/g, '\\$&');
+}
+/** 部分一致用のパターン（%…%）。値のワイルドカードは退避済み */
+export function likeContains(value) {
+  return `%${escapeLike(value)}%`;
 }
 
 /** UTC の ISO 日時 → JST の日付 'YYYY-MM-DD'（日付だけの値・解釈できない値はそのまま） */

@@ -1,6 +1,6 @@
 import { requireRole } from '../../_lib/auth.js';
 import { json } from '../../_lib/http.js';
-import { jstDayStartUtc, jstNextDayStartUtc } from '../../_lib/util.js';
+import { jstDayStartUtc, jstNextDayStartUtc, likeContains, LIKE_ESCAPE } from '../../_lib/util.js';
 
 export async function onRequestGet({ request, env, data }) {
   const denied = requireRole(data.user, 'admin');
@@ -14,14 +14,15 @@ export async function onRequestGet({ request, env, data }) {
   const from     = sp.get('from');
   const to       = sp.get('to');
   const limit    = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 100), 500);
-  const offset   = Number(sp.get('offset')) || 0;
+  // 小数や桁あふれの値を OFFSET に渡すと D1 が「datatype mismatch」で失敗する（500になる）ため、整数に丸める
+  const offset   = Math.min(Math.max(0, Math.trunc(Number(sp.get('offset'))) || 0), 1_000_000_000);
 
   let sql = `SELECT * FROM audit_log WHERE 1=1`;
   const binds = [];
 
   if (table)  { sql += ` AND table_name = ?`;  binds.push(table); }
   if (action) { sql += ` AND action = ?`;       binds.push(action); }
-  if (user)   { sql += ` AND changed_by LIKE ?`; binds.push(`%${user}%`); }
+  if (user)   { sql += ` AND changed_by LIKE ?${LIKE_ESCAPE}`; binds.push(likeContains(user)); }
   if (from)   { sql += ` AND changed_at >= ?`;  binds.push(jstDayStartUtc(from)); } // JST の日付境界
   if (to)     { sql += ` AND changed_at < ?`;   binds.push(jstNextDayStartUtc(to)); }
 
@@ -34,7 +35,7 @@ export async function onRequestGet({ request, env, data }) {
   const countBinds = [];
   if (table)  { countSql += ` AND table_name = ?`; countBinds.push(table); }
   if (action) { countSql += ` AND action = ?`;      countBinds.push(action); }
-  if (user)   { countSql += ` AND changed_by LIKE ?`; countBinds.push(`%${user}%`); }
+  if (user)   { countSql += ` AND changed_by LIKE ?${LIKE_ESCAPE}`; countBinds.push(likeContains(user)); }
   if (from)   { countSql += ` AND changed_at >= ?`; countBinds.push(jstDayStartUtc(from)); }
   if (to)     { countSql += ` AND changed_at < ?`;  countBinds.push(jstNextDayStartUtc(to)); }
   const total = await db.prepare(countSql).bind(...countBinds).first();

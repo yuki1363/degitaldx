@@ -1,7 +1,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog, auditStatement } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { linkRowToEquipment } from '../_lib/equipment-link.js';
 
 const PLAN_TYPES = ['inspection', 'parts', 'construction', 'other'];
@@ -393,6 +393,8 @@ export async function onRequestPost({ request, env, data }) {
 
   if (!title || !title.trim()) return jsonError(400, 'title は必須です');
   if (!planned_date) return jsonError(400, 'planned_date は必須です');
+  if (!isValidYmd(planned_date)) return jsonError(400, 'planned_date は YYYY-MM-DD の実在する日付で指定してください');
+  if (planned_end_date && !isValidYmd(planned_end_date)) return jsonError(400, 'planned_end_date は YYYY-MM-DD の実在する日付で指定してください');
   if (!PLAN_TYPES.includes(plan_type)) return jsonError(400, `plan_type は ${PLAN_TYPES.join('/')} のいずれかです`);
   if (planned_end_date && planned_end_date < planned_date) {
     return jsonError(400, '終了日は開始日以降にしてください');

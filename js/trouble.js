@@ -7,7 +7,8 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
@@ -362,17 +363,7 @@ async function renderDetail(id) {
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : el('div', { class: 'row-list' },
-            history.map((h) =>
-              el('div', { class: 'history-row' }, [
-                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, maskEmail(h.changed_by)),
-                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-              ])
-            )
-          ),
+      buildHistoryList(history),
     ]),
   ]);
 }

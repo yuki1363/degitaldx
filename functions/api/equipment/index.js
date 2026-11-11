@@ -5,7 +5,7 @@
 import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, likeContains, LIKE_ESCAPE } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
 import { autoLinkAfterLedgerChange } from '../_lib/equipment-link.js';
 
@@ -99,14 +99,26 @@ export async function computeNextEquipmentCode(db, lineName) {
   return `${String(nn).padStart(2, '0')}-${String(mm).padStart(2, '0')}`;
 }
 
+/**
+ * 設備番号が重複したときの案内文。設備番号は削除済みの設備とも重複できない（UNIQUE）ため、
+ * 「既に使われています」だけでは、画面の一覧に無い（削除済みの）設備が原因のとき原因が分からない。
+ */
+export function duplicateCodeMessage(code, existing) {
+  const label = existing?.name ? `「${existing.name}」` : '';
+  if (existing?.deleted_at) {
+    return `設備番号「${code}」は、削除済みの設備${label}で使われています（設備番号は削除済みの設備とも重複できません）。管理画面の「削除済み」から元に戻すか、別の設備番号にしてください。`;
+  }
+  return `設備番号「${code}」は既に使われています${label ? `（設備${label}）` : ''}。`;
+}
+
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const q = (url.searchParams.get('q') || '').trim();
 
   const cond = q
-    ? `e.deleted_at IS NULL AND (e.code LIKE ?1 OR e.name LIKE ?1 OR e.location LIKE ?1)`
+    ? `e.deleted_at IS NULL AND (e.code LIKE ?1${LIKE_ESCAPE} OR e.name LIKE ?1${LIKE_ESCAPE} OR e.location LIKE ?1${LIKE_ESCAPE})`
     : `e.deleted_at IS NULL`;
-  const binds = q ? [`%${q}%`] : [];
+  const binds = q ? [likeContains(q)] : [];
 
   // 件数の上限（既定300・最大2000）。1件多く読んで、上限を超えるときは truncated:true を返す
   // （ラベル印刷・設備選択で黙って欠けないよう、画面側が検知できるようにする）
@@ -163,10 +175,10 @@ export async function onRequestPost({ request, env, data }) {
   }
 
   // 設備番号の重複チェック（論理削除済みも含めて一意 = UNIQUE 制約と整合）
-  const dup = await env.DB.prepare('SELECT id FROM equipment_ledger WHERE code = ?1')
+  const dup = await env.DB.prepare('SELECT id, name, deleted_at FROM equipment_ledger WHERE code = ?1')
     .bind(v.code)
     .first();
-  if (dup) return jsonError(409, `設備番号「${v.code}」は既に使われています。`);
+  if (dup) return jsonError(409, duplicateCodeMessage(v.code, dup));
 
   const result = await env.DB.prepare(
     `INSERT INTO equipment_ledger

@@ -10,7 +10,8 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { buildItemInput, normalizeNumberText } from '/js/inspection-items.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
@@ -454,11 +455,7 @@ async function renderDetail(id) {
     ]) : null,
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, '変更履歴'),
-      history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : history.map((h) => el('div', { class: 'history-row' }, [
-            `${formatDateTime(h.changed_at)}　${ACTION_LABELS[h.action] || h.action}　${maskEmail(h.changed_by)}`,
-          ])),
+      buildHistoryList(history),
     ]),
   ]);
 }
