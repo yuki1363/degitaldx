@@ -24,15 +24,12 @@ export const CONSTRUCTION_NOTICE_FIELDS = [
 // トラブル報告書（設備関係修理報告書）の「画面で入力する項目」の標準セット。
 //   ・管理画面の帳票テンプレート（print-templates.js）の標準項目
 //   ・トラブル記録の編集ページ（trouble.js）の帳票入力欄
-// の両方で共有する。設備名・発生年月日・現象・原因・対策はトラブル記録から自動で入る。
+// の両方で共有する。設備名・発生年月日・現象・原因・対策・記録者（調査対象・トラブル名・処置・担当者印のタグも）は
+// トラブル記録の入力から自動で入るため、ここには入力項目として出さない。
 export const TROUBLE_REPORT_FIELDS = [
   { tag: '整理NO', label: '整理NO.', type: 'text' },
-  { tag: '調査対象', label: '調査対象', type: 'text' },
-  { tag: 'トラブル名', label: 'トラブル名', type: 'text' },
   { tag: '休止時間', label: '休止時間（分）', type: 'text' },
   { tag: '休止種別', label: '休止区分（1つ選び○）', type: 'choice', options: ['故障休止', '点検休止', '調整休止'] },
-  { tag: '処置', label: '処置', type: 'textarea' },
   { tag: '有効性の確認', label: '有効性の確認', type: 'textarea' },
   { tag: '特記事項', label: '特記事項', type: 'textarea' },
-  { tag: '担当者印', label: '担当者（ハンコ・苗字）', type: 'hanko' },
 ];

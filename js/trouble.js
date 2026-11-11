@@ -12,7 +12,7 @@ import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { TROUBLE_REPORT_FIELDS } from '/js/permit-fields.js';
-import { AUTOFILL_HINTS } from '/js/report-autofill.js';
+import { AUTOFILL_HINTS, RECORD_TAGS } from '/js/report-autofill.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
@@ -424,8 +424,11 @@ function buildReportFields(templates) {
       }
     }
   }
-  if (fields.length === 0) return TROUBLE_REPORT_FIELDS.map((f) => ({ ...f }));
-  return fields;
+  // 記録から入るタグ（調査対象・トラブル名・処置・担当者印・原因など）は、テンプレートが入力項目として
+  // 定義していても出さない（トラブルの入力をそのまま反映するため、同じことを二度入力させない）
+  const own = (list) => list.filter((f) => !RECORD_TAGS.trouble_report.includes(f.tag));
+  if (fields.length === 0) return own(TROUBLE_REPORT_FIELDS.map((f) => ({ ...f })));
+  return own(fields);
 }
 
 // form_values_json を安全にパース
@@ -495,25 +498,25 @@ async function renderForm(existing, prefill = null, usedParts = []) {
   const eqHint = el('div', {});
   const updateEqHint = () => {
     const t = f.equipment_id.unmatchedText;
-    if (!t) { render(eqHint, []); return; }
-    const refreshBtn = el('button', { type: 'button', class: 'btn btn-sm', onclick: async () => {
-      refreshBtn.disabled = true;
-      try {
-        const fresh = await api.get('/api/equipment?limit=2000');
-        f.equipment_id.setEquipment(fresh.equipment);
-      } catch (err) { alert(err.message || String(err)); }
-      refreshBtn.disabled = false;
-      updateEqHint();
-    } }, '🔄 追加したので一覧を更新');
-    render(eqHint, el('div', { class: 'notice is-warning', id: 'equip-missing-hint' }, [
-      el('div', {}, `「${t}」は設備一覧にありません。設備台帳に追加してから選んでください。`),
-      el('div', { class: 'action-row', style: 'margin-top:6px' }, [
-        el('a', { class: 'btn btn-sm btn-primary', href: '/pages/ledger?new=1', target: '_blank', rel: 'noopener' }, '＋ 設備台帳で追加'),
-        refreshBtn,
-      ]),
-    ]));
+    render(eqHint, t
+      ? el('div', { class: 'notice is-warning', id: 'equip-missing-hint' },
+          `「${t}」は設備一覧にありません。下の「＋ 設備台帳で追加」から追加してください。`)
+      : []);
   };
+  // 設備台帳で追加したあと、設備の選択肢を取り直す
+  const refreshEquipBtn = el('button', { type: 'button', class: 'btn btn-sm', id: 'equip-refresh', onclick: async () => {
+    refreshEquipBtn.disabled = true;
+    try {
+      const fresh = await api.get('/api/equipment?limit=2000');
+      f.equipment_id.setEquipment(fresh.equipment);
+    } catch (err) { alert(err.message || String(err)); }
+    refreshEquipBtn.disabled = false;
+    updateEqHint();
+  } }, '🔄 一覧を更新');
   f.equipment_id.addEventListener('change', updateEqHint);
+  // 打っている途中でも案内を出す（スマホは入力欄から離れるまで change が来ないため）
+  let eqTimer = null;
+  f.equipment_id.querySelector('input')?.addEventListener('input', () => { clearTimeout(eqTimer); eqTimer = setTimeout(updateEqHint, 300); });
 
   // ---- 類似トラブル事例（あいまい検索・常時表示・AIは使わない） ----
   //   現象欄の入力に追従して過去の似た記録を表示する（300msデバウンス）。
@@ -615,7 +618,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     if (reportFields.length === 0) { render(reportBox, []); return; }
     render(reportBox, el('div', { class: 'card', style: 'background:#f8fafc;margin:0' }, [
       el('h4', { style: 'margin:0 0 4px;font-size:14px;color:#374151' }, 'トラブル報告書（帳票）の入力'),
-      el('p', { class: 'hint', style: 'margin:0 0 8px' }, 'ここで入力した内容が「帳票出力」でExcelに差し込まれます（出力時に入力し直す必要はありません）。'),
+      el('p', { class: 'hint', style: 'margin:0 0 8px' }, '設備・現象・原因・対策・記録者は、上の入力がそのまま帳票に入ります（ここには出しません）。ここで入力した内容も「帳票出力」でExcelに差し込まれます。'),
       ...reportFields.map(reportInput),
     ]));
   };
@@ -784,6 +787,12 @@ async function renderForm(existing, prefill = null, usedParts = []) {
             onclick: () => openQrScanner((eqId) => { f.equipment_id.value = String(eqId); }),
           }, '📷 QR'),
         ]),
+      ]),
+      // 設備が一覧に無いときの入口は、入力しなくても常に出しておく（台帳は別タブで開く）
+      el('div', { class: 'action-row', style: 'margin:-4px 0 8px;align-items:center' }, [
+        el('span', { class: 'hint' }, '設備が一覧にないときは'),
+        el('a', { class: 'btn btn-sm btn-primary', href: '/pages/ledger?new=1', target: '_blank', rel: 'noopener', id: 'equip-ledger-link' }, '＋ 設備台帳で追加'),
+        refreshEquipBtn,
       ]),
       eqHint,
       field('現象（必須）', f.phenomenon),

@@ -30,6 +30,9 @@ let typeFilter = '';                       // '' = 全種別
 let nameFilter = '';                        // 名称あいまい検索
 let statusFilter = '';                      // 状態絞り込み: '' = 全部 | 'pending' = 未実施 | 'done' = 完了
 let sortKey = 'equipment';                  // 並び順: 'equipment'（設備順・既定）| 'inspector'（点検者順）
+// 月別表示でレ点を付けた予定のID（まとめて完了・未実施に戻す用。月・表示を切り替えると解除する）
+const selectedIds = new Set();
+let updateSelectionBar = () => {};
 let viewMode = 'month';                     // 'month'（月別・既定）| 'all'（全月）
 let viewMonth = Number(jstTodayStr().slice(5, 7)); // 月別表示で見ている月
 let plansCache = [];                        // 表示用の予定（今年度以外は完了状態を外したもの）
@@ -358,6 +361,32 @@ function planRow(p, monthLabel) {
     : el('a', { class: 'mplan-row', href: `/pages/plan?id=${p.id}` }, inner);
 }
 
+// 1予定を1行で表示し、編集できる人には左に「レ点」のチェック欄を付ける（まとめて完了にするため）。
+// 繰り返し予定は1件ずつ操作する仕組みのためチェック欄なし
+function planLine(p, monthLabel) {
+  const row = planRow(p, monthLabel);
+  if (!canEditView() || p.recurrence_rule) return row;
+  const cb = el('input', {
+    type: 'checkbox', checked: selectedIds.has(p.id), 'aria-label': `${p.title} にレ点を付ける`,
+    onchange: (e) => { if (e.target.checked) selectedIds.add(p.id); else selectedIds.delete(p.id); updateSelectionBar(); },
+  });
+  return el('div', { class: 'mplan-line' }, [el('label', { class: 'mplan-check', title: 'レ点で選ぶ' }, [cb]), row]);
+}
+
+// レ点を付けた予定をまとめて完了／未実施に戻す
+async function applyBulkStatus(ids, status) {
+  const word = status === 'done' ? '完了' : '未実施に戻'; 
+  if (!confirm(`レ点を付けた ${ids.length} 件を${word}${status === 'done' ? 'にします' : 'します'}。よろしいですか？`)) return;
+  try {
+    const r = await api.post('/api/plans/bulk-status', { ids, status });
+    selectedIds.clear();
+    await renderYear();
+    if (r.skipped > 0) alert(`${r.updated}件を変更しました（${r.skipped}件はすでにその状態のため変更なし）。`);
+  } catch (err) {
+    alert(err.message || String(err));
+  }
+}
+
 function buildMonthView() {
   // 種別・名称で絞った当月分（状態の集計はこの全体に対して出す）
   const inMonthAll = plansCache.filter((p) =>
@@ -373,7 +402,34 @@ function buildMonthView() {
   const statusNote = statusFilter ? `（${statusFilter === 'done' ? '完了' : '未実施'}のみ）` : '';
   const list = inMonth.length === 0
     ? el('p', { class: 'empty' }, `${viewMonth}月の予定はありません${statusNote}。`)
-    : el('div', { class: 'mplan-list' }, inMonth.map((p) => planRow(p, `${viewMonth}月`)));
+    : el('div', { class: 'mplan-list' }, inMonth.map((p) => planLine(p, `${viewMonth}月`)));
+
+  // レ点の選択バー（表示中の、チェック欄のある予定が対象）
+  const selectable = [...inMonth, ...undecided].filter((p) => !p.recurrence_rule);
+  const selectableIds = new Set(selectable.map((p) => p.id));
+  for (const id of [...selectedIds]) if (!selectableIds.has(id)) selectedIds.delete(id); // 表示から外れたものは解除
+  const countText = el('span', { class: 'hint' }, '');
+  const doneBtn = el('button', { class: 'btn btn-sm btn-primary', type: 'button', id: 'bulk-done',
+    onclick: () => applyBulkStatus([...selectedIds], 'done') }, '✓ まとめて完了');
+  const undoBtn = el('button', { class: 'btn btn-sm', type: 'button', id: 'bulk-undo',
+    onclick: () => applyBulkStatus([...selectedIds], 'pending') }, '↩ 未実施に戻す');
+  updateSelectionBar = () => {
+    const n = selectedIds.size;
+    countText.textContent = n > 0 ? `レ点: ${n}件` : 'レ点を付けた予定をまとめて操作できます';
+    doneBtn.disabled = n === 0;
+    undoBtn.disabled = n === 0;
+  };
+  const selBar = (canEditView() && selectable.length > 0)
+    ? el('div', { class: 'mplan-selbar no-print' }, [
+        el('button', { class: 'btn btn-sm', type: 'button', id: 'bulk-select-pending', onclick: () => {
+          for (const p of selectable) if (p.status !== 'done') selectedIds.add(p.id);
+          renderResults();
+        } }, '☑ 未実施をすべて選ぶ'),
+        el('button', { class: 'btn btn-sm', type: 'button', onclick: () => { selectedIds.clear(); renderResults(); } }, '選択を解除'),
+        doneBtn, undoBtn, countText,
+      ])
+    : null;
+  updateSelectionBar();
 
   return el('div', {}, [
     monthNav(),
@@ -381,18 +437,19 @@ function buildMonthView() {
       ? el('p', { class: 'hint no-print' },
           `${viewMonth}月: ${inMonthAll.length}件（完了 ${doneCount} / 未完了 ${inMonthAll.length - doneCount}）${statusFilter ? ` ・表示中 ${inMonth.length}件${statusNote}` : ''}`)
       : null,
+    selBar,
     list,
     undecided.length > 0
       ? el('div', { class: 'mplan-unsched no-print' }, [
           el('h4', { class: 'mplan-unsched-title' }, `未定（実施月が未設定）${undecided.length}件`),
-          el('div', { class: 'mplan-list' }, undecided.map((p) => planRow(p, '未定'))),
+          el('div', { class: 'mplan-list' }, undecided.map((p) => planLine(p, '未定'))),
         ])
       : null,
   ]);
 }
 
 function monthNav() {
-  const stepTo = (m) => { viewMonth = m; renderView(); };
+  const stepTo = (m) => { selectedIds.clear(); viewMonth = m; renderView(); };
   // 会計年度の並び（10月〜翌9月）で前後へ。年度の端では止める（9月の次は来年度の10月＝別の表示年度）
   const idx = MONTHS.indexOf(viewMonth);
   return el('div', { class: 'cal-nav no-print', style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' }, [
@@ -554,8 +611,8 @@ function toolbar() {
     oninput: (e) => { nameFilter = e.target.value; renderResults(); },
   });
   const viewToggle = el('div', { class: 'annual-view-toggle' }, [
-    el('button', { class: `btn btn-sm${viewMode === 'month' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'month'; renderView(); } }, '月別'),
-    el('button', { class: `btn btn-sm${viewMode === 'all' ? ' btn-primary' : ''}`, onclick: () => { viewMode = 'all'; renderView(); } }, '全月'),
+    el('button', { class: `btn btn-sm${viewMode === 'month' ? ' btn-primary' : ''}`, onclick: () => { selectedIds.clear(); viewMode = 'month'; renderView(); } }, '月別'),
+    el('button', { class: `btn btn-sm${viewMode === 'all' ? ' btn-primary' : ''}`, onclick: () => { selectedIds.clear(); viewMode = 'all'; renderView(); } }, '全月'),
   ]);
   // 並び順（設備順 / 点検者順）。結果領域だけ再描画して切り替える
   const sortSel = el('select', {

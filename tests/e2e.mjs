@@ -287,11 +287,16 @@ section('2.55 トラブル入力: 設備の案内・使用部品');
   await page.evaluate(() => localStorage.removeItem('draft:trouble-new'));
   // 設備欄に一覧に無い名前 → 設備台帳へ追加するよう案内し、そのままでは保存させない
   const eqInput = page.locator('input.equip-picker').first();
+  // 設備台帳への入口は、何も入力しなくても常に出ている（別タブで開く）
+  const ledgerHref = await page.locator('#equip-ledger-link').getAttribute('href').catch(() => '');
+  const ledgerTarget = await page.locator('#equip-ledger-link').getAttribute('target').catch(() => '');
+  check('トラブル入力: 設備欄の下に「＋ 設備台帳で追加」が常に出る（別タブで台帳の新規登録へ）', ledgerHref === '/pages/ledger?new=1' && ledgerTarget === '_blank', `${ledgerHref} ${ledgerTarget}`);
+  // 打っている途中（入力欄から離れる前）でも、一覧に無い名前なら案内を出す
   await eqInput.fill('E2E存在しない設備XYZ');
-  await eqInput.blur();
+  await page.waitForSelector('#equip-missing-hint', { timeout: 3000 }).catch(() => {});
   const hintText = await page.locator('#equip-missing-hint').innerText().catch(() => '');
-  const ledgerHref = await page.locator('#equip-missing-hint a').getAttribute('href').catch(() => '');
-  check('トラブル入力: 設備が一覧に無いと、設備台帳から追加するよう案内する', hintText.includes('設備一覧にありません') && hintText.includes('設備台帳') && ledgerHref === '/pages/ledger?new=1', hintText.slice(0, 100));
+  check('トラブル入力: 設備が一覧に無いと、設備台帳から追加するよう案内する（入力した直後に出る）', hintText.includes('設備一覧にありません') && hintText.includes('設備台帳'), hintText.slice(0, 100));
+  await eqInput.blur();
   await page.fill('textarea[placeholder*="異音"]', 'E2E使用部品トラブル');
   const dlg0 = dialogs.length; // alert/confirm は page.on('dialog') が記録して承諾する
   await page.click('button:text-is("保存")');
@@ -301,7 +306,8 @@ section('2.55 トラブル入力: 設備の案内・使用部品');
   // 設備欄を空にして、使用部品（部品在庫から選択）を追加 → 保存で在庫が減る
   await eqInput.fill('');
   await eqInput.blur();
-  check('トラブル入力: 設備欄を空にすると案内が消える', await page.locator('#equip-missing-hint').count() === 0);
+  await page.waitForTimeout(500);
+  check('トラブル入力: 設備欄を空にすると案内が消える（台帳への入口は残る）', await page.locator('#equip-missing-hint').count() === 0 && await page.locator('#equip-ledger-link').count() === 1);
   await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫10）');
   await page.fill('input[aria-label="数量"]', '3');
   await page.click('button:text-is("＋ 追加")');
@@ -965,6 +971,34 @@ check('年度リセット: 監査ログに戻した予定と変更前の状態�
 const annAfter = ((await api('/api/plans?annual_only=1')).json?.plans || []);
 check('年度リセット: リセット直後に過去年の今月分が期限超過にならない',
   annAfter.find((p) => p.id === annCur.json?.id)?.status === 'pending');
+}
+// 月別表示: レ点（チェック欄）で複数の予定を選び、まとめて完了／未実施に戻せる
+{
+  const bk = [];
+  for (const t of ['E2Eレ点A', 'E2Eレ点B', 'E2Eレ点C']) {
+    bk.push((await api('/api/plans', { method: 'POST', body: { title: t, plan_type: 'inspection', planned_date: `${nowY - 2}-${mm2(nowM)}-01`, annual_only: 1 } })).json?.id);
+  }
+  await page.goto(`${BASE}/pages/plan-annual`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.mplan-line', { timeout: 8000 });
+  const lineOf = (t) => page.locator('.mplan-line', { hasText: t });
+  check('年間計画（月別）: 各予定の左にレ点のチェック欄がある', await lineOf('E2Eレ点A').locator('input[type="checkbox"]').count() === 1);
+  check('年間計画（月別）: レ点が無いうちは「まとめて完了」は押せない', await page.locator('#bulk-done').isDisabled());
+  await lineOf('E2Eレ点A').locator('input[type="checkbox"]').check();
+  await lineOf('E2Eレ点B').locator('input[type="checkbox"]').check();
+  check('年間計画（月別）: レ点を付けると件数が出て「まとめて完了」が押せる', (await page.locator('.mplan-selbar').innerText()).includes('レ点: 2件') && !(await page.locator('#bulk-done').isDisabled()));
+  await page.click('#bulk-done'); // confirm() は page.on('dialog') が承諾する
+  await page.waitForFunction(() => !document.querySelector('#bulk-done') || document.querySelector('#bulk-done').disabled, { timeout: 8000 });
+  await page.waitForTimeout(600);
+  const stOf = async (id) => (await api(`/api/plans/${id}`)).json?.plan?.status;
+  const sts = [await stOf(bk[0]), await stOf(bk[1]), await stOf(bk[2])];
+  check('年間計画（月別）: レ点を付けた2件だけがまとめて完了になる（付けなかった1件は未実施のまま）', sts[0] === 'done' && sts[1] === 'done' && sts[2] === 'pending', JSON.stringify(sts));
+  const bulkAudit = ((await api('/api/admin/audit?table=maintenance_plan&limit=30')).json?.logs || []).filter((l) => (l.diff_json || '').includes('"bulk":true'));
+  check('年間計画（月別）: まとめて完了は監査ログに残る', bulkAudit.length >= 2, `n=${bulkAudit.length}`);
+  await page.click('#bulk-select-pending');
+  const cOn = await lineOf('E2Eレ点C').locator('input[type="checkbox"]').isChecked();
+  const abOn = (await lineOf('E2Eレ点A').locator('input[type="checkbox"]').isChecked()) || (await lineOf('E2Eレ点B').locator('input[type="checkbox"]').isChecked());
+  check('年間計画（月別）: 「未実施をすべて選ぶ」で、未実施（C）にレ点が付き、完了済み（A・B）には付かない', cOn && !abOn, `C=${cOn} AorB=${abOn}`);
+  for (const id of bk.filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 }
 for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 
@@ -2514,14 +2548,22 @@ const exportFilled = async (type, record, savedInputs) => {
 const trbXml = await exportFilled('trouble_report',
   { id: 9001, occurred_at: '2026-10-03T01:00:00Z', equipment_name: 'E2Eコンプレッサ', phenomenon: 'E2E異音', countermeasure: 'E2Eベルト交換' },
   { '休止時間': '30', '処置': '' });
-check('トラブル報告書: 空の入力欄は設備・現象・対策で補われ、入力した値（休止時間）はそのまま',
+check('トラブル報告書: 調査対象・トラブル名・処置は記録（設備・現象・対策）がそのまま入り、入力した値（休止時間）はそのまま',
   !!trbXml && trbXml.includes('調査対象=[E2Eコンプレッサ]') && trbXml.includes('トラブル名=[E2E異音]') && trbXml.includes('処置=[E2Eベルト交換]') && trbXml.includes('休止時間=[30]'),
   (trbXml || 'no download').slice(0, 300));
+{
+  // トラブルの入力画面: 帳票の入力欄に、記録と重複する項目（調査対象・トラブル名・処置・担当者印）は出さない
+  await page.goto(`${BASE}/pages/trouble?new=1`, { waitUntil: 'networkidle' });
+  const rptLabels = await page.evaluate(() => [...document.querySelectorAll('.card .field label')].map((l) => l.textContent.trim()));
+  const rptCard = await page.evaluate(() => document.body.innerText.includes('トラブル報告書（帳票）の入力'));
+  check('トラブル入力: 帳票の入力欄に、記録と重複する項目（調査対象・トラブル名・処置・担当者印）は出さない',
+    rptCard && !['調査対象', 'トラブル名', '処置'].some((t) => rptLabels.includes(t)) && !rptLabels.some((t) => t.includes('担当者（ハンコ')) && rptLabels.includes('休止時間（分）'), JSON.stringify(rptLabels));
+}
 check('トラブル報告書: 整理NO（該当する入力が無い）は補わず空欄のまま', !!trbXml && trbXml.includes('整理NO=[]'));
 const trbXml2 = await exportFilled('trouble_report',
   { id: 9002, occurred_at: '2026-10-03T01:00:00Z', equipment_name: 'E2E設備', phenomenon: 'E2E現象', countermeasure: 'E2E対策' },
   { '調査対象': '手入力の対象' });
-check('トラブル報告書: 入力欄に値があれば設備名より優先', !!trbXml2 && trbXml2.includes('調査対象=[手入力の対象]'));
+check('トラブル報告書: 記録の内容が優先される（以前の帳票入力があっても設備名が入る）', !!trbXml2 && trbXml2.includes('調査対象=[E2E設備]') && !trbXml2.includes('手入力の対象'));
 const cnXml = await exportFilled('construction_notice',
   { id: 9003, title: 'E2E配管工事', planned_date: '2026-11-05', note: 'E2E備考の内容' }, null);
 check('工事連絡書: 工事概要は備考で補われ、会社名（該当する入力が無い）は空欄のまま',
