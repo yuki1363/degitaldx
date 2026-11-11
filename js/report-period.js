@@ -1,4 +1,4 @@
-// 08 保全レポート: 期間の計算（今週・先週・今月・先月）。他の import を持たない（Node の単体テスト用）。
+// 08 ダッシュボード・保全レポート: 期間の計算（今週・先週・今月・先月・直近6ヶ月）。他の import を持たない（Node の単体テスト用）。
 //   日付は JST の 'YYYY-MM-DD' 文字列で扱い、UTC の日付計算だけで求める（端末のタイムゾーンに依存しない）。
 //   週は月曜始まり〜日曜終わり。
 
@@ -20,7 +20,8 @@ export function shiftDate(s, days) {
 
 /**
  * 期間の種類 → { from, to }（どちらも含む）。today は JST の 'YYYY-MM-DD'。不正なら null。
- * @param {'week'|'lastweek'|'month'|'lastmonth'} kind
+ * 直近6ヶ月 = 5ヶ月前の1日〜今月末（月別推移のグラフ用）
+ * @param {'week'|'lastweek'|'month'|'lastmonth'|'last6months'} kind
  */
 export function periodFor(kind, today) {
   const t = parse(today);
@@ -34,6 +35,11 @@ export function periodFor(kind, today) {
     const offset = kind === 'lastmonth' ? -1 : 0;
     const first = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + offset, 1));
     const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0));
+    return { from: fmt(first), to: fmt(last) };
+  }
+  if (kind === 'last6months') {
+    const first = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 5, 1));
+    const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0));
     return { from: fmt(first), to: fmt(last) };
   }
   return null;

@@ -947,6 +947,21 @@ for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api
   for (const id of ids.filter(Boolean)) await api(`/api/equipment/${id}`, { method: 'DELETE' });
 }
 
+// 期間の初期値は今月。「直近6ヶ月」ボタンで5ヶ月前の1日〜今月末にできる
+await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
+const dashDef = await page.evaluate(() => ({
+  active: document.querySelector('.chip.is-active')?.dataset.kind,
+  from: document.querySelector('.period-bar input[type="date"]').value,
+  to: document.querySelectorAll('.period-bar input[type="date"]')[1].value,
+}));
+const dashNow = new Date(Date.now() + 9 * 3600 * 1000);
+const dashYm = `${dashNow.getUTCFullYear()}-${String(dashNow.getUTCMonth() + 1).padStart(2, '0')}`;
+check('ダッシュボード: 期間の初期値は今月（1日〜月末）', dashDef.active === 'month' && dashDef.from === `${dashYm}-01` && dashDef.to.startsWith(dashYm), JSON.stringify(dashDef));
+await page.click('.chip[data-kind="last6months"]');
+await page.waitForTimeout(800);
+const dash6 = await page.evaluate(() => ({ active: document.querySelector('.chip.is-active')?.dataset.kind, from: document.querySelector('.period-bar input[type="date"]').value }));
+check('ダッシュボード: 直近6ヶ月ボタンで期間が5ヶ月前の1日からになる', dash6.active === 'last6months' && dash6.from < `${dashYm}-01` && /-01$/.test(dash6.from), JSON.stringify(dash6));
+
 // サマリーはトラブルのカードと2つのグラフだけ。依頼・点検達成率・日報・業務依頼内訳はレポートタブにある
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
 await page.waitForSelector('#chart-trend, #tab-content .empty', { timeout: 8000 });

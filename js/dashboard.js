@@ -275,19 +275,16 @@ async function renderCustom(fromStr, toStr) {
 // ---------------- タブ付きレイアウト ----------------
 
 async function renderDashboard() {
-  // 期間デフォルト（直近6ヶ月）。端末の時刻設定に依らず JST の今日を基準にする
-  // （期間は JST の日付として API が日付境界を変換するため、端末が UTC だと今日の記録が外れる）
-  const defaultTo = jstTodayStr();
-  const [ty, tm] = defaultTo.split('-').map(Number);
-  const fromIdx = ty * 12 + (tm - 1) - 5; // 5ヶ月前の1日
-  const defaultFrom = `${Math.floor(fromIdx / 12)}-${String((fromIdx % 12) + 1).padStart(2, '0')}-01`;
+  // 期間の初期値は「今月」（1日〜月末）。長い期間（月別推移など）は「直近6ヶ月」ボタンか FROM〜TO で選ぶ。
+  // 期間は JST の日付で扱う（端末の時刻設定に依らず JST の今日を基準にする）
+  const { from: defaultFrom, to: defaultTo } = periodFor('month', jstTodayStr());
 
   const fromInput = el('input', { type: 'date', value: defaultFrom });
   const toInput   = el('input', { type: 'date', value: defaultTo });
   const applyBtn  = el('button', { class: 'btn btn-sm', onclick: () => loadTab() }, '集計');
 
   // 期間のプリセット（今週・先週・今月・先月）。全タブ共通の FROM〜TO を書き換えて取り直す
-  const KINDS = [['week', '今週'], ['lastweek', '先週'], ['month', '今月'], ['lastmonth', '先月']];
+  const KINDS = [['week', '今週'], ['lastweek', '先週'], ['month', '今月'], ['lastmonth', '先月'], ['last6months', '直近6ヶ月']];
   const chips = el('div', { class: 'chip-row' }, KINDS.map(([kind, label]) =>
     el('button', { class: 'chip', type: 'button', 'data-kind': kind, onclick: () => { setPreset(kind); loadTab(); } }, label)));
   const setPreset = (kind) => {
@@ -323,10 +320,9 @@ async function renderDashboard() {
   const csvUtf8Btn = el('button', { class: 'btn btn-sm', onclick: () => exportTroubles('utf8', csvUtf8Btn) }, '📥 CSV（UTF-8/BOM）');
   const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportTroubles('sjis', csvSjisBtn) }, '📥 CSV（Shift_JIS）');
 
-  // ?tab=report（旧「保全レポート」ページからの移動・ブックマーク）はレポートタブを今月で開く
+  // ?tab=report（旧「保全レポート」ページからの移動・ブックマーク）はレポートタブで開く
   const startTab = new URLSearchParams(window.location.search).get('tab');
   let activeTab = startTab === 'report' ? 'report' : 'summary';
-  if (activeTab === 'report') setPreset('month');
   const tabContent = el('div', { id: 'tab-content' }, []);
 
   const tabs = [
