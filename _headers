@@ -3,11 +3,18 @@
 #
 # CSP: 外部サイトからのスクリプト・画像・通信を禁止し、万一XSSがあっても外部へ送信させない。
 #   すべてのライブラリは js/vendor/ に同梱しているので 'self' だけで動く。
-#   各ページのインラインの <script type="module"> と電気設備点検（/electrical/）の onclick のため
-#   script-src に 'unsafe-inline' が必要。外部CDN等を使う場合はここへ追記すること。
+#   script-src に 'unsafe-inline' を入れない（インラインの <script> は無く、全ページ外部ファイル
+#   を <script src> で読み込む方式のため）。外部CDN等を使う場合はここへ追記すること。
+#   ※ 電気設備点検（/electrical/*）だけは別の CSP が必要だが、Cloudflare Pages の _headers は
+#     同じヘッダー名に複数のルールが一致すると「上書き」ではなく値をカンマで連結してしまうため
+#     （より具体的なパスが優先、ではない）、ここで個別ルールを書かない。代わりに
+#     functions/electrical/_middleware.js が応答のあとで Content-Security-Policy を
+#     確実に1つだけに上書きする（Headers.set は追記ではなく置き換えのため安全）。
+# style-src の 'unsafe-inline' は残す（style="" 属性を各画面で多用しているため。インラインscriptと
+#   違い、style属性だけでJS実行には使われないのでリスクは小さい）。
 # Permissions-Policy: カメラはQR読み取り（js/qr-scan.js）で使うため自サイトのみ許可。
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: same-origin

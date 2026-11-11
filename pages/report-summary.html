@@ -12,6 +12,7 @@
 <body>
   <!-- 保全レポートはダッシュボードの「レポート」タブへ統合した。古いブックマーク・ホーム画面のURL用の移動ページ -->
   <p>保全レポートはダッシュボードの「レポート」タブに移動しました。<a href="/pages/dashboard?tab=report">開く</a></p>
-  <script>location.replace('/pages/dashboard?tab=report');</script>
+  <!-- 上の <meta http-equiv="refresh"> だけで即時遷移するため、インラインスクリプトは不要
+       （CSP の script-src から 'unsafe-inline' を外すため削除） -->
 </body>
 </html>
