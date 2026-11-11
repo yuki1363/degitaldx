@@ -2225,8 +2225,10 @@ input.is-abnormal {
 
 /* 年間計画表ツールバー・月別表示 */
 .annual-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
-.annual-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; }
-.annual-filter { font-size: 14px; display: inline-flex; align-items: center; gap: 4px; }
+.annual-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; flex: 1 1 320px; }
+.annual-filter { font-size: 14px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* 種別・状態・並びを横に並べる（共通の select は幅100%なので、ここでは中身に合わせる） */
+.annual-filter select { width: auto; min-width: 0; min-height: 36px; padding: 4px 24px 4px 8px; font-size: 14px; }
 .annual-name-search { flex: 1; min-width: 140px; max-width: 240px; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 6px; font-size: 14px; }
 .annual-view-toggle { display: inline-flex; gap: 4px; }
 .annual-output-btns { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }

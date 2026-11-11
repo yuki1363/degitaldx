@@ -1895,7 +1895,16 @@ const fyView = await page.evaluate(() => ({
   bulk: !!document.querySelector('.annual-month-grid'),
 }));
 check('年間計画表: 今年度を会計年度で表示（FY◯◯◯◯（YYYY/10〜YYYY/09）（今年度））',
-  fyView.label === `FY${annFy}（${annFy}/10〜${annFy + 1}/09）（今年度）`, fyView.label);
+  fyView.label === `FY${annFy}～FY${annFy + 1}（${annFy}/10～${annFy + 1}/9）（今年度）`, fyView.label);
+// 絞り込み（種別・状態・並び）は横に並べる。スマホ幅でも項目名が1文字ずつ折り返さない
+await page.setViewportSize({ width: 375, height: 720 });
+const filterRow = await page.evaluate(() => {
+  const r = [...document.querySelectorAll('.annual-filter')].map((l) => l.getBoundingClientRect());
+  const labelH = [...document.querySelectorAll('.annual-filter')].map((l) => l.getBoundingClientRect().height);
+  return { n: r.length, tops: r.map((b) => Math.round(b.top)), labelH, w: r.map((b) => Math.round(b.width)) };
+});
+await page.setViewportSize({ width: 1280, height: 720 });
+check('年間計画表: 種別・状態は横並びで、項目名が折り返さない（375px）', filterRow.n === 3 && filterRow.tops[0] === filterRow.tops[1] && Math.max(...filterRow.labelH) < 50, JSON.stringify(filterRow));
 check('年間計画表: 列は10月〜翌9月', fyView.heads.length === 12 && fyView.heads[0] === `${annFy}年10月` && fyView.heads[3] === `${annFy + 1}年1月` && fyView.heads[11] === '9月',
   fyView.heads.join(','));
 const doneMarkCur = await page.evaluate(() => [...document.querySelectorAll('.annual-grid tbody tr')]
@@ -1912,7 +1921,7 @@ const prevView = await page.evaluate(() => ({
   addBtn: !!document.querySelector('.annual-add'),
 }));
 check('年間計画表: 前の年度は「過去の年度」の案内を出し、完了状態・編集を出さない',
-  prevView.label.startsWith(`FY${annFy - 1}（`) && prevView.notice.includes('過去の年度') && !prevView.done && !prevView.bulk && !prevView.addBtn,
+  prevView.label.startsWith(`FY${annFy - 1}～FY${annFy}（`) && prevView.notice.includes('過去の年度') && !prevView.done && !prevView.bulk && !prevView.addBtn,
   JSON.stringify(prevView));
 await api(`/api/plans/${annDoneP.json?.id}`, { method: 'DELETE' });
 
