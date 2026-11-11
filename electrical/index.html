@@ -701,6 +701,7 @@ async function _init() {
     checkDraftOnLoad();
     renderHistory();
     renderSettingsPage();
+    openRecordFromHash();                   // 通知・横断検索から開かれたとき、その記録の詳細を開く
     // 基本情報フィールドの変更を自動保存
     ['inspector','facility','weather'].forEach(id => {
       const el = document.getElementById(id);
@@ -718,6 +719,15 @@ async function _init() {
 }
 document.addEventListener('DOMContentLoaded', _init);
 _init();
+
+// 通知・横断検索のリンク（/electrical/#record=記録ID）で開かれたとき、履歴タブでその記録の詳細を開く。
+//   記録IDは英数字・_・- だけ（サーバー側でも同じ形式に限定している）。該当する記録が無ければ何もしない
+function openRecordFromHash() {
+  const m = /^#record=([A-Za-z0-9_-]{1,64})$/.exec(location.hash || '');
+  if (!m || !findRecord(m[1])) return;
+  showTab('history');
+  openRecord(m[1]);
+}
 
 // 印刷前後にブラウザヘッダーを非表示にする
 window.addEventListener('beforeprint', () => { document.title = '高圧受電設備等　点検記録'; });

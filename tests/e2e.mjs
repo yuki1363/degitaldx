@@ -3002,6 +3002,101 @@ section('9.33 開発用ファイルの配信止め（許可リスト）');
   check('通常ページの CSP は従来どおり（インラインスクリプトを許可しない）', !/script-src[^;]*'unsafe-inline'/.test(html.csp) && /script-src 'self'/.test(html.csp), html.csp.slice(0, 120));
 }
 
+// ---------- 9.34 電気設備点検の異常を通知・横断検索へ／ユーティリティ日報のオフライン保存 ----------
+section('9.34 電気設備点検の異常（通知・横断検索・記録を開くリンク）／ユーティリティ日報のオフライン保存');
+{
+  // --- 電気設備点検: 異常を含む記録 → 通知 ---
+  const elecRec = {
+    id: 'e2e9001', equipmentType: 'battery', date: '2031-05-01', inspector: 'E2E点検者九', facility: 'E2E棟', weather: '', room_temp: '', humidity: '',
+    statuses: { x: 'repair', y: 'caution', z: 'good' }, measurements: {}, qualifiers: {}, categoryRemarks: {}, remarks: 'E2E備考語九', repairNotes: 'E2E端子腐食', photos: [], config: [],
+  };
+  const mkE = await api('/api/electrical-inspections', { method: 'POST', body: elecRec });
+  check('電気点検: 異常を含む記録を保存できる', mkE.status === 201, JSON.stringify(mkE));
+  const ntf = await api('/api/notifications?type=inspection_abnormal');
+  const eNtf = (ntf.json?.notifications || []).find((n) => n.link_url === '/electrical/#record=e2e9001');
+  check('電気点検: 異常を含む記録の保存で通知ができる（設備種別・件数・記録を開くリンク）',
+    !!eNtf && /蓄電池/.test(eNtf.title) && /2031-05-01/.test(eNtf.title) && /要修理1件・要注意1件/.test(eNtf.body) && eNtf.level === 'alert', JSON.stringify(eNtf));
+  await api('/api/electrical-inspections', { method: 'POST', body: { ...elecRec, remarks: '再保存' } });
+  const ntf2 = await api('/api/notifications?type=inspection_abnormal');
+  check('電気点検: 異常のままの再保存では通知を繰り返さない',
+    (ntf2.json?.notifications || []).filter((n) => n.link_url === '/electrical/#record=e2e9001').length === 1);
+  const okRec = await api('/api/electrical-inspections', { method: 'POST', body: { ...elecRec, id: 'e2e9002', date: '2031-05-02', statuses: { x: 'good' } } });
+  const ntf3 = await api('/api/notifications?type=inspection_abnormal');
+  check('電気点検: 異常の無い記録は通知しない', okRec.status === 201 && !(ntf3.json?.notifications || []).some((n) => n.link_url === '/electrical/#record=e2e9002'));
+
+  // --- 横断検索 ---
+  const sr = await api('/api/search?type=electrical&q=' + encodeURIComponent('E2E点検者九'));
+  const hit = (sr.json?.results || []).find((r) => r.id === 'e2e9001');
+  check('横断検索: 電気設備点検を点検者名で探せる（結果から記録を開くリンク付き）', !!hit && hit.type === 'electrical' && hit.url === '/electrical/#record=e2e9001' && /⚠異常あり/.test(hit.snippet), JSON.stringify(sr.json?.results));
+  const sr2 = await api('/api/search?type=electrical&q=' + encodeURIComponent('E2E端子腐食'));
+  check('横断検索: 要修理メモの語でも見つかる', (sr2.json?.results || []).some((r) => r.id === 'e2e9001'));
+  await page.goto(`${BASE}/pages/search`, { waitUntil: 'networkidle' });
+  check('横断検索の画面: 種別に「電気設備点検」がある', await page.evaluate(() => document.body.innerText.includes('電気設備点検')));
+
+  // --- 通知・検索のリンクから開くと、その記録の詳細が開く ---
+  await page.goto(`${BASE}/electrical/#record=e2e9001`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
+  const opened = await page.evaluate(() => ({
+    active: document.getElementById('modal')?.classList.contains('active'),
+    title: document.getElementById('modal-title')?.textContent || '',
+    body: document.getElementById('modal-content')?.innerText || '',
+  }));
+  check('電気点検: /electrical/#record=ID で、その記録の詳細が開く', opened.active === true && /2031/.test(opened.title) && /E2E点検者九/.test(opened.body), JSON.stringify(opened).slice(0, 200));
+  await page.goto(`${BASE}/pages/help`, { waitUntil: 'networkidle' }); // 同じページ内のハッシュ変更では再読み込みされないため、別ページを挟む
+  await page.goto(`${BASE}/electrical/#record=nonexistent`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  check('電気点検: 存在しない記録IDのリンクでは何も開かない（エラーにならない）', await page.evaluate(() => !document.getElementById('modal')?.classList.contains('active')));
+  await api('/api/electrical-inspections/e2e9001', { method: 'DELETE' });
+  await api('/api/electrical-inspections/e2e9002', { method: 'DELETE' });
+
+  // --- ユーティリティ日報: 電波が途切れたら送信待ちに保存し、復帰で自動送信（同じ日は二重にしない） ---
+  const fillUtility = async (pg, date, value) => {
+    await pg.goto(`${BASE}/pages/utility?new=1`, { waitUntil: 'networkidle' });
+    await pg.waitForSelector('.check-item', { timeout: 10000 });
+    await pg.locator('#app input[type=date]').first().fill(date);
+    const idx = await pg.evaluate(() => [...document.querySelectorAll('#app .check-item')]
+      .findIndex((c) => (c.querySelector('.check-item-name')?.childNodes[0]?.textContent || '').trim() === 'ヘッダー圧力'));
+    await pg.locator('#app .check-item').nth(idx).locator('input[type=text], input[type=number]').first().fill(value);
+  };
+  await fillUtility(page, '2031-04-01', '0.7');
+  const page2 = await context.newPage();
+  page2.on('dialog', async (d) => { dialogs.push(d.message()); await d.accept(); });
+  await fillUtility(page2, '2031-04-01', '0.9'); // 同じ日を別画面でも入力しておく（送信待ちの二重ガードの確認用）
+  await context.setOffline(true);
+  const dlg0 = dialogs.length;
+  await page.click('button:text-is("登録する")');
+  await page.waitForTimeout(1500);
+  check('ユーティリティ日報: 電波が無いと「送信待ちに保存しました」と案内する', dialogs.slice(dlg0).some((d) => d.includes('送信待ち')), dialogs.slice(dlg0).join(' / '));
+  const queued = await page.evaluate(() => new Promise((resolve) => {
+    const req = indexedDB.open('mainte-offline');
+    req.onsuccess = () => {
+      try {
+        const db = req.result; const store = db.objectStoreNames[0];
+        const all = db.transaction(store, 'readonly').objectStore(store).getAll();
+        all.onsuccess = () => resolve(all.result.filter((i) => i.kind === 'utility').map((i) => ({ date: i.payload.report_date, rid: !!i.payload.client_request_id, n: Object.keys(i.payload.values || {}).length })));
+        all.onerror = () => resolve('err');
+      } catch (e) { resolve(String(e)); }
+    };
+    req.onerror = () => resolve('open-err');
+  }));
+  check('ユーティリティ日報: 送信待ちに、日付・識別番号・点検値つきで入る', Array.isArray(queued) && queued.length === 1 && queued[0].date === '2031-04-01' && queued[0].rid === true && queued[0].n >= 1, JSON.stringify(queued));
+  const dlg1 = dialogs.length;
+  await page2.click('button:text-is("登録する")');
+  await page2.waitForTimeout(1500);
+  check('ユーティリティ日報: 同じ日が既に送信待ちにあるときは、2件目を積まず案内する（1日1件）', dialogs.slice(dlg1).some((d) => d.includes('すでにこの端末の送信待ち')), dialogs.slice(dlg1).join(' / '));
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForTimeout(3000);
+  const sentU = await api('/api/utility-reports?date=2031-04-01');
+  const sentList = sentU.json?.reports || [];
+  check('ユーティリティ日報: 電波が戻ると自動で送信され、その日の記録が1件だけできる', sentList.length === 1, JSON.stringify(sentList.map((r) => r.id)));
+  const sentDetail = sentList[0] ? await api(`/api/utility-reports/${sentList[0].id}`) : null;
+  check('ユーティリティ日報: 送信された記録に入力した点検値（ヘッダー圧力 0.7）が入っている',
+    (sentDetail?.json?.report?.values || sentDetail?.json?.values || []).some((v) => v.name === 'ヘッダー圧力' && Number(v.value) === 0.7), JSON.stringify(sentDetail?.json).slice(0, 160));
+  await page2.close();
+  if (sentList[0]) await api(`/api/utility-reports/${sentList[0].id}`, { method: 'DELETE' });
+}
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

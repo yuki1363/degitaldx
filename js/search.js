@@ -18,6 +18,7 @@ const TYPE_CONFIG = {
   parts:      { label: '部品在庫',  color: '#9a3412', bg: '#ffedd5' },
   plan:       { label: '保全計画',  color: '#0369a1', bg: '#e0f2fe' },
   utility:    { label: 'ユーティリティ日報', color: '#334155', bg: '#e2e8f0' },
+  electrical: { label: '電気設備点検', color: '#a16207', bg: '#fef9c3' },
 };
 
 const ALL_TYPES = Object.keys(TYPE_CONFIG);
