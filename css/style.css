@@ -208,6 +208,24 @@ body {
   }
 }
 
+/* ホームのタイルは、用途ごとのまとまり（見出し＋色）に分ける */
+.tile-sections { display: flex; flex-direction: column; gap: 18px; }
+.tile-section { --sec: #1e40af; }
+.tile-section.sec-plan { --sec: #1e40af; }
+.tile-section.sec-record { --sec: #b45309; }
+.tile-section.sec-stock { --sec: #15803d; }
+.tile-section.sec-view { --sec: #6b21a8; }
+.tile-section.sec-other { --sec: #64748b; }
+.tile-section-title {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 8px; font-size: 14px; font-weight: 700; color: var(--sec);
+}
+.tile-section-title::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: var(--sec); }
+.tile-section .tile { border-top: 3px solid var(--sec); }
+/* たまにしか使わないもの（使い方・管理・更新履歴）は小さく控えめに */
+.tile-section.is-minor .tile { min-height: 64px; box-shadow: none; border: 1px solid var(--color-border); border-top: 3px solid var(--sec); }
+.tile-section.is-minor .tile-icon { font-size: 20px; }
+
 @media (min-width: 880px) {
   .tile-grid {
     grid-template-columns: repeat(4, 1fr);
