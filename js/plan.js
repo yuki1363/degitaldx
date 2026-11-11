@@ -21,10 +21,6 @@ const PLAN_TYPES = {
 };
 const STATUS_LABELS = { pending: '未実施', done: '完了', overdue: '期限超過' };
 
-const RECUR_LABELS = {
-  daily: '毎日', weekly: '毎週', monthly: '毎月', yearly: '毎年',
-};
-
 const app = document.getElementById('app');
 let currentUser = null;
 
@@ -34,22 +30,6 @@ function go(query) {
 
 function showError(err) {
   render(app, el('p', { class: 'notice is-error' }, err.message || String(err)));
-}
-
-// 繰り返しルールを日本語に変換
-function formatRecurrence(ruleJson) {
-  if (!ruleJson) return 'なし';
-  try {
-    const { freq, interval = 1, until } = JSON.parse(ruleJson);
-    let label = freq === 'daily' && interval > 1
-      ? `${interval}日ごと`
-      : (RECUR_LABELS[freq] || freq);
-    if (interval > 1 && freq !== 'daily') label = `${interval}${label.replace('毎', '')}ごと`;
-    if (until) label += ` (〜${until})`;
-    return label;
-  } catch {
-    return ruleJson;
-  }
 }
 
 // 月の最初の日の曜日と日数を返す
@@ -214,7 +194,6 @@ function showCopySheet(plan, onDone) {
         assignee_name: plan.assignee_name || null,
         status: 'pending',
         note: plan.note || null,
-        recurrence_rule: null,
         form_values_json: plan.form_values_json || null,
       });
       close();
@@ -698,7 +677,6 @@ async function renderForm(existing, fromAnnual = false) {
       assignee_name: assigneeInput.value.trim() || null,
       status: statusSelect.value,
       note: noteInput.value.trim() || null,
-      recurrence_rule: null,
       form_values_json: Object.keys(permitValues).length ? JSON.stringify(permitValues) : null,
       // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
       ...(existing ? { expected_updated_at: existing.updated_at } : {}),
