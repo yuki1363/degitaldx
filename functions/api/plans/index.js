@@ -129,15 +129,31 @@ export async function getAnnualFyState(db) {
 // 年間計画表からの一括登録（/api/plans/batch）で作られた予定のID集合を返す。
 // 監査ログの diff に batch:true が残るため、登録日（1日以外でも）に依存せず判定できる。
 // → annual_only 列の導入前に登録した「旧年間計画」を確実に復元するための手がかり。
-// 旧形式の年間計画（annual_only 列が入る前に一括登録した予定）の ID。audit_log の batch 署名で見分ける
+// 旧形式の年間計画（annual_only 列が入る前に一括登録した予定）の ID。audit_log の batch 署名で見分ける。
+//
+// このIDの集合は、今の画面がすべて annual_only=1 を明示して登録するため、ほぼ増えない。
+// にもかかわらず、カレンダー・年間計画表を開くたびに audit_log 全体を LIKE 検索していたため、
+// 他機能の操作も含めて audit_log が増えるほど少しずつ遅くなっていた。そのため、audit_log の
+// 最新ID（MAX(id)。主キーの索引だけで分かる軽い問い合わせ）が前回と変わっていなければ、
+// 新しい行は1件も増えていない＝結果が変わりようがないとして、キャッシュをそのまま使う
+// （1プロセス＝1 Workers インスタンスの間だけ有効。TTLでの時間切れ方式だと「挿入した直後に
+// 古い結果が返る」取りこぼしが起きるため、件数の変化で判定する方式にしている）。
+let batchPlanIdsCache = { ids: null, maxId: -1 };
 export async function getBatchPlanIds(db) {
   try {
+    const maxRow = await db.prepare(`SELECT MAX(id) AS n FROM audit_log`).all();
+    const currentMaxId = maxRow.results?.[0]?.n ?? 0;
+    if (batchPlanIdsCache.ids && currentMaxId === batchPlanIdsCache.maxId) {
+      return batchPlanIdsCache.ids;
+    }
     const { results } = await db.prepare(`
       SELECT record_id FROM audit_log
       WHERE table_name = 'maintenance_plan' AND action = 'create'
         AND diff_json LIKE '%"batch":true%'
     `).all();
-    return new Set((results ?? []).map((r) => String(r.record_id)));
+    const ids = new Set((results ?? []).map((r) => String(r.record_id)));
+    batchPlanIdsCache = { ids, maxId: currentMaxId };
+    return ids;
   } catch {
     return new Set(); // audit_log 参照に失敗しても通常表示は続行
   }
