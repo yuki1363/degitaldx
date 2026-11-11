@@ -29,7 +29,7 @@ ok('記録の値が空のときだけ、以前に保存した帳票入力が使�
 ok('整理NO・休止区分・有効性の確認・特記事項は補わない（該当する入力が無い）',
   !('整理NO' in v) && !('休止種別' in v) && !('有効性の確認' in v) && !('特記事項' in v));
 ok('帳票の入力欄に出さないタグ（記録から入るタグ）に 調査対象・トラブル名・処置・担当者印・原因・調査日時 が含まれる',
-  ['調査対象', 'トラブル名', '処置', '担当者印', '原因', '対策', '現象', '調査日時', '調査年月日'].every((t) => RECORD_TAGS.trouble_report.includes(t)));
+  ['調査対象', 'トラブル名', '処置', '担当者印', '原因', '対策', '現象', '調査日時', '調査日付', '調査年月日'].every((t) => RECORD_TAGS.trouble_report.includes(t)));
 
 const plan = { assignee_name: '山田 一郎', note: '配管の交換', title: 'A棟配管工事' };
 v = applyReportFallbacks('construction_notice', plan, {});

@@ -99,6 +99,7 @@ function buildValues(type, r) {
     // 調査日時は発生日時と同じ（日時を二つに分けず、トラブルの発生日時に統合）
     '調査日時': formatDateTime(r.occurred_at),
     '調査年月日': formatDate(r.occurred_at),
+    '調査日付': formatDate(r.occurred_at),
     '調査年': od.y, '調査月': od.mo, '調査日': od.da,
     '設備番号': r.equipment_code || '',
     '設備名': r.equipment_name || '',
