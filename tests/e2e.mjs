@@ -2971,6 +2971,37 @@ section('9.32 変更履歴の差分表示・SW登録（全ページ）・細か�
   check('設備一覧の検索: 「%」は全件一致にならず、%を含む設備だけ', eqPct.status === 200 && (eqPct.json?.equipment?.length ?? 0) < (eqAll.json?.equipment?.length ?? 0), `${eqPct.json?.equipment?.length}/${eqAll.json?.equipment?.length}`);
 }
 
+// ---------- 9.33 開発用ファイル（CLAUDE.md・schema.sql・tests/ など）は配信しない ----------
+section('9.33 開発用ファイルの配信止め（許可リスト）');
+{
+  const get = async (p) => {
+    const res = await page.request.get(`${BASE}${p}`, { maxRedirects: 0 });
+    return { status: res.status(), text: (await res.text()).slice(0, 4000), ct: res.headers()['content-type'] || '', csp: res.headers()['content-security-policy'] || '' };
+  };
+  const hidden = ['/CLAUDE.md', '/README.md', '/schema.sql', '/wrangler.toml', '/package.json', '/tests/e2e.mjs', '/tests/package.json', '/scripts/make-icons.mjs',
+    '/functions/api/_middleware.js', '/.github/workflows/e2e.yml', '/_routes.json',
+    // 抜け道（実測で本物のファイルが返った書き方）
+    '//schema.sql', '/%43LAUDE.md', '/sch%65ma.sql', '/js/..%2fschema.sql', '/js/%2e%2e%2fschema.sql', '/css/..%2fCLAUDE.md', '/pages/..%2f..%2fwrangler.toml'];
+  const leaked = [];
+  for (const p of hidden) {
+    const r = await get(p);
+    if (r.status !== 404 || /CREATE TABLE|database_id|# CLAUDE\.md|"scripts"/.test(r.text)) leaked.push(`${p}→${r.status}`);
+  }
+  check('開発用ファイルと、その抜け道（//・%エンコード・..%2f）は 404 で、中身が返らない', leaked.length === 0, leaked.join(' '));
+  const docs = await get('/docs/' + encodeURIComponent('現場向け使い方ガイド.md'));
+  check('docs/ 配下（日本語のファイル名）も 404', docs.status === 404, `status=${docs.status}`);
+  // アプリ本体は今までどおり配信される（JS は Functions 経由・HTML は静的配信）
+  const js = await get('/js/api.js');
+  const css = await get('/css/style.css');
+  const html = await get('/pages/parts');
+  const ele = await get('/electrical/');
+  const me = await api('/api/me');
+  check('アプリのファイルは従来どおり配信される（JS・CSS・ページ・電気設備点検・API）', js.status === 200 && /javascript/.test(js.ct) && css.status === 200 && html.status === 200 && ele.status === 200 && me.status === 200, JSON.stringify([js.status, css.status, html.status, ele.status, me.status]));
+  check('JS（Functions 経由）にも CSP ヘッダーが付いている（ヘッダーが外れていない）', /script-src 'self'/.test(js.csp) && !/unsafe-inline/.test((js.csp.match(/script-src[^;]*/) || [''])[0]), js.csp.slice(0, 80));
+  check('電気設備点検の CSP は従来どおり（インラインスクリプトを許可）', /script-src[^;]*'unsafe-inline'/.test(ele.csp), ele.csp.slice(0, 120));
+  check('通常ページの CSP は従来どおり（インラインスクリプトを許可しない）', !/script-src[^;]*'unsafe-inline'/.test(html.csp) && /script-src 'self'/.test(html.csp), html.csp.slice(0, 120));
+}
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

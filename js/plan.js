@@ -7,7 +7,7 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
-import { el, render, formatDate, formatDateTime, nowLocalInputValue, jstTodayStr } from '/js/util.js';
+import { el, render, formatDate, nowLocalInputValue, jstTodayStr } from '/js/util.js';
 import { buildHistoryList } from '/js/history-view.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
