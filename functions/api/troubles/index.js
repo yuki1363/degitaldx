@@ -46,6 +46,10 @@ export async function onRequestGet({ request, env }) {
   const equipmentId = sp.get('equipment_id');
   const from = sp.get('from');   // YYYY-MM-DD
   const to = sp.get('to');       // YYYY-MM-DD
+  // 件数の上限（既定500・最大5000）。期間を指定しない呼び出し（設備の「すべて見る」等）でも
+  // D1の読み取り枠を無制限に消費しないようにする。1件多く読んで、超えるときは truncated:true を返す
+  // （CSV出力・レポートの件数表示が黙って欠けないよう、呼び出し側が検知できるようにする）
+  const limit = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 500), 5000);
 
   let sql = `
     SELECT
@@ -81,10 +85,13 @@ export async function onRequestGet({ request, env }) {
     binds.push(jstNextDayStartUtc(to));
   }
 
-  sql += ` ORDER BY t.occurred_at DESC, t.id DESC`;
+  sql += ` ORDER BY t.occurred_at DESC, t.id DESC LIMIT ?`;
+  binds.push(limit + 1);
 
   const { results } = await db.prepare(sql).bind(...binds).all();
-  return json({ troubles: results ?? [] });
+  const rows = results ?? [];
+  const truncated = rows.length > limit;
+  return json({ troubles: truncated ? rows.slice(0, limit) : rows, truncated, limit });
 }
 
 export async function onRequestPost({ request, env, data, waitUntil }) {

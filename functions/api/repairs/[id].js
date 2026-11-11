@@ -30,7 +30,7 @@ export async function onRequestGet({ params, env }) {
   const repair = await getRepair(db, id);
   if (!repair) return jsonError(404, '修理依頼が見つかりません');
 
-  const [filesResult, historyResult, usedPartsResult] = await Promise.all([
+  const [filesResult, historyResult, usedPartsResult, auditHistoryResult] = await Promise.all([
     db
       .prepare(
         `SELECT id, file_name, content_type, size_bytes, created_by, created_at
@@ -64,12 +64,26 @@ export async function onRequestGet({ params, env }) {
       .bind(id)
       .all()
       .catch(() => ({ results: [] })),
+    // 変更履歴（他機能の詳細画面と同じ表示方式。共通監査設計。
+    // 上の history＝repair_history はステータス変更だけの記録のため、タイトル・優先度・
+    // 期限などの変更は別の「変更履歴」カードで出す）
+    db
+      .prepare(
+        `SELECT action, changed_by, changed_at, diff_json
+           FROM audit_log
+          WHERE table_name = 'repair_request' AND record_id = ?1
+          ORDER BY changed_at DESC, id DESC
+          LIMIT 20`
+      )
+      .bind(String(id))
+      .all(),
   ]);
 
   return json({
     repair: { ...repair, is_overdue: isOverdueRepair(repair) },
     files: filesResult.results ?? [],
     history: historyResult.results ?? [],
+    audit_history: auditHistoryResult.results ?? [],
     used_parts: usedPartsResult.results ?? [],
   });
 }

@@ -46,6 +46,9 @@ export async function onRequestGet({ request, env }) {
   const equipmentId = sp.get('equipment_id');
   const sourceTable = sp.get('source_table');
   const sourceId = sp.get('source_id');
+  // 件数の上限（既定500・最大3000）。一覧画面は期間指定が無く毎回全件を読みに行くため、
+  // D1の読み取り枠を無制限に消費しないようにする（equipment/index.js と同じ truncated 方式）
+  const limit = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 500), 3000);
 
   // 担当者は自由入力の assignee_name 列を使う（r.* に含まれる）。users JOIN は廃止。
   let sql = `
@@ -72,11 +75,14 @@ export async function onRequestGet({ request, env }) {
     binds.push(sourceTable, Number(sourceId));
   }
 
-  sql += ` ORDER BY r.created_at DESC`;
+  sql += ` ORDER BY r.created_at DESC LIMIT ?`;
+  binds.push(limit + 1);
 
   const { results } = await db.prepare(sql).bind(...binds).all();
-  const repairs = (results ?? []).map((r) => ({ ...r, is_overdue: isOverdueRepair(r) }));
-  return json({ repairs });
+  const rows = results ?? [];
+  const truncated = rows.length > limit;
+  const repairs = (truncated ? rows.slice(0, limit) : rows).map((r) => ({ ...r, is_overdue: isOverdueRepair(r) }));
+  return json({ repairs, truncated, limit });
 }
 
 // POST /api/repairs — editor+

@@ -21,7 +21,16 @@ export async function onRequestGet({ params, env }) {
     `SELECT * FROM files WHERE related_table = 'daily_report' AND related_id = ? AND deleted_at IS NULL ORDER BY created_at`
   ).bind(id).all();
 
-  return json({ report, files: files ?? [] });
+  // 変更履歴（他機能の詳細画面と同じ表示方式。共通監査設計）
+  const { results: history } = await db.prepare(
+    `SELECT action, changed_by, changed_at, diff_json
+       FROM audit_log
+      WHERE table_name = 'daily_report' AND record_id = ?1
+      ORDER BY changed_at DESC, id DESC
+      LIMIT 20`
+  ).bind(id).all();
+
+  return json({ report, files: files ?? [], history: history ?? [] });
 }
 
 export async function onRequestPut({ request, params, env, data }) {

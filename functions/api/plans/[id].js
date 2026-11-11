@@ -25,7 +25,20 @@ export async function onRequestGet({ params, env }) {
   const fy = plan.annual_only ? (await getAnnualFyState(db)).current : undefined;
   // 設備台帳との紐づけ状況（画面に「どの設備に紐づいているか」を出すため）
   const link = await describeEquipmentLink(db, plan);
-  return json({ plan: deriveOverdue(plan, { fy }), equipment_link: link.equipment, equipment_status: link.status });
+  // 変更履歴（他機能の詳細画面と同じ表示方式。共通監査設計）
+  const { results: history } = await db.prepare(
+    `SELECT action, changed_by, changed_at, diff_json
+       FROM audit_log
+      WHERE table_name = 'maintenance_plan' AND record_id = ?1
+      ORDER BY changed_at DESC, id DESC
+      LIMIT 20`
+  ).bind(String(plan.id)).all();
+  return json({
+    plan: deriveOverdue(plan, { fy }),
+    equipment_link: link.equipment,
+    equipment_status: link.status,
+    history: history ?? [],
+  });
 }
 
 export async function onRequestPut({ request, params, env, data }) {

@@ -69,32 +69,41 @@ async function renderList(equipmentId) {
     const sp = new URLSearchParams();
     if (filterStatus) sp.set('status', filterStatus);
     if (filterEquipment) sp.set('equipment_id', filterEquipment);
-    const { repairs } = await api.get(`/api/repairs${sp.toString() ? '?' + sp : ''}`);
+    // 件数の上限（既定500）より多く拾えるよう明示的に増やす（この一覧は期間指定が無く毎回全件を
+    // 読みに行くため。それでも超えるときは truncated で画面に案内する）
+    sp.set('limit', '3000');
+    const { repairs, truncated } = await api.get(`/api/repairs?${sp}`);
+    const truncatedNotice = truncated
+      ? el('p', { class: 'notice is-warning' }, `件数が多いため先頭${repairs.length}件のみ表示しています。ステータスや設備で絞り込んでください。`)
+      : null;
     if (repairs.length === 0) {
-      render(listBox, el('p', { class: 'empty' }, '業務依頼はありません。'));
+      render(listBox, [truncatedNotice, el('p', { class: 'empty' }, '業務依頼はありません。')]);
       return;
     }
     render(
       listBox,
-      repairs.map((r) => {
-        const s = STATUS[r.status] || STATUS.open;
-        return el('a', { class: 'list-item', href: `/pages/repair?id=${r.id}` }, [
-          el('div', { class: 'list-item-main' }, [
-            el('div', { class: 'list-item-sub' }, [
-              el('span', { class: 'status-badge', style: `background:${s.bg};color:${s.color}` }, s.label),
-              formatDateTime(r.created_at),
-              priorityBadge(r.priority),
-              overdueBadge(r),
+      [
+        truncatedNotice,
+        ...repairs.map((r) => {
+          const s = STATUS[r.status] || STATUS.open;
+          return el('a', { class: 'list-item', href: `/pages/repair?id=${r.id}` }, [
+            el('div', { class: 'list-item-main' }, [
+              el('div', { class: 'list-item-sub' }, [
+                el('span', { class: 'status-badge', style: `background:${s.bg};color:${s.color}` }, s.label),
+                formatDateTime(r.created_at),
+                priorityBadge(r.priority),
+                overdueBadge(r),
+              ]),
+              el('div', { class: 'list-item-title' }, r.title),
+              el('div', { class: 'list-item-sub' }, [
+                r.equipment_name || '設備未指定',
+                r.assignee_name ? `担当: ${r.assignee_name}` : null,
+              ].filter(Boolean).join(' / ')),
             ]),
-            el('div', { class: 'list-item-title' }, r.title),
-            el('div', { class: 'list-item-sub' }, [
-              r.equipment_name || '設備未指定',
-              r.assignee_name ? `担当: ${r.assignee_name}` : null,
-            ].filter(Boolean).join(' / ')),
-          ]),
-          el('span', { class: 'chevron' }, '›'),
-        ]);
-      })
+            el('span', { class: 'chevron' }, '›'),
+          ]);
+        }),
+      ]
     );
   };
 
@@ -134,7 +143,7 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { repair, files, history, used_parts = [] } = await api.get(`/api/repairs/${id}`);
+  const { repair, files, history, audit_history: auditHistory, used_parts = [] } = await api.get(`/api/repairs/${id}`);
   const canEdit = hasRole(currentUser, 'editor');
   const s = STATUS[repair.status] || STATUS.open;
 
@@ -351,6 +360,20 @@ async function renderDetail(id) {
                 h.comment ? el('span', { class: 'list-item-sub' }, h.comment) : null,
               ]);
             })
+          ),
+    ]),
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '変更履歴'),
+      !auditHistory || auditHistory.length === 0
+        ? el('p', { class: 'empty' }, '履歴はありません。')
+        : el('div', { class: 'row-list' },
+            auditHistory.map((h) =>
+              el('div', { class: 'history-row' }, [
+                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
+                el('span', {}, maskEmail(h.changed_by)),
+                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
+              ])
+            )
           ),
     ]),
   ]);

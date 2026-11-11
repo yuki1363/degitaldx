@@ -6,7 +6,7 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
@@ -48,25 +48,33 @@ async function renderList() {
     if (filterReporter) p.set('reporter', filterReporter);
     if (filterFrom) p.set('from', filterFrom);
     if (filterTo)   p.set('to',   filterTo);
-    const { reports } = await api.get(`/api/reports${p.size ? '?' + p : ''}`);
+    // 件数の上限（既定500）より多く拾えるよう明示的に増やす（それでも超えるときは truncated で案内する）
+    p.set('limit', '3000');
+    const { reports, truncated } = await api.get(`/api/reports?${p}`);
+    const truncatedNotice = truncated
+      ? el('p', { class: 'notice is-warning' }, `件数が多いため先頭${reports.length}件のみ表示しています。期間を絞り込んでください。`)
+      : null;
     if (reports.length === 0) {
-      render(listBox, el('p', { class: 'empty' }, '日報はありません。'));
+      render(listBox, [truncatedNotice, el('p', { class: 'empty' }, '日報はありません。')]);
       return;
     }
-    render(listBox, reports.map((r) => {
-      const body = r.body || '';
-      const title = body ? body.slice(0, 60) + (body.length > 60 ? '…' : '') : '（本文なし）';
-      return el('a', { class: 'list-item', href: `/pages/report?id=${r.id}` }, [
-        el('div', { class: 'list-item-main' }, [
-          el('div', { class: 'list-item-sub' }, [
-            r.category_name ? el('span', { class: 'cat-badge' }, r.category_name) : null,
-            ` ${r.report_date}  ${r.reporter_name || maskEmail(r.created_by)}`,
+    render(listBox, [
+      truncatedNotice,
+      ...reports.map((r) => {
+        const body = r.body || '';
+        const title = body ? body.slice(0, 60) + (body.length > 60 ? '…' : '') : '（本文なし）';
+        return el('a', { class: 'list-item', href: `/pages/report?id=${r.id}` }, [
+          el('div', { class: 'list-item-main' }, [
+            el('div', { class: 'list-item-sub' }, [
+              r.category_name ? el('span', { class: 'cat-badge' }, r.category_name) : null,
+              ` ${r.report_date}  ${r.reporter_name || maskEmail(r.created_by)}`,
+            ]),
+            el('div', { class: 'list-item-title' }, title),
           ]),
-          el('div', { class: 'list-item-title' }, title),
-        ]),
-        el('span', { class: 'chevron' }, '›'),
-      ]);
-    }));
+          el('span', { class: 'chevron' }, '›'),
+        ]);
+      }),
+    ]);
   };
 
   // 「＋ 日報を書く」は選択中のカテゴリを引き継ぐ（該当カテゴリで日報を作成できる）
@@ -135,7 +143,7 @@ function infoRow(label, value) {
 }
 
 async function renderDetail(id) {
-  const { report } = await api.get(`/api/reports/${id}`);
+  const { report, history } = await api.get(`/api/reports/${id}`);
   // 日報は共有記録のため、入力可（editor）なら誰でも編集・削除できる（作成者/管理者の区別なし）
   const canEdit = hasRole(currentUser, 'editor');
 
@@ -162,6 +170,20 @@ async function renderDetail(id) {
           }, '削除'),
         ])
       : null,
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title' }, '変更履歴'),
+      !history || history.length === 0
+        ? el('p', { class: 'empty' }, '履歴はありません。')
+        : el('div', { class: 'row-list' },
+            history.map((h) =>
+              el('div', { class: 'history-row' }, [
+                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
+                el('span', {}, maskEmail(h.changed_by)),
+                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
+              ])
+            )
+          ),
+    ]),
   ]);
 }
 

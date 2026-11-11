@@ -11,6 +11,9 @@ export async function onRequestGet({ request, env }) {
   const from        = sp.get('from');
   const to          = sp.get('to');
   const date        = sp.get('date');
+  // 件数の上限（既定500・最大3000）。既定のFROM〜TOは直近30日だが、期間を広げて検索した
+  // ときでも D1 の読み取り枠を無制限に消費しないようにする
+  const limit = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 500), 3000);
 
   // 入力者は自由入力の reporter_name を正とし、未設定の旧データは users.name で補う
   let sql = `
@@ -38,10 +41,13 @@ export async function onRequestGet({ request, env }) {
     binds.push(`%${reporter}%`);
   }
 
-  sql += ` ORDER BY dr.report_date DESC, dr.id DESC`;
+  sql += ` ORDER BY dr.report_date DESC, dr.id DESC LIMIT ?`;
+  binds.push(limit + 1);
 
   const { results } = await db.prepare(sql).bind(...binds).all();
-  return json({ reports: results ?? [] });
+  const rows = results ?? [];
+  const truncated = rows.length > limit;
+  return json({ reports: truncated ? rows.slice(0, limit) : rows, truncated, limit });
 }
 
 export async function onRequestPost({ request, env, data }) {

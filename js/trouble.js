@@ -66,28 +66,37 @@ async function renderList(equipmentId) {
     if (filterEquipment) params.set('equipment_id', filterEquipment);
     if (filterFrom) params.set('from', filterFrom);
     if (filterTo) params.set('to', filterTo);
-    const { troubles } = await api.get(`/api/troubles${params.toString() ? '?' + params : ''}`);
+    // 件数の上限（既定500）より多く拾えるよう明示的に増やす（CSV出力・件数表示が黙って欠けないように。
+    // それでも超えるときは truncated で画面に案内する）
+    params.set('limit', '5000');
+    const { troubles, truncated } = await api.get(`/api/troubles?${params}`);
     currentTroubles = troubles;
     updateCsvButtons();
+    const truncatedNotice = truncated
+      ? el('p', { class: 'notice is-warning' }, `件数が多いため先頭${troubles.length}件のみ表示しています。期間や設備で絞り込んでください（CSVも同じ件数までです）。`)
+      : null;
     if (troubles.length === 0) {
-      render(listBox, el('p', { class: 'empty' }, '該当するトラブル記録がありません。'));
+      render(listBox, [truncatedNotice, el('p', { class: 'empty' }, '該当するトラブル記録がありません。')]);
       return;
     }
     render(
       listBox,
-      troubles.map((t) =>
-        el('a', { class: 'list-item', href: `/pages/trouble?id=${t.id}` }, [
-          el('div', { class: 'list-item-main' }, [
-            el('div', { class: 'list-item-sub' }, [
-              formatDateTime(t.occurred_at),
-              t.category_name ? el('span', { class: 'cat-badge' }, t.category_name) : null,
+      [
+        truncatedNotice,
+        ...troubles.map((t) =>
+          el('a', { class: 'list-item', href: `/pages/trouble?id=${t.id}` }, [
+            el('div', { class: 'list-item-main' }, [
+              el('div', { class: 'list-item-sub' }, [
+                formatDateTime(t.occurred_at),
+                t.category_name ? el('span', { class: 'cat-badge' }, t.category_name) : null,
+              ]),
+              el('div', { class: 'list-item-title' }, t.phenomenon),
+              el('div', { class: 'list-item-sub' }, t.equipment_name || '設備未指定'),
             ]),
-            el('div', { class: 'list-item-title' }, t.phenomenon),
-            el('div', { class: 'list-item-sub' }, t.equipment_name || '設備未指定'),
-          ]),
-          el('span', { class: 'chevron' }, '›'),
-        ])
-      )
+            el('span', { class: 'chevron' }, '›'),
+          ])
+        ),
+      ]
     );
   };
 

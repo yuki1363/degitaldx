@@ -191,8 +191,10 @@ async function renderDashboard() {
     btn.disabled = true;
     btn.textContent = '出力中…';
     try {
-      const { troubles } = await api.get(`/api/troubles?${new URLSearchParams({ from, to })}`);
+      // 件数の上限（既定500）より多く拾えるよう明示的に増やす（CSVが黙って欠けないように）
+      const { troubles, truncated } = await api.get(`/api/troubles?${new URLSearchParams({ from, to, limit: '5000' })}`);
       if (troubles.length === 0) { alert('期間内のトラブル記録がありません。'); return; }
+      if (truncated) alert(`件数が多いため先頭${troubles.length}件のみCSVに出力します。全件を出すには期間を絞ってください。`);
       exportTroubleCsv(troubles, enc);
     } catch (err) {
       alert(err.message || String(err));
