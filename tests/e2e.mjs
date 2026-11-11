@@ -2521,7 +2521,7 @@ const exportFilled = async (type, record, savedInputs) => {
     page.evaluate(async ({ type, record, savedInputs }) => {
       await new Promise((resolve) => { const sc = document.createElement('script'); sc.src = '/js/vendor/jszip.min.js'; sc.onload = resolve; document.head.appendChild(sc); });
       const tags = type === 'trouble_report'
-        ? ['調査対象', 'トラブル名', '処置', '調査日時', '整理NO', '休止時間']
+        ? ['調査対象', 'トラブル名', '処置', '調査日時', '調査日付', '整理NO', '休止時間']
         : ['担当', '工事概要', '会社名'];
       const z = new window.JSZip();
       z.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
@@ -2562,13 +2562,20 @@ check('トラブル報告書: 調査対象・トラブル名・処置は記録�
       const g = [...document.querySelectorAll('.field label')].find((l) => l.textContent.trim() === '記録者');
       return !!f && !!g && f.closest('.card') === g.closest('.card');
     })), JSON.stringify(rptLabels));
+  const order = await page.evaluate(() => {
+    const ls = [...document.querySelectorAll('.card .field label')].map((l) => l.textContent.trim());
+    return { kyushi: ls.indexOf('休止時間（分）'), hanbetsu: ls.findIndex((t) => t.startsWith('休止区分')), taisaku: ls.indexOf('対策'), parts: ls.findIndex((t) => t.startsWith('使用部品')), reporter: ls.indexOf('記録者'), date: ls.findIndex((t) => t.startsWith('発生日時')), dateLabel: ls.find((t) => t.startsWith('発生日時')) };
+  });
+  check('トラブル入力: 発生日時は「発生日時・調査日付」の1つの欄', order.dateLabel === '発生日時・調査日付（必須）', JSON.stringify(order));
+  check('トラブル入力: 休止時間・休止区分は対策の直後（使用部品・記録者より上）に並ぶ', order.taisaku >= 0 && order.kyushi === order.taisaku + 1 && order.hanbetsu === order.kyushi + 1 && order.kyushi < order.parts && order.kyushi < order.reporter, JSON.stringify(order));
+  check('トラブル入力: 休止時間は数字キーパッドで入力できる', await page.evaluate(() => { const i = [...document.querySelectorAll('.field')].find((f) => f.querySelector('label')?.textContent.trim() === '休止時間（分）')?.querySelector('input'); return i?.getAttribute('inputmode') === 'numeric'; }));
   check('トラブル入力: 帳票の入力欄に、記録と重複する項目（調査対象・トラブル名・処置・担当者印・調査日時）は出さない',
     !['調査対象', 'トラブル名', '処置', '調査日時'].some((t) => rptLabels.includes(t)) && !rptLabels.some((t) => t.includes('担当者（ハンコ')), JSON.stringify(rptLabels));
 }
 const trbXml3 = await exportFilled('trouble_report',
   { id: 9004, occurred_at: '2026-10-03T01:00:00Z', equipment_name: 'E2E設備', phenomenon: 'E2E現象' },
   { '調査日時': '1999/01/01 00:00' });
-check('トラブル報告書: 調査日時は発生日時と同じ（以前の帳票入力があっても発生日時が入る）', !!trbXml3 && trbXml3.includes('調査日時=[2026/10/03 10:00]') && !trbXml3.includes('1999'), (trbXml3 || 'no download').slice(0, 200));
+check('トラブル報告書: 調査日時・調査日付は発生日時と同じ（以前の帳票入力があっても発生日時が入る）', !!trbXml3 && trbXml3.includes('調査日時=[2026/10/03 10:00]') && trbXml3.includes('調査日付=[2026/10/03]') && !trbXml3.includes('1999'), (trbXml3 || 'no download').slice(0, 200));
 check('トラブル報告書: 整理NO（該当する入力が無い）は補わず空欄のまま', !!trbXml && trbXml.includes('整理NO=[]'));
 const trbXml2 = await exportFilled('trouble_report',
   { id: 9002, occurred_at: '2026-10-03T01:00:00Z', equipment_name: 'E2E設備', phenomenon: 'E2E現象', countermeasure: 'E2E対策' },

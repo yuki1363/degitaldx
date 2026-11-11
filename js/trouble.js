@@ -426,7 +426,11 @@ function buildReportFields(templates) {
   }
   // 記録から入るタグ（調査対象・トラブル名・処置・担当者印・原因など）は、テンプレートが入力項目として
   // 定義していても出さない（トラブルの入力をそのまま反映するため、同じことを二度入力させない）
-  const own = (list) => list.filter((f) => !RECORD_TAGS.trouble_report.includes(f.tag));
+  // 入力しやすいよう、よく使う休止時間・休止区分を先頭に並べる（そのほかは元の順）
+  const FIRST = ['休止時間', '休止種別'];
+  const rank = (f) => { const i = FIRST.indexOf(f.tag); return i === -1 ? FIRST.length : i; };
+  const own = (list) => list.filter((f) => !RECORD_TAGS.trouble_report.includes(f.tag))
+    .map((f, i) => ({ f, i })).sort((a, b) => rank(a.f) - rank(b.f) || a.i - b.i).map((x) => x.f);
   if (fields.length === 0) return own(TROUBLE_REPORT_FIELDS.map((f) => ({ ...f })));
   return own(fields);
 }
@@ -608,7 +612,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     if (fld.type === 'textarea') input = el('textarea', { rows: '2', value: cur, placeholder: hint });
     else if (fld.type === 'date') input = el('input', { type: 'date', value: cur });
     else if (fld.type === 'time') input = el('input', { type: 'time', value: cur });
-    else input = el('input', { type: 'text', value: cur, placeholder: hint });
+    else input = el('input', { type: 'text', value: cur, placeholder: hint, ...(tag === '休止時間' ? { inputmode: 'numeric', placeholder: '例: 30' } : {}) });
     input.addEventListener('input', () => { reportValues[tag] = input.value; });
     return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
   };
@@ -773,7 +777,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     draftBanner,
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, existing ? 'トラブル記録を編集' : 'トラブルを記録'),
-      field('発生日時（必須）', f.occurred_at),
+      field('発生日時・調査日付（必須）', f.occurred_at),
       field('ジャンル', f.category_id),
       el('div', { class: 'field' }, [
         el('label', {}, '設備'),
@@ -796,6 +800,8 @@ async function renderForm(existing, prefill = null, usedParts = []) {
       similarBox,
       field('原因', f.cause),
       field('対策', f.countermeasure),
+      // 帳票用の項目（休止時間・休止区分など）は、使用部品・記録者より上に置いて入力しやすくする
+      reportBox,
       el('div', { class: 'field' }, [
         el('label', {}, '使用部品（部品在庫から選択）'),
         usedInput.node,
@@ -803,7 +809,6 @@ async function renderForm(existing, prefill = null, usedParts = []) {
       field('記録者', f.reporter_name),
       reporterOptions,
       ...customInputs.map(({ fld, input }) => field(fld.name, input)),
-      reportBox,
       el('div', { class: 'field' }, [
         el('label', {}, '写真・動画'),
         el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px' }, [
