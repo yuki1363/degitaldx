@@ -26,7 +26,6 @@ export async function onRequestGet({ request, env }) {
     { results: troubleTrendByCategory },
     { results: equipmentRanking },
     { results: repairStatusRows },
-    { results: planRows },
     troubleTotal,
     repairTotal,
     inspectionTotal,
@@ -82,15 +81,6 @@ export async function onRequestGet({ request, env }) {
       GROUP BY status
     `).all(),
 
-    // 点検計画達成率（期間内）
-    db.prepare(`
-      SELECT status, COUNT(*) AS count
-      FROM maintenance_plan
-      WHERE deleted_at IS NULL AND plan_type = 'inspection'
-        AND planned_date >= ? AND planned_date <= ?
-      GROUP BY status
-    `).bind(fromStr, toStr).all(),
-
     // 各種件数
     db.prepare(`SELECT COUNT(*) AS n FROM trouble_record WHERE deleted_at IS NULL AND occurred_at >= ? AND occurred_at < ?`).bind(fromTs, toTsExcl).first(),
     db.prepare(`SELECT COUNT(*) AS n FROM repair_request WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?`).bind(fromTs, toTsExcl).first(),
@@ -99,9 +89,6 @@ export async function onRequestGet({ request, env }) {
   ]);
 
   const repairSummary = Object.fromEntries((repairStatusRows ?? []).map((r) => [r.status, r.count]));
-  const planCounts    = Object.fromEntries((planRows        ?? []).map((r) => [r.status, r.count]));
-  const totalPlanned  = Object.values(planCounts).reduce((a, b) => a + b, 0);
-  const donePlanned   = planCounts['done'] ?? 0;
 
   // 期間内にトラブルがあった全設備の件数（ダッシュボードの表と、印刷用レポートの設備別が使う）
   const equipmentCounts = equipmentRanking ?? [];
@@ -113,11 +100,6 @@ export async function onRequestGet({ request, env }) {
     trouble_trend_by_category: troubleTrendByCategory ?? [],
     equipment_trouble_counts: equipmentCounts,
     repair_summary:         repairSummary,
-    inspection_rate: {
-      planned: totalPlanned,
-      done:    donePlanned,
-      rate:    totalPlanned > 0 ? Math.round((donePlanned / totalPlanned) * 100) : null,
-    },
     activity: {
       troubles:    troubleTotal?.n    ?? 0,
       repairs:     repairTotal?.n     ?? 0,

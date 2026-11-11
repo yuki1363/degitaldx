@@ -2,7 +2,6 @@
 //   期間を渡すと、概要・ジャンル別・設備別の故障件数（期間内にトラブルがあった全設備）・トラブル一覧・未完了の業務依頼・期限超過の保全計画を
 //   A4 1ページ前後にまとめて描画する（印刷は dashboard.js 側のボタン。PDF保存も可）。
 //   既存の API（/api/stats・/api/troubles・/api/repairs・/api/plans）の読み取りだけを使う。
-//   ※ 点検実施率は /api/stats と同じ（期間内の「点検」計画のうち完了したものの割合）。
 import { api } from '/js/api.js';
 import { el, render, formatDate, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { isValidPeriod, shiftDate } from '/js/report-period.js';
@@ -31,16 +30,17 @@ export async function renderReport(docBox, from, to, user) {
   if (!isValidPeriod(from, to)) { render(docBox, el('p', { class: 'empty' }, '期間を正しく指定してください（開始日 ≦ 終了日）。')); return; }
   // /api/plans の to は「含まない」ため、終了日の翌日を渡す
   const planTo = shiftDate(to, 1);
+  // 件数の上限（既定500/既定500）より多く拾えるよう明示的に増やす（件数の見出し・CSVが
+  // 黙って欠けないように。それでも超えるときは troublesRes.truncated 等で画面に案内する）
   const [stats, troublesRes, repairsRes, plansRes] = await Promise.all([
     api.get(`/api/stats?from=${from}&to=${to}`),
-    api.get(`/api/troubles?from=${from}&to=${to}`),
-    api.get('/api/repairs'),
+    api.get(`/api/troubles?from=${from}&to=${to}&limit=5000`),
+    api.get('/api/repairs?limit=3000'),
     api.get(`/api/plans?from=${from}&to=${planTo}`).catch(() => ({ plans: [] })),
   ]);
   const troubles = troublesRes.troubles || [];
   const openRepairs = (repairsRes.repairs || []).filter((r) => r.status !== 'done');
   const overduePlans = (plansRes.plans || []).filter((p) => p.status === 'overdue');
-  const rate = stats.inspection_rate || {};
   const act = stats.activity || {};
   const equipCounts = stats.equipment_trouble_counts || [];
   const maxTrend = Math.max(1, ...(stats.trouble_trend || []).map((m) => m.count));
@@ -63,7 +63,6 @@ export async function renderReport(docBox, from, to, user) {
       tile('業務依頼（新規）', act.repairs ?? 0, '件'),
       tile('点検記録', act.inspections ?? 0, '件'),
       tile('日報', act.reports ?? 0, '件'),
-      tile('点検計画の実施率', rate.rate != null ? `${rate.rate}%` : '—', rate.planned ? `${rate.done}/${rate.planned}件` : '計画なし'),
       tile('未完了の依頼', openRepairs.length, '件（現時点）'),
     ]),
     section('ジャンル別トラブル', table(['ジャンル', '件数', ''],
@@ -82,13 +81,18 @@ export async function renderReport(docBox, from, to, user) {
     section(`設備別 故障件数（${equipCounts.length}設備）`, table(['設備', '件数'],
       equipCounts.map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
       'この期間のトラブルはありません。')),
-    section(`期間内のトラブル（${troubles.length}件）`, el('div', {}, [
+    section(`期間内のトラブル（${troubles.length}件${troublesRes.truncated ? '・件数が多いため先頭のみ' : ''}）`, el('div', {}, [
+      troublesRes.truncated
+        ? el('p', { class: 'rpt-more' }, '件数が多いため先頭のみの集計です。正確な件数は期間を絞って確認してください。')
+        : null,
       table(['発生日', '設備', 'ジャンル', '現象'],
         troubles.slice(0, TROUBLE_ROWS).map((t) => el('tr', {}, [
           cell(formatDate(toJstDateStr(t.occurred_at))), cell(t.equipment_name), cell(t.category_name), cell(trunc(t.phenomenon, 60)),
         ])), 'この期間のトラブルはありません。'),
       troubles.length > TROUBLE_ROWS ? el('p', { class: 'rpt-more' }, `ほか ${troubles.length - TROUBLE_ROWS} 件（一覧はトラブル記録画面で確認できます）`) : null,
     ])),
+    repairsRes.truncated
+      ? el('p', { class: 'rpt-more' }, '業務依頼の件数が多いため、未完了件数は先頭のみの集計です。') : null,
     section(`未完了の業務依頼（${openRepairs.length}件）`, el('div', {}, [
       table(['依頼', '設備', '状況', '優先度', '期限'],
         openRepairs.slice(0, REPAIR_ROWS).map((r) => el('tr', { class: r.is_overdue ? 'rpt-overdue' : '' }, [

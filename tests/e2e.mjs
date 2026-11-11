@@ -1062,8 +1062,8 @@ section('8. ダッシュボード・保全レポート');
     .find((x) => x.innerText.includes('設備別 故障件数'))?.querySelectorAll('tbody tr').length);
   check('保全レポート: 設備別の故障件数は上限なしで全設備ぶん出る', eqRows === 12, `rows=${eqRows}`);
   const repText = await page.evaluate(() => document.getElementById('report-doc').innerText);
-  check('保全レポート: 点検実施率・日報・業務依頼内訳・月別推移が出る',
-    repText.includes('点検計画の実施率') && repText.includes('日報') && repText.includes('業務依頼 ステータス内訳') && repText.includes('トラブル月別推移'), repText.slice(0, 200));
+  check('保全レポート: 日報・業務依頼内訳・月別推移が出る（点検実施率は廃止済みなので出ない）',
+    !repText.includes('点検計画の実施率') && repText.includes('日報') && repText.includes('業務依頼 ステータス内訳') && repText.includes('トラブル月別推移'), repText.slice(0, 200));
   const tabsFit = await page.evaluate(() => { const t = document.querySelector('.tab-bar'); return getComputedStyle(t).overflowX; });
   check('ダッシュボード: タブ欄は横スクロールさせない', tabsFit === 'visible', tabsFit);
   await page.setViewportSize({ width: 375, height: 720 });
