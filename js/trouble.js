@@ -113,19 +113,7 @@ async function renderList(equipmentId) {
   const csvSjisBtn = el('button', { class: 'btn btn-sm', onclick: () => exportCsv('sjis') }, '📥 CSV（Shift_JIS）');
   const csvCount = el('span', { class: 'hint' }, '');
 
-  // 過去のトラブルをキーワードで探す入口（検索は横断検索に集約。原因・対策の参考にする）
-  const kwInput = el('input', { type: 'search', placeholder: '例: コンプレッサ 異音', style: 'flex:1;min-width:0', 'aria-label': 'キーワード' });
-  const goSearch = () => {
-    const q = kwInput.value.trim();
-    window.location.href = `/pages/search?type=trouble${q ? `&q=${encodeURIComponent(q)}` : ''}`;
-  };
-  kwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') goSearch(); });
-
   render(app, [
-    el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title' }, '🔎 過去のトラブルを探す（原因・対策の参考に）'),
-      el('div', { class: 'inline-form' }, [kwInput, el('button', { class: 'btn btn-primary', type: 'button', id: 'trouble-kw-go', onclick: goSearch }, '横断検索')]),
-    ]),
     el('div', { class: 'card' }, [
       el('div', { class: 'field-pair' }, [
         el('div', { class: 'field' }, [el('label', {}, 'ジャンル'), catSel]),

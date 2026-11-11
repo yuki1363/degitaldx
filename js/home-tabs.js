@@ -6,7 +6,6 @@
 import { api } from '/js/api.js';
 import { el, render, formatDate, formatDateTime, jstTodayStr } from '/js/util.js';
 import { fetchPlanStatus } from '/js/plan-summary.js';
-import { pendingUpdates, updatesTabContent } from '/js/update-notice.js';
 
 const TYPE_BADGE = {
   inspection:   { label: '点検',    color: '#1e40af', bg: '#dbeafe' },
@@ -237,10 +236,7 @@ export async function loadHomeTabs(container) {
   const upcomingCount = upcoming.length + annualAlerts.thisMonth.length;
   const activityCount = notifUnread + (chatStatus.unread_count || 0);
 
-  // 新しい版の更新のお知らせ（「確認した」を押すまで「🆕 更新」タブが出る）
-  const unseen = pendingUpdates();
-
-  if (!overdueCount && !upcomingCount && !activityCount && !notifications.length && unseen.length === 0) {
+  if (!overdueCount && !upcomingCount && !activityCount && !notifications.length) {
     render(container, []);
     return;
   }
@@ -260,17 +256,9 @@ export async function loadHomeTabs(container) {
     },
   ];
 
-  if (unseen.length > 0) {
-    tabs.push({
-      key: 'updates', label: '🆕 更新', count: unseen.length,
-      content: () => updatesTabContent(unseen, onUpdatesConfirmed),
-    });
-  }
-
-  // 期限超過 → 更新 → 直近 → 通知 の順で優先タブを決定
+  // 期限超過 → 直近 → 通知 の順で優先タブを決定
   let active = 'activity';
   if (upcomingCount) active = 'upcoming';
-  if (unseen.length > 0) active = 'updates';
   if (overdueCount)  active = 'overdue';
 
   const bar  = el('div', { class: 'home-tabs-bar', role: 'tablist' });
@@ -279,8 +267,7 @@ export async function loadHomeTabs(container) {
   // 折りたたみ: 通知が機能タイルを画面下へ押し出さないよう、既定では本文を畳んで
   // カウントバーだけ表示する（タブをタップで開閉）。ただし期限超過があるときだけは
   // 見落とし防止のため最初から開いておく。
-  //   更新のお知らせも見落とさないよう、期限超過が無いときは最初から開く。
-  let collapsed = overdueCount === 0 && unseen.length === 0;
+  let collapsed = overdueCount === 0;
   const applyCollapsed = () => {
     body.style.display = collapsed ? 'none' : '';
     bar.classList.toggle('is-collapsed', collapsed);
@@ -293,36 +280,21 @@ export async function loadHomeTabs(container) {
     applyCollapsed();
   };
 
-  const buildBar = () => {
-    bar.replaceChildren();
-    tabs.forEach((t) => {
-      const badge = t.count > 0
-        ? el('span', { class: 'home-tab-count' + (t.over ? ' is-over' : '') }, String(t.count))
-        : null;
-      bar.appendChild(el('button', {
-        class: 'home-tab', type: 'button', title: 'タップで開閉',
-        onclick: () => {
-          if (collapsed) { collapsed = false; active = t.key; }
-          else if (active === t.key) { collapsed = true; }   // 同じタブを再タップで畳む
-          else { active = t.key; }
-          renderActive();
-        },
-      }, [el('span', { class: 'home-tab-label' }, t.label), badge]));
-    });
-  };
+  tabs.forEach((t) => {
+    const badge = t.count > 0
+      ? el('span', { class: 'home-tab-count' + (t.over ? ' is-over' : '') }, String(t.count))
+      : null;
+    bar.appendChild(el('button', {
+      class: 'home-tab', type: 'button', title: 'タップで開閉',
+      onclick: () => {
+        if (collapsed) { collapsed = false; active = t.key; }
+        else if (active === t.key) { collapsed = true; }   // 同じタブを再タップで畳む
+        else { active = t.key; }
+        renderActive();
+      },
+    }, [el('span', { class: 'home-tab-label' }, t.label), badge]));
+  });
 
-  // 「確認した」: 更新タブを消す（残るタブが無ければホーム概要ごと消す）
-  function onUpdatesConfirmed() {
-    const i = tabs.findIndex((t) => t.key === 'updates');
-    if (i !== -1) tabs.splice(i, 1);
-    if (tabs.length === 0) { render(container, []); return; }
-    active = tabs[0].key;
-    collapsed = overdueCount === 0;
-    buildBar();
-    renderActive();
-  }
-
-  buildBar();
   render(container, el('section', { class: 'home-tabs' }, [bar, body]));
   renderActive();
 }
