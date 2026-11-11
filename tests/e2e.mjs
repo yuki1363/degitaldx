@@ -930,6 +930,9 @@ for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api
   await page.fill('input[type="date"] >> nth=1', '2032-03-31');
   await page.click('button.btn-sm:text-is("集計")');
   await page.waitForTimeout(1200);
+  const closedOpen = await page.locator('details.equip-counts').evaluate((d) => d.open);
+  check('ダッシュボード: 設備別故障件数は折りたたみ（最初は閉じている）', closedOpen === false);
+  await page.click('details.equip-counts summary');
   const rows = await page.locator('.extract-table tbody tr').count();
   check('ダッシュボード: 設備別故障件数が一覧表で全設備ぶん出る', rows === 12, `rows=${rows}`);
   await page.fill('input[placeholder*="設備名・設備番号で絞り込み"]', '件数表設備12');

@@ -1475,6 +1475,14 @@ input.is-abnormal {
   color: var(--color-text);
 }
 
+/* ダッシュボード: 設備別故障件数の折りたたみ */
+.equip-counts summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  padding: 6px 0;
+}
+
 /* 抽出レポート */
 .type-check {
   display: inline-flex;

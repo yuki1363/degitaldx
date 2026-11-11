@@ -94,8 +94,10 @@ function buildEquipmentCounts(rows) {
   const search = el('input', { type: 'search', placeholder: '設備名・設備番号で絞り込み', style: 'flex:1;min-width:0' });
   search.addEventListener('input', () => { state.q = search.value; draw(); });
   draw();
-  return el('div', {}, [
-    el('div', { class: 'action-row', style: 'margin-bottom:8px' }, [search, sortBtns.count, sortBtns.code]),
+  // 普段は閉じておき、タップで開く（設備が多くてもダッシュボードが縦に長くならない）
+  return el('details', { class: 'equip-counts' }, [
+    el('summary', {}, `設備ごとの件数を見る（${rows.length}設備・合計${total}件）`),
+    el('div', { class: 'action-row', style: 'margin:8px 0' }, [search, sortBtns.count, sortBtns.code]),
     note,
     el('div', { style: 'max-height:420px;overflow:auto' },
       el('table', { class: 'extract-table' }, [
