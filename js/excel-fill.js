@@ -96,6 +96,10 @@ function buildValues(type, r) {
     '発生日時': formatDateTime(r.occurred_at),
     '発生年月日': formatDate(r.occurred_at),
     '発生年': od.y, '発生月': od.mo, '発生日': od.da,
+    // 調査日時は発生日時と同じ（日時を二つに分けず、トラブルの発生日時に統合）
+    '調査日時': formatDateTime(r.occurred_at),
+    '調査年月日': formatDate(r.occurred_at),
+    '調査年': od.y, '調査月': od.mo, '調査日': od.da,
     '設備番号': r.equipment_code || '',
     '設備名': r.equipment_name || '',
     'ジャンル': r.category_name || '',
@@ -307,6 +311,12 @@ async function fillAndDownload(template, type, record, inputValues) {
   // 入力欄が空のタグは、記録／計画の内容で補う（トラブル報告書は記録の内容を優先して反映）
   const inputs = applyReportFallbacks(type, record, inputValues);
   const values = { ...auto, ...base, ...inputs };
+  // トラブル報告書: 記録から入るタグ（調査日時など）は、以前に保存した帳票入力があっても記録の値を優先する
+  if (type === 'trouble_report') {
+    for (const t of RECORD_TAGS.trouble_report) {
+      if (auto[t] != null && String(auto[t]).trim() !== '') values[t] = auto[t];
+    }
+  }
 
   // ○で1つ選択: 群タグ（例 休止種別）→選んだ選択肢名。各選択肢セル（例 {{故障休止}}）は
   // 「選択肢名」を残したまま、選ばれたものにだけ ○ を付ける（○◯故障休止 のように）。
