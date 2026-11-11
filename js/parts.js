@@ -19,6 +19,16 @@ import qrcode from '/js/vendor/qrcode.mjs';
 //   （E2E では window.__PARTS_REFRESH_MS__ で短くして確認する）
 const AUTO_REFRESH_MS = Number(window.__PARTS_REFRESH_MS__) || 20_000;
 
+// 長時間操作が無ければ自動更新も止める（タブレットを開いたまま放置される等で、
+// D1 の読み取り枠（無料枠 500万行/日）を無駄に消費しないように）。
+// タップ・キー操作・スクロールがあれば自動更新を再開する（E2E では __PARTS_IDLE_MS__ で短縮）。
+const IDLE_STOP_MS = Number(window.__PARTS_IDLE_MS__) || 5 * 60_000;
+let lastActivityAt = Date.now();
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
+  window.addEventListener(ev, () => { lastActivityAt = Date.now(); }, { passive: true })
+);
+const isIdle = () => Date.now() - lastActivityAt > IDLE_STOP_MS;
+
 // 1回の入出庫の識別番号。押し直し・送信待ちの再送でも同じ番号を送り、サーバーは2回反映しない
 const newTxId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
 
@@ -688,7 +698,7 @@ async function renderList() {
   // 自動更新: 画面を開いている間は一定間隔で在庫を取り直す（他の人の入出庫を反映）。
   // 棚卸中・入力中は入力を消さないよう更新しない。裏に回っている間・オフラインの間も止める
   setInterval(() => {
-    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode) return;
+    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode || isIdle()) return;
     const active = document.activeElement;
     if (active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)) return;
     if (document.querySelector('.modal-backdrop, .sheet-backdrop, .order-dialog')) return;
@@ -913,7 +923,7 @@ async function renderDetail(id) {
   // 自動更新: 画面を開いている間は一定間隔で取り直す（他の人の入出庫を反映）。入力中は邪魔しない
   clearInterval(detailTimer);
   detailTimer = setInterval(() => {
-    if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+    if (document.visibilityState !== 'visible' || navigator.onLine === false || isIdle()) return;
     const active = document.activeElement;
     const typing = active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
     const touched = txQtyEl.value !== '1' || txNoteEl.value !== '' || txTypeEl.value !== 'in';

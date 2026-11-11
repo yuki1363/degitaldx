@@ -266,12 +266,16 @@ export async function onRequestPost({ request, env, data }) {
   if (fileIdList.length > 0) {
     await attachFiles(env, { fileIds: fileIdList, relatedTable: 'chat_messages', relatedId: id, userEmail, now });
   }
+  // 本文は監査ログに残さない（チャットは10日で物理削除する短期の申し送り用途であり、
+  // 個人情報の入力禁止を周知してはいるものの、本文には電話番号・氏名等が入り得るため。
+  // audit_log はチャットと違って自動削除されず永続するので、ここに本文を残すと「10日で消える」
+  // 設計と矛盾する。誰が・いつ・どの文字数で投稿したかだけを記録する）。
   await writeAuditLog(db, {
     tableName: 'chat_messages',
     recordId: id,
     action: 'create',
     changedBy: userEmail,
-    diff: { channel, body: (msgBody || '').trim(), file_ids: fileIdList },
+    diff: { channel, body_length: (msgBody || '').trim().length, file_ids: fileIdList },
   });
 
   return json({ id }, 201);

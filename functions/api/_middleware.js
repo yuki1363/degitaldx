@@ -16,6 +16,8 @@ export async function onRequest(context) {
 
 async function handle(context) {
   try {
+    const csrf = checkOrigin(context.request);
+    if (csrf) return csrf;
     const { user, error } = await resolveUser(context.request, context.env);
     if (error) return error;
     context.data.user = user;
@@ -24,6 +26,20 @@ async function handle(context) {
     console.error('API error:', err && err.stack ? err.stack : err);
     return jsonError(500, 'サーバーエラーが発生しました。時間をおいて再度お試しください。');
   }
+}
+
+// CSRF対策（簡易）: 更新系メソッドは Origin ヘッダーが自サイトと一致するときだけ通す。
+//   Cloudflare Access の認証はブラウザの Cookie/ヘッダーに依存するため、別サイトに置いた
+//   フォーム等から（ログイン済みブラウザ経由で）API を叩かれる危険がある（CSRF）。
+//   fetch は同一オリジンの POST/PUT/DELETE でも Origin ヘッダーを送るため、これで実害なく防げる。
+//   GET/HEAD は副作用がないため対象外。Origin が無いリクエスト（一般的なブラウザのfetchでは
+//   通常付く）は、古いUA等を誤って拒否しないよう素通りさせる（Access の認証自体は別途効く）。
+function checkOrigin(request) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return null;
+  const origin = request.headers.get('Origin');
+  if (!origin) return null;
+  if (origin === new URL(request.url).origin) return null;
+  return jsonError(403, '不正なリクエスト元からの操作です。ページを再読み込みしてやり直してください。');
 }
 
 // API 応答のセキュリティヘッダー（静的ファイルはルートの _headers で付ける）。
