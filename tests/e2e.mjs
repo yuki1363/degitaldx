@@ -9,7 +9,7 @@
 //     5. オフライン送信キュー（圏外保存 → 復帰で自動送信）
 //     6. 部品の発注中バッジ → 入庫で自動解除
 //     7. 保全計画: 期間予定が週表示の全日に出る
-//     8. ダッシュボード: カスタムグラフ描画
+//     8. ダッシュボード・保全レポート（年度グラフ・期間・設備別・CSV）
 //     9. ユーティリティ日報（1日1件ガード・異常判定・横断検索）
 //    10. オフラインでの静的ページ表示（SWプリキャッシュ）
 
@@ -910,7 +910,8 @@ check('年度リセット: リセット直後に過去年の今月分が期限�
 }
 for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 
-// ---------- 8.0 設備別の故障件数（上位10件のランキングではなく全設備。レポートタブに表示） ----------
+// ---------- 8.0 ダッシュボード（年度のグラフ）と保全レポート（期間・設備別） ----------
+section('8. ダッシュボード・保全レポート');
 {
   const ids = [];
   for (let i = 1; i <= 12; i++) {
@@ -925,19 +926,61 @@ for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api
     st?.equipment_trouble_counts?.length === 12 && st?.equipment_ranking === undefined
       && st.equipment_trouble_counts[0].trouble_count === 3 && st.equipment_trouble_counts[0].equipment_id === ids[11],
     JSON.stringify(st?.equipment_trouble_counts?.length));
-  // サマリーには設備別を出さない（レポートタブと重複するため）。レポートタブに全設備が出る
+  const stFy = (await api('/api/stats?from=2031-10-01&to=2032-09-30')).json;
+  const fyRows = (stFy?.trouble_trend_by_category || []).filter((r) => r.month === '2032-03');
+  check('統計API: ジャンル別の月推移（月×ジャンル）を返す', fyRows.length >= 1 && fyRows.reduce((a, r) => a + r.count, 0) === 14, JSON.stringify(fyRows));
+
+  // サマリー: 年度（10月〜翌9月）のグラフ。期間の操作欄は出さず、設備別・カスタムグラフもない
   await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#fy-label', { timeout: 8000 });
+  await page.waitForTimeout(600);
+  const dashNow = new Date(Date.now() + 9 * 3600 * 1000);
+  const dashYm = `${dashNow.getUTCFullYear()}-${String(dashNow.getUTCMonth() + 1).padStart(2, '0')}`;
+  const curFy = dashNow.getUTCMonth() + 1 >= 10 ? dashNow.getUTCFullYear() : dashNow.getUTCFullYear() - 1;
+  const sum = await page.evaluate(() => ({
+    text: document.getElementById('tab-content').innerText,
+    fy: document.getElementById('fy-label').innerText,
+    bars: document.getElementById('report-bars').hidden,
+    tabs: [...document.querySelectorAll('.tab-btn')].map((b) => b.textContent.trim()),
+    nextDisabled: document.getElementById('fy-next').disabled,
+    charts: ['chart-trend', 'chart-category-trend', 'chart-category'].map((id) => !!(window.Chart && Chart.getChart(id))),
+  }));
+  check('ダッシュボード: 今年度（10月〜翌9月）で開く', sum.fy.includes(`FY${curFy}`) && sum.fy.includes(`${curFy}/10/01`) && sum.fy.includes(`${curFy + 1}/09/30`), sum.fy);
+  check('ダッシュボード: 年度のグラフ（月別推移・ジャンル別の月推移・ジャンル別）が描かれる', sum.charts.every(Boolean), JSON.stringify(sum.charts));
+  check('ダッシュボード: カスタムグラフのタブはない・期間の操作欄はサマリーに出ない', sum.tabs.length === 2 && !sum.tabs.some((t) => t.includes('カスタム')) && sum.bars === true, JSON.stringify({ tabs: sum.tabs, bars: sum.bars }));
+  check('ダッシュボード: サマリーに設備別・依頼・点検達成率・日報・業務依頼内訳は出さない',
+    !sum.text.includes('設備別') && !sum.text.includes('依頼（未完了）') && !sum.text.includes('点検達成率') && !sum.text.includes('日報') && !sum.text.includes('ステータス内訳') && sum.text.includes('ジャンル別の月推移'), sum.text.slice(0, 200));
+  check('ダッシュボード: 次の年度ボタンは今年度のとき押せない', sum.nextDisabled === true);
+  await page.click('#fy-prev');
+  await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1, { timeout: 8000 });
+  check('ダッシュボード: 「前の年度」で1年前の年度に切り替わり、次の年度に戻れる',
+    await page.evaluate(() => !document.getElementById('fy-next').disabled));
+  await page.click('#fy-next');
+  await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy, { timeout: 8000 });
+
+  // レポート: 期間の初期値は今月。直近6ヶ月ボタン。期間を指定すると設備別が全設備ぶん出る
+  await page.goto(`${BASE}/pages/dashboard?tab=report`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
+  const dashDef = await page.evaluate(() => ({
+    active: document.querySelector('.chip.is-active')?.dataset.kind,
+    from: document.querySelector('.period-bar input[type="date"]').value,
+    to: document.querySelectorAll('.period-bar input[type="date"]')[1].value,
+  }));
+  check('レポート: 期間の初期値は今月（1日〜月末）', dashDef.active === 'month' && dashDef.from === `${dashYm}-01` && dashDef.to.startsWith(dashYm), JSON.stringify(dashDef));
+  await page.click('.chip[data-kind="last6months"]');
+  await page.waitForTimeout(800);
+  const dash6 = await page.evaluate(() => ({ active: document.querySelector('.chip.is-active')?.dataset.kind, from: document.querySelector('.period-bar input[type="date"]').value }));
+  check('レポート: 直近6ヶ月ボタンで期間が5ヶ月前の1日からになる', dash6.active === 'last6months' && dash6.from < `${dashYm}-01` && /-01$/.test(dash6.from), JSON.stringify(dash6));
   await page.fill('.period-bar input[type="date"] >> nth=0', '2032-03-01');
   await page.fill('.period-bar input[type="date"] >> nth=1', '2032-03-31');
   await page.click('.period-bar button.btn-sm:text-is("集計")');
-  await page.waitForTimeout(1200);
-  check('ダッシュボード: サマリーに設備別の表は出さない（レポートと重複させない）',
-    await page.locator('details.equip-counts').count() === 0 && !(await page.evaluate(() => document.getElementById('tab-content').innerText.includes('設備別'))));
-  await page.click('#tab-btn-report');
-  await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
+  await page.waitForFunction(() => document.getElementById('report-doc')?.innerText.includes('E2E件数表'), { timeout: 8000 });
   const eqRows = await page.evaluate(() => [...document.querySelectorAll('#report-doc .rpt-section')]
     .find((x) => x.innerText.includes('設備別 故障件数'))?.querySelectorAll('tbody tr').length);
   check('保全レポート: 設備別の故障件数は上限なしで全設備ぶん出る', eqRows === 12, `rows=${eqRows}`);
+  const repText = await page.evaluate(() => document.getElementById('report-doc').innerText);
+  check('保全レポート: 点検実施率・日報・業務依頼内訳・月別推移が出る',
+    repText.includes('点検計画の実施率') && repText.includes('日報') && repText.includes('業務依頼 ステータス内訳') && repText.includes('トラブル月別推移'), repText.slice(0, 200));
   const tabsFit = await page.evaluate(() => { const t = document.querySelector('.tab-bar'); return getComputedStyle(t).overflowX; });
   check('ダッシュボード: タブ欄は横スクロールさせない', tabsFit === 'visible', tabsFit);
   await page.setViewportSize({ width: 375, height: 720 });
@@ -947,46 +990,24 @@ for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api
   for (const id of ids.filter(Boolean)) await api(`/api/equipment/${id}`, { method: 'DELETE' });
 }
 
-// 期間の初期値は今月。「直近6ヶ月」ボタンで5ヶ月前の1日〜今月末にできる
-await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
-const dashDef = await page.evaluate(() => ({
-  active: document.querySelector('.chip.is-active')?.dataset.kind,
-  from: document.querySelector('.period-bar input[type="date"]').value,
-  to: document.querySelectorAll('.period-bar input[type="date"]')[1].value,
-}));
-const dashNow = new Date(Date.now() + 9 * 3600 * 1000);
-const dashYm = `${dashNow.getUTCFullYear()}-${String(dashNow.getUTCMonth() + 1).padStart(2, '0')}`;
-check('ダッシュボード: 期間の初期値は今月（1日〜月末）', dashDef.active === 'month' && dashDef.from === `${dashYm}-01` && dashDef.to.startsWith(dashYm), JSON.stringify(dashDef));
-await page.click('.chip[data-kind="last6months"]');
-await page.waitForTimeout(800);
-const dash6 = await page.evaluate(() => ({ active: document.querySelector('.chip.is-active')?.dataset.kind, from: document.querySelector('.period-bar input[type="date"]').value }));
-check('ダッシュボード: 直近6ヶ月ボタンで期間が5ヶ月前の1日からになる', dash6.active === 'last6months' && dash6.from < `${dashYm}-01` && /-01$/.test(dash6.from), JSON.stringify(dash6));
+// ホームの「更新のお知らせ」: 新しい版のあとに出て、「確認した」で閉じ、次回からは出ない。更新履歴はいつでも見られる
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+await page.evaluate(() => localStorage.removeItem('updates:seen'));
+await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+const swVer = (await (await page.request.get(`${BASE}/sw.js`)).text()).match(/CACHE_VERSION = 'v([\d.]+)'/)?.[1];
+const noticeText = await page.locator('#update-notice-card').innerText().catch(() => '');
+check('ホーム: 新しい版のあとに「更新しました」のお知らせが出る（最新の版の内容）', noticeText.includes('更新しました') && noticeText.includes(`v${swVer}`), noticeText.slice(0, 120));
+await page.click('#update-notice-ok');
+check('ホーム: 「確認した」でお知らせが消える', await page.locator('#update-notice-card').count() === 0);
+await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+check('ホーム: 確認したあとの再表示では出ない', await page.locator('#update-notice-card').count() === 0);
+await page.click('#update-history summary');
+const histCount = await page.locator('#update-history .update-entry').count();
+check('ホーム: 更新履歴から過去の更新も見られる', histCount >= 2, `entries=${histCount}`);
 
-// サマリーはトラブルのカードと2つのグラフだけ。依頼・点検達成率・日報・業務依頼内訳はレポートタブにある
-await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
-await page.waitForSelector('#chart-trend, #tab-content .empty', { timeout: 8000 });
-const sumText = await page.evaluate(() => document.getElementById('tab-content').innerText);
-check('ダッシュボード: サマリーに依頼・点検達成率・日報・業務依頼内訳は出さない',
-  !sumText.includes('依頼（未完了）') && !sumText.includes('点検達成率') && !sumText.includes('日報') && !sumText.includes('ステータス内訳') && sumText.includes('トラブル月別推移'), sumText.slice(0, 200));
-await page.click('#tab-btn-report');
-await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
-const repText = await page.evaluate(() => document.getElementById('report-doc').innerText);
-check('保全レポート: 点検実施率・日報・業務依頼内訳・月別推移が出る',
-  repText.includes('点検計画の実施率') && repText.includes('日報') && repText.includes('業務依頼 ステータス内訳') && repText.includes('トラブル月別推移'), repText.slice(0, 200));
-
-// ---------- 8. カスタムグラフ ----------
-section('8. ダッシュボード カスタムグラフ');
-await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(600);
-await page.click('button:has-text("カスタムグラフ")');
-await page.waitForTimeout(1500);
-const graph = await page.evaluate(() => ({
-  canvas: !!document.getElementById('chart-custom'),
-  chart: typeof Chart !== 'undefined' && !!Chart.getChart('chart-custom'),
-}));
-check('カスタムグラフ描画', graph.canvas && graph.chart, JSON.stringify(graph));
-
-// ダッシュボードからもトラブル記録CSV（集計期間・04一覧と同じ列）を出力できる
+// レポートタブからもトラブル記録CSV（集計期間・04一覧と同じ列）を出力できる
+await page.goto(`${BASE}/pages/dashboard?tab=report`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#trouble-csv-bar', { state: 'visible', timeout: 8000 });
 const [dashDl] = await Promise.all([
   page.waitForEvent('download', { timeout: 10000 }).catch(() => null),
   page.click('#trouble-csv-bar button:has-text("UTF-8")'),

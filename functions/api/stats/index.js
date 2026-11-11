@@ -23,6 +23,7 @@ export async function onRequestGet({ request, env }) {
   const [
     { results: troubleTrend },
     { results: troubleByCategory },
+    { results: troubleTrendByCategory },
     { results: equipmentRanking },
     { results: repairStatusRows },
     { results: planRows },
@@ -46,6 +47,16 @@ export async function onRequestGet({ request, env }) {
       LEFT JOIN trouble_category tc ON tr.category_id = tc.id
       WHERE tr.deleted_at IS NULL AND tr.occurred_at >= ? AND tr.occurred_at < ?
       GROUP BY tr.category_id ORDER BY count DESC
+    `).bind(fromTs, toTsExcl).all(),
+
+    // ジャンル別の月推移（月×ジャンル。ダッシュボードの積み上げ棒グラフ用）
+    db.prepare(`
+      SELECT strftime('%Y-%m', tr.occurred_at, '+9 hours') AS month,
+             COALESCE(tc.name, '未分類') AS category_name, COUNT(*) AS count
+      FROM trouble_record tr
+      LEFT JOIN trouble_category tc ON tr.category_id = tc.id
+      WHERE tr.deleted_at IS NULL AND tr.occurred_at >= ? AND tr.occurred_at < ?
+      GROUP BY month, tr.category_id ORDER BY month
     `).bind(fromTs, toTsExcl).all(),
 
     // 設備別の故障件数（期間内にトラブルがあった設備すべて。GROUP BYの母数は設備数程度のため
@@ -99,6 +110,7 @@ export async function onRequestGet({ request, env }) {
     period: { from: fromStr, to: toStr },
     trouble_trend:          troubleTrend      ?? [],
     trouble_by_category:    troubleByCategory ?? [],
+    trouble_trend_by_category: troubleTrendByCategory ?? [],
     equipment_trouble_counts: equipmentCounts,
     repair_summary:         repairSummary,
     inspection_rate: {
