@@ -48,11 +48,12 @@ export async function onRequestGet({ request, env }) {
       GROUP BY tr.category_id ORDER BY count DESC
     `).bind(fromTs, toTsExcl).all(),
 
-    // 設備別故障ランキング（全件取得→JS側で上位10件+10位同着を分離。GROUP BYの母数は設備数程度のため
-    // LIMITなしでも軽い。同点内の順序をequipment_nameで固定しないと10位のカットラインで
-    // 表示される設備がSQLite内部順序次第で変わってしまう）
+    // 設備別の故障件数（期間内にトラブルがあった設備すべて。GROUP BYの母数は設備数程度のため
+    // LIMITなしでも軽い）。ダッシュボードは全件を表で表示し、保全レポート(01)は上位10件を使う。
+    // 同点内の順序をequipment_nameで固定しないと、上位10件のカットラインがSQLite内部順序で変わる
     db.prepare(`
       SELECT
+        tr.equipment_id AS equipment_id,
         COALESCE(e.name, '設備未指定') AS equipment_name,
         e.code AS equipment_code,
         COUNT(*) AS trouble_count
@@ -91,21 +92,15 @@ export async function onRequestGet({ request, env }) {
   const totalPlanned  = Object.values(planCounts).reduce((a, b) => a + b, 0);
   const donePlanned   = planCounts['done'] ?? 0;
 
-  // 上位10件は通常表示。11位以降で10位と同じ件数（同着）のものだけ「折りたたみ」用に分離する
-  // （10位の件数未満は通常どおり非表示のまま）
-  const rankingAll = equipmentRanking ?? [];
-  const rankingTop = rankingAll.slice(0, 10);
-  const tiedCutoffCount = rankingTop.length === 10 ? rankingTop[9].trouble_count : null;
-  const rankingTiedExtra = tiedCutoffCount === null
-    ? []
-    : rankingAll.slice(10).filter((r) => r.trouble_count === tiedCutoffCount);
+  // 全設備の件数（ダッシュボード用）と上位10件（保全レポート用）
+  const equipmentCounts = equipmentRanking ?? [];
 
   return json({
     period: { from: fromStr, to: toStr },
     trouble_trend:          troubleTrend      ?? [],
     trouble_by_category:    troubleByCategory ?? [],
-    equipment_ranking:      rankingTop,
-    equipment_ranking_tied: rankingTiedExtra,
+    equipment_trouble_counts: equipmentCounts,
+    equipment_ranking:      equipmentCounts.slice(0, 10),
     repair_summary:         repairSummary,
     inspection_rate: {
       planned: totalPlanned,
