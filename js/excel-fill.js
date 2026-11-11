@@ -347,11 +347,16 @@ async function fillAndDownload(template, type, record, inputValues) {
     }
   }
 
-  // トラブル報告書: 担当者印（記録者の苗字）は、入力欄を設けず記録から自動で押す
-  if (type === 'trouble_report' && !hankoItems.some((h) => h.tag === '担当者印')) {
+  // トラブル報告書: 担当者印（記録者の苗字）は、入力欄を設けず記録から自動で押す。
+  // 用紙のタグ名は {{担当者印}}・{{担当印}}・{{担当社印}} のどれでもよい（工事連絡書と同じ赤シャチハタ）
+  if (type === 'trouble_report') {
     const surname = String(inputs['担当者印'] || '').trim();
-    values['担当者印'] = ''; // 用紙に残る {{担当者印}} のタグ文字は消す（印影画像で表現するため）
-    if (surname) hankoItems.push({ tag: '担当者印', base64: makeHankoPngBase64(surname) });
+    const png = surname ? makeHankoPngBase64(surname) : '';
+    for (const tag of ['担当者印', '担当印', '担当社印']) {
+      if (hankoItems.some((h) => h.tag === tag)) continue;
+      values[tag] = ''; // 用紙に残る {{…印}} のタグ文字は消す（印影画像で表現するため）
+      if (png) hankoItems.push({ tag, base64: png });
+    }
   }
 
   if (hankoItems.length) {

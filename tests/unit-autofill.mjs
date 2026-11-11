@@ -18,7 +18,7 @@ console.log('\n=== 単体: 帳票の入力欄の自動補完 ===');
 const trouble = { equipment_name: 'コンプレッサ', phenomenon: '異音が出る', cause: 'ベルト摩耗', countermeasure: 'ベルト交換', reporter_name: '田中 太郎', creator_name: 'x' };
 let v = applyReportFallbacks('trouble_report', trouble, {});
 ok('トラブル報告書: 調査対象←設備・トラブル名←現象・処置←対策・原因←原因', v['調査対象'] === 'コンプレッサ' && v['トラブル名'] === '異音が出る' && v['処置'] === 'ベルト交換' && v['原因'] === 'ベルト摩耗', JSON.stringify(v));
-ok('トラブル報告書: 担当者印←記録者の苗字（姓＋名なら姓だけ）', v['担当者印'] === '田中');
+ok('トラブル報告書: 担当者印←記録者の苗字（姓＋名なら姓だけ）。担当印・担当社印のタグ名でも同じ', v['担当者印'] === '田中' && v['担当印'] === '田中' && v['担当社印'] === '田中');
 ok('記録者が無ければ登録者の苗字を使う', applyReportFallbacks('trouble_report', { creator_name: '佐藤　花子' }, {})['担当者印'] === '佐藤');
 
 v = applyReportFallbacks('trouble_report', trouble, { '調査対象': '3号機', '処置': '  ', '休止時間': '30' });

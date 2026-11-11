@@ -426,11 +426,7 @@ function buildReportFields(templates) {
   }
   // 記録から入るタグ（調査対象・トラブル名・処置・担当者印・原因など）は、テンプレートが入力項目として
   // 定義していても出さない（トラブルの入力をそのまま反映するため、同じことを二度入力させない）
-  // 入力しやすいよう、よく使う休止時間・休止区分を先頭に並べる（そのほかは元の順）
-  const FIRST = ['休止時間', '休止種別'];
-  const rank = (f) => { const i = FIRST.indexOf(f.tag); return i === -1 ? FIRST.length : i; };
-  const own = (list) => list.filter((f) => !RECORD_TAGS.trouble_report.includes(f.tag))
-    .map((f, i) => ({ f, i })).sort((a, b) => rank(a.f) - rank(b.f) || a.i - b.i).map((x) => x.f);
+  const own = (list) => list.filter((f) => !RECORD_TAGS.trouble_report.includes(f.tag));
   if (fields.length === 0) return own(TROUBLE_REPORT_FIELDS.map((f) => ({ ...f })));
   return own(fields);
 }
@@ -557,31 +553,6 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     return { fld, input };
   });
 
-  // 写真・動画・PDF（保存時にまとめてアップロードして紐づける）
-  const pendingFiles = [];
-  // 送信済みファイルのID（保存が409等で失敗して押し直したとき、同じ写真を再アップロードしないため）
-  const uploadedIdOf = new WeakMap();
-  const fileListBox = el('div', { class: 'row-list' }, []);
-  const renderPending = () => {
-    render(fileListBox, pendingFiles.map((file, idx) =>
-      el('div', { class: 'file-row' }, [
-        el('span', { class: 'file-name' }, file.name),
-        el('button', {
-          class: 'btn btn-sm', type: 'button',
-          onclick: () => { pendingFiles.splice(idx, 1); renderPending(); },
-        }, '外す'),
-      ])
-    ));
-  };
-  const fileInput = el('input', {
-    type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true,
-    onchange: (e) => {
-      for (const file of e.target.files) pendingFiles.push(file);
-      renderPending();
-      e.target.value = '';
-    },
-  });
-
   // トラブル報告書（帳票）の入力欄を1項目ぶん作る（reportValues に値をバインド）
   const reportInput = (fld) => {
     const tag = fld.tag;
@@ -617,11 +588,15 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
   };
   // 帳票入力欄は再描画できる箱にしておく（下書き復元時に reportValues を反映し直すため）
-  const reportBox = el('div', {});
+  // 帳票用の項目の置き場所。現象の上・対策の下など、入力しやすい位置に分けて置く
+  const slots = { kubun: el('div', {}), yuko: el('div', {}), kyushi: el('div', {}), zuzu: el('div', {}), tokki: el('div', {}), rest: el('div', {}) };
+  const SLOT_OF = { '休止種別': 'kubun', '有効性の確認': 'yuko', '休止時間': 'kyushi', '略図': 'zuzu', '特記事項': 'tokki' };
   const renderReportSection = () => {
     // トラブルの入力と区分けしない（別の枠・見出しにせず、ほかの入力欄と同じように並べる）。
     // 帳票に必要な項目も、ここに入れた内容が「帳票出力」でExcelに差し込まれる
-    render(reportBox, reportFields.map(reportInput));
+    for (const [name, box] of Object.entries(slots)) {
+      render(box, reportFields.filter((fld) => (SLOT_OF[fld.tag] || 'rest') === name).map(reportInput));
+    }
   };
   renderReportSection();
 
@@ -701,19 +676,9 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     const pendingParts = usedInput.getPending();
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中…';
-    const fileIds = []; // アップロード済み分（オフライン失敗時のキュー投入で使うため try の外に置く）
+    const fileIds = []; // 入力画面からは添付しないため常に空（送信待ちの形式を変えないために残す）
     try {
-      // 添付（画像はリサイズしてEXIF除去、動画はそのまま）を先に送って file_ids を集める
-      for (const file of pendingFiles) {
-        saveBtn.textContent = `写真を送信中… (${fileIds.length + 1}/${pendingFiles.length})`;
-        if (!uploadedIdOf.has(file)) {
-          const prepared = await resizeImageFile(file);
-          const meta = await uploadFile(prepared, {});
-          uploadedIdOf.set(file, meta.id);
-        }
-        fileIds.push(uploadedIdOf.get(file));
-      }
-      saveBtn.textContent = '保存中…';
+      // 入力画面には写真・動画の欄を置かない（添付は詳細画面から。ここでは file_ids は空）
       body.file_ids = fileIds;
       // 使用部品は、トラブルを保存できたあとで出庫する（在庫を減らして、このトラブルに紐づける）。
       // 出庫できなかった部品があっても、トラブルは保存済み。詳細画面の「使用部品」からやり直せる
@@ -744,8 +709,6 @@ async function renderForm(existing, prefill = null, usedParts = []) {
       }
     } catch (err) {
       // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する。
-      // アップロード済みの写真IDは payload に、未送信の写真はリサイズ済みBlobでキューに入れる
-      // （二重アップロードも取り残しも発生しない）。
       const offline = err?.offline === true || navigator.onLine === false;
       if (offline && !existing) {
         if (pendingParts.length > 0 && !confirm('オフラインです。使用部品は記録されず、トラブルだけが「送信待ち」に保存されます。\n送信されたあと、詳細画面の「使用部品」から追加してください。続けますか？')) {
@@ -754,11 +717,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
           return;
         }
         try {
-          const remaining = [];
-          for (const file of pendingFiles.slice(fileIds.length)) {
-            remaining.push(await resizeImageFile(file));
-          }
-          await enqueueOffline('trouble', { ...body, file_ids: fileIds }, remaining);
+          await enqueueOffline('trouble', { ...body, file_ids: fileIds }, []);
           draft?.clear();
           guard?.clear();
           alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
@@ -796,27 +755,25 @@ async function renderForm(existing, prefill = null, usedParts = []) {
         refreshEquipBtn,
       ]),
       eqHint,
+      slots.kubun,   // 休止区分は現象の上
       field('現象（必須）', f.phenomenon),
       similarBox,
       field('原因', f.cause),
       field('対策', f.countermeasure),
-      // 帳票用の項目（休止時間・休止区分など）は、使用部品・記録者より上に置いて入力しやすくする
-      reportBox,
+      // 帳票用の項目は、対策の下に 有効性の確認 → 休止時間 → 略図 → 特記事項 の順で並べる
+      slots.yuko,
+      slots.kyushi,
+      slots.zuzu,
+      ...customInputs.filter(({ fld }) => fld.name === '略図').map(({ fld, input }) => field(fld.name, input)),
+      slots.tokki,
+      slots.rest,
       el('div', { class: 'field' }, [
         el('label', {}, '使用部品（部品在庫から選択）'),
         usedInput.node,
       ]),
       field('記録者', f.reporter_name),
       reporterOptions,
-      ...customInputs.map(({ fld, input }) => field(fld.name, input)),
-      el('div', { class: 'field' }, [
-        el('label', {}, '写真・動画'),
-        el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px' }, [
-          el('button', { type: 'button', class: 'btn btn-sm', onclick: () => fileInput.click() }, '📷 写真・動画を追加'),
-        ]),
-        fileInput,
-        fileListBox,
-      ]),
+      ...customInputs.filter(({ fld }) => fld.name !== '略図').map(({ fld, input }) => field(fld.name, input)),
       el('div', { class: 'action-row' }, [
         saveBtn,
         el('button', {
