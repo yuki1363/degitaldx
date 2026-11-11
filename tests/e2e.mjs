@@ -962,6 +962,18 @@ await page.waitForTimeout(800);
 const dash6 = await page.evaluate(() => ({ active: document.querySelector('.chip.is-active')?.dataset.kind, from: document.querySelector('.period-bar input[type="date"]').value }));
 check('ダッシュボード: 直近6ヶ月ボタンで期間が5ヶ月前の1日からになる', dash6.active === 'last6months' && dash6.from < `${dashYm}-01` && /-01$/.test(dash6.from), JSON.stringify(dash6));
 
+// サマリーはトラブルのカードと2つのグラフだけ。依頼・点検達成率・日報・業務依頼内訳はレポートタブにある
+await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
+await page.waitForSelector('#chart-trend, #tab-content .empty', { timeout: 8000 });
+const sumText = await page.evaluate(() => document.getElementById('tab-content').innerText);
+check('ダッシュボード: サマリーに依頼・点検達成率・日報・業務依頼内訳は出さない',
+  !sumText.includes('依頼（未完了）') && !sumText.includes('点検達成率') && !sumText.includes('日報') && !sumText.includes('ステータス内訳') && sumText.includes('トラブル月別推移'), sumText.slice(0, 200));
+await page.click('#tab-btn-report');
+await page.waitForSelector('#report-doc .rpt-tiles', { timeout: 8000 });
+const repText = await page.evaluate(() => document.getElementById('report-doc').innerText);
+check('保全レポート: 点検実施率・日報・業務依頼内訳・月別推移が出る',
+  repText.includes('点検計画の実施率') && repText.includes('日報') && repText.includes('業務依頼 ステータス内訳') && repText.includes('トラブル月別推移'), repText.slice(0, 200));
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });

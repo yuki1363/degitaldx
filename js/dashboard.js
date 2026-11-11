@@ -59,58 +59,21 @@ function drawTroubleByCategory(canvasId, data) {
   });
 }
 
-function drawRepairSummary(canvasId, summary) {
-  destroyChart(canvasId);
-  const STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
-  const keys = ['open', 'in_progress', 'waiting_parts', 'done'];
-  const values = keys.map((k) => summary[k] ?? 0);
-  new Chart(document.getElementById(canvasId), {
-    type: 'doughnut',
-    data: {
-      labels:   keys.map((k) => STATUS_LABELS[k]),
-      datasets: [{ data: values, backgroundColor: [CHART_COLORS.blue, CHART_COLORS.orange, CHART_COLORS.purple, CHART_COLORS.green] }],
-    },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } },
-  });
-}
-
 // ---------------- サマリータブ ----------------
 
 async function renderSummary(fromStr, toStr) {
   render(app.querySelector('#tab-content'), el('p', { class: 'loading' }, '集計中…'));
   const stats = await api.get(`/api/stats?from=${fromStr}&to=${toStr}`);
 
-  const rateText = stats.inspection_rate.rate !== null
-    ? `${stats.inspection_rate.rate}%（${stats.inspection_rate.done}/${stats.inspection_rate.planned}件）`
-    : 'データなし';
-
-  const openRepairs = (stats.repair_summary.open ?? 0) + (stats.repair_summary.in_progress ?? 0) + (stats.repair_summary.waiting_parts ?? 0);
-
   const canTrend    = makeCanvas('chart-trend');
   const canCategory = makeCanvas('chart-category');
-  const canRepair   = makeCanvas('chart-repair');
 
   render(app.querySelector('#tab-content'), [
     // サマリーカード
-    el('div', { class: 'summary-grid' }, [
+    el('div', { class: 'summary-grid', style: 'grid-template-columns:1fr' }, [
       el('div', { class: 'summary-card' }, [
         el('div', { class: 'summary-label' }, 'トラブル'),
         el('div', { class: 'summary-value' }, String(stats.activity.troubles)),
-        el('div', { class: 'summary-period' }, '期間内'),
-      ]),
-      el('div', { class: 'summary-card' }, [
-        el('div', { class: 'summary-label' }, '依頼（未完了）'),
-        el('div', { class: 'summary-value', style: openRepairs > 0 ? 'color:#b45309' : '' }, String(openRepairs)),
-        el('div', { class: 'summary-period' }, '全期間'),
-      ]),
-      el('div', { class: 'summary-card' }, [
-        el('div', { class: 'summary-label' }, '点検達成率'),
-        el('div', { class: 'summary-value' }, stats.inspection_rate.rate !== null ? `${stats.inspection_rate.rate}%` : '—'),
-        el('div', { class: 'summary-period' }, rateText),
-      ]),
-      el('div', { class: 'summary-card' }, [
-        el('div', { class: 'summary-label' }, '日報'),
-        el('div', { class: 'summary-value' }, String(stats.activity.reports)),
         el('div', { class: 'summary-period' }, '期間内'),
       ]),
     ]),
@@ -125,17 +88,12 @@ async function renderSummary(fromStr, toStr) {
         el('h3', { class: 'chart-title' }, 'ジャンル別トラブル'),
         stats.trouble_by_category.length > 0 ? canCategory : el('p', { class: 'empty' }, 'データがありません'),
       ]),
-      el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, '業務依頼 ステータス内訳'),
-        Object.keys(stats.repair_summary).length > 0 ? canRepair : el('p', { class: 'empty' }, 'データがありません'),
-      ]),
     ]),
   ]);
 
   // グラフ描画（DOMに追加後）
   if (stats.trouble_trend.length > 0)         drawTroubleTrend('chart-trend', stats.trouble_trend);
   if (stats.trouble_by_category.length > 0)   drawTroubleByCategory('chart-category', stats.trouble_by_category);
-  if (Object.keys(stats.repair_summary).length > 0) drawRepairSummary('chart-repair', stats.repair_summary);
 }
 
 // ---------------- カスタムグラフタブ ----------------
