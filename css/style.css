@@ -226,6 +226,27 @@ body {
 .tile-section.is-minor .tile { min-height: 64px; box-shadow: none; border: 1px solid var(--color-border); border-top: 3px solid var(--sec); }
 .tile-section.is-minor .tile-icon { font-size: 20px; }
 
+/* 「在庫・設備」と「見る・探す」は横に並べる（スマホは1つずつ縦に重ねたタイルを2列に） */
+.tile-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tile-row .tile-grid { grid-template-columns: 1fr; }
+@media (min-width: 600px) {
+  .tile-row { gap: 18px; }
+  .tile-row .tile-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* 下にまだ続きがあるときの目印（ホーム） */
+.scroll-hint {
+  position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  z-index: 50; padding: 8px 16px; border: none; border-radius: 999px;
+  background: rgba(30, 64, 175, 0.92); color: #fff; font-size: 13px; font-weight: 600;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.3); cursor: pointer;
+  animation: scroll-hint-bob 1.6s ease-in-out infinite;
+}
+.scroll-hint[hidden] { display: none; }
+@keyframes scroll-hint-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, 4px); } }
+@media (prefers-reduced-motion: reduce) { .scroll-hint { animation: none; } }
+@media print { .scroll-hint { display: none !important; } }
+
 @media (min-width: 880px) {
   .tile-grid {
     grid-template-columns: repeat(4, 1fr);
