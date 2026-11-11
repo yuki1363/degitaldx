@@ -57,30 +57,53 @@ function drawTroubleByCategory(canvasId, data) {
   });
 }
 
-function drawEquipmentRanking(canvasId, data) {
-  destroyChart(canvasId);
-  new Chart(document.getElementById(canvasId), {
-    type: 'bar',
-    data: {
-      labels:   data.map((d) => d.equipment_name),
-      datasets: [{ label: 'トラブル件数', data: data.map((d) => d.trouble_count), backgroundColor: CHART_COLORS.orange }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
-    },
-  });
-}
+// 設備ごとの故障（トラブル）件数の一覧表。期間内にトラブルがあった全設備を出す（上位N件の制限なし）。
+// 並び順（件数順／設備番号順）の切り替えと、設備名・設備番号での絞り込みができる。
+function buildEquipmentCounts(rows) {
+  const state = { sort: 'count', q: '' };
+  const total = rows.reduce((a, r) => a + r.trouble_count, 0);
+  const tbody = el('tbody');
+  const note = el('p', { class: 'hint' });
+  const sortBtns = {
+    count: el('button', { class: 'btn btn-sm', onclick: () => setSort('count') }, '件数が多い順'),
+    code: el('button', { class: 'btn btn-sm', onclick: () => setSort('code') }, '設備番号順'),
+  };
 
-// 10位と同数（同着）で上位10件の表示枠に入りきらなかった設備を折りたたみ表示する
-function buildTiedRankingDetails(tiedExtra) {
-  if (!tiedExtra || tiedExtra.length === 0) return null;
-  const count = tiedExtra[0].trouble_count;
-  return el('details', { class: 'ranking-tied' }, [
-    el('summary', {}, `10位タイ（${count}件）が他に${tiedExtra.length}件あります`),
-    el('ul', { class: 'ranking-tied-list' }, tiedExtra.map((r) => el('li', {}, `${r.equipment_name}（${r.trouble_count}件）`))),
+  const draw = () => {
+    const q = state.q.trim().toLowerCase();
+    let list = rows.filter((r) => !q || `${r.equipment_code || ''} ${r.equipment_name}`.toLowerCase().includes(q));
+    list = [...list].sort(state.sort === 'code'
+      ? (a, b) => (a.equipment_code || '\uffff').localeCompare(b.equipment_code || '\uffff', 'ja', { numeric: true })
+          || a.equipment_name.localeCompare(b.equipment_name, 'ja')
+      : (a, b) => b.trouble_count - a.trouble_count
+          || a.equipment_name.localeCompare(b.equipment_name, 'ja'));
+    render(tbody, list.map((r) => el('tr', {}, [
+      el('td', {}, r.equipment_code || '—'),
+      el('td', {}, r.equipment_id
+        ? el('a', { class: 'table-link', href: `/pages/ledger?id=${r.equipment_id}` }, r.equipment_name)
+        : r.equipment_name),
+      el('td', { style: 'text-align:right;font-weight:600' }, `${r.trouble_count}件`),
+    ])));
+    note.textContent = q
+      ? `${list.length}設備 / 全${rows.length}設備（絞り込み中）`
+      : `${rows.length}設備・合計${total}件`;
+    for (const [k, b] of Object.entries(sortBtns)) b.classList.toggle('btn-primary', k === state.sort);
+  };
+  const setSort = (k) => { state.sort = k; draw(); };
+
+  const search = el('input', { type: 'search', placeholder: '設備名・設備番号で絞り込み', style: 'flex:1;min-width:0' });
+  search.addEventListener('input', () => { state.q = search.value; draw(); });
+  draw();
+  // 普段は閉じておき、タップで開く（設備が多くてもダッシュボードが縦に長くならない）
+  return el('details', { class: 'equip-counts' }, [
+    el('summary', {}, `設備ごとの件数を見る（${rows.length}設備・合計${total}件）`),
+    el('div', { class: 'action-row', style: 'margin:8px 0' }, [search, sortBtns.count, sortBtns.code]),
+    note,
+    el('div', { style: 'max-height:420px;overflow:auto' },
+      el('table', { class: 'extract-table' }, [
+        el('thead', {}, el('tr', {}, [el('th', {}, '設備番号'), el('th', {}, '設備'), el('th', { style: 'text-align:right' }, '故障件数')])),
+        tbody,
+      ])),
   ]);
 }
 
@@ -113,7 +136,6 @@ async function renderSummary(fromStr, toStr) {
 
   const canTrend    = makeCanvas('chart-trend');
   const canCategory = makeCanvas('chart-category');
-  const canRanking  = makeCanvas('chart-ranking');
   const canRepair   = makeCanvas('chart-repair');
 
   render(app.querySelector('#tab-content'), [
@@ -152,9 +174,10 @@ async function renderSummary(fromStr, toStr) {
         stats.trouble_by_category.length > 0 ? canCategory : el('p', { class: 'empty' }, 'データがありません'),
       ]),
       el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, '設備別故障ランキング'),
-        stats.equipment_ranking.length > 0 ? canRanking : el('p', { class: 'empty' }, 'データがありません'),
-        buildTiedRankingDetails(stats.equipment_ranking_tied),
+        el('h3', { class: 'chart-title' }, '設備別 故障件数'),
+        stats.equipment_trouble_counts.length > 0
+          ? buildEquipmentCounts(stats.equipment_trouble_counts)
+          : el('p', { class: 'empty' }, 'データがありません'),
       ]),
       el('div', { class: 'chart-wrap' }, [
         el('h3', { class: 'chart-title' }, '業務依頼 ステータス内訳'),
@@ -166,7 +189,6 @@ async function renderSummary(fromStr, toStr) {
   // グラフ描画（DOMに追加後）
   if (stats.trouble_trend.length > 0)         drawTroubleTrend('chart-trend', stats.trouble_trend);
   if (stats.trouble_by_category.length > 0)   drawTroubleByCategory('chart-category', stats.trouble_by_category);
-  if (stats.equipment_ranking.length > 0)     drawEquipmentRanking('chart-ranking', stats.equipment_ranking);
   if (Object.keys(stats.repair_summary).length > 0) drawRepairSummary('chart-repair', stats.repair_summary);
 }
 

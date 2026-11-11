@@ -1475,20 +1475,12 @@ input.is-abnormal {
   color: var(--color-text);
 }
 
-.ranking-tied {
-  margin-top: 10px;
-  font-size: 13px;
-}
-.ranking-tied summary {
+/* ダッシュボード: 設備別故障件数の折りたたみ */
+.equip-counts summary {
   cursor: pointer;
   color: var(--color-primary);
   font-weight: 600;
-  padding: 4px 0;
-}
-.ranking-tied-list {
-  margin: 4px 0 0;
-  padding-left: 20px;
-  color: var(--color-text-muted);
+  padding: 6px 0;
 }
 
 /* 抽出レポート */

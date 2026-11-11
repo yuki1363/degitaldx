@@ -910,6 +910,37 @@ check('年度リセット: リセット直後に過去年の今月分が期限�
 }
 for (const id of [annCur.json?.id, annPrev?.json?.id].filter(Boolean)) await api(`/api/plans/${id}`, { method: 'DELETE' });
 
+// ---------- 8.0 ダッシュボード: 設備別の故障件数（上位10件のランキングではなく全設備の一覧表） ----------
+{
+  const ids = [];
+  for (let i = 1; i <= 12; i++) {
+    const e = await api('/api/equipment', { method: 'POST', body: { line_name: `E2E件数表設備${String(i).padStart(2, '0')}` } });
+    ids.push(e.json?.id);
+    for (let k = 0; k < (i === 12 ? 3 : 1); k++) {
+      await api('/api/troubles', { method: 'POST', body: { occurred_at: '2032-03-10T03:00:00Z', phenomenon: `E2E件数表${i}-${k}`, equipment_id: e.json?.id } });
+    }
+  }
+  const st = (await api('/api/stats?from=2032-03-01&to=2032-03-31')).json;
+  check('統計API: 設備別の故障件数は全設備を返す（上位10件で切らない）',
+    st?.equipment_trouble_counts?.length === 12 && st?.equipment_ranking?.length === 10
+      && st.equipment_trouble_counts[0].trouble_count === 3 && st.equipment_trouble_counts[0].equipment_id === ids[11],
+    JSON.stringify(st?.equipment_trouble_counts?.length));
+  await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
+  await page.fill('input[type="date"] >> nth=0', '2032-03-01');
+  await page.fill('input[type="date"] >> nth=1', '2032-03-31');
+  await page.click('button.btn-sm:text-is("集計")');
+  await page.waitForTimeout(1200);
+  const closedOpen = await page.locator('details.equip-counts').evaluate((d) => d.open);
+  check('ダッシュボード: 設備別故障件数は折りたたみ（最初は閉じている）', closedOpen === false);
+  await page.click('details.equip-counts summary');
+  const rows = await page.locator('.extract-table tbody tr').count();
+  check('ダッシュボード: 設備別故障件数が一覧表で全設備ぶん出る', rows === 12, `rows=${rows}`);
+  await page.fill('input[placeholder*="設備名・設備番号で絞り込み"]', '件数表設備12');
+  const filtered = await page.locator('.extract-table tbody tr').count();
+  check('ダッシュボード: 設備名で絞り込める', filtered === 1, `rows=${filtered}`);
+  for (const id of ids.filter(Boolean)) await api(`/api/equipment/${id}`, { method: 'DELETE' });
+}
+
 // ---------- 8. カスタムグラフ ----------
 section('8. ダッシュボード カスタムグラフ');
 await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
