@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = fs.readFileSync(path.join(ROOT, 'js/report-period.js'), 'utf8');
-const { periodFor, isValidPeriod, shiftDate } = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
+const { periodFor, isValidPeriod, shiftDate, fiscalYearOf, fiscalYearRange, fiscalMonths } = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -27,6 +27,11 @@ ok('直近6ヶ月は5ヶ月前の1日〜今月末（年をまたぐ）', is(peri
 ok('不正な日付・種類は null', periodFor('week', 'abc') === null && periodFor('year', '2026-10-29') === null && periodFor('month', '2026-02-30') === null);
 ok('shiftDate: 翌日（月末・年末）', shiftDate('2026-10-31', 1) === '2026-11-01' && shiftDate('2026-12-31', 1) === '2027-01-01' && shiftDate('x', 1) === null);
 ok('isValidPeriod: 開始≦終了で、存在する日付のみ', isValidPeriod('2026-10-01', '2026-10-31') && isValidPeriod('2026-10-01', '2026-10-01') && !isValidPeriod('2026-10-31', '2026-10-01') && !isValidPeriod('', '2026-10-01') && !isValidPeriod('2026-02-30', '2026-03-01'));
+
+ok('年度: 10月始まり・9月終わり（9/30→前年度、10/1→新年度）', fiscalYearOf('2026-09-30') === 2025 && fiscalYearOf('2026-10-01') === 2026 && fiscalYearOf('2027-01-15') === 2026 && fiscalYearOf('2026-12-31') === 2026);
+ok('年度: 不正な日付は null', fiscalYearOf('abc') === null);
+ok('年度の範囲は10/1〜翌9/30', is(fiscalYearRange(2026), { from: '2026-10-01', to: '2027-09-30' }));
+ok('年度の12か月は10月〜翌9月の順', is(fiscalMonths(2026), ['2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04', '2027-05', '2027-06', '2027-07', '2027-08', '2027-09']));
 
 console.log(`\n========== 単体（保全レポート期間）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

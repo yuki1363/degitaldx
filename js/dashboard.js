@@ -1,13 +1,14 @@
-// 08 ダッシュボード — サマリー/グラフ・カスタムグラフ・レポート（印刷用1枚）
+// 08 ダッシュボード・保全レポート — サマリー/グラフ（年度ごと・10月〜翌9月）とレポート（印刷用1枚）
+//   サマリーのグラフは会計年度（10月始まり9月終わり）で固定し、「前の年度／次の年度」で切り替える。
+//   期間（今週・先週・今月・先月・直近6ヶ月・FROM〜TO）とトラブルCSVはレポートタブだけで使う。
 //   （抽出→表→CSV/PDF は横断検索(11)へ集約。ダッシュボードは「見る（グラフ）」に専念。
-//    例外としてトラブル記録だけは、集計期間のまま CSV を出せる＝04 一覧と同じ列）
+//    例外としてトラブル記録だけは、レポートの期間のまま CSV を出せる＝04 一覧と同じ列）
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
 import { el, render, toJstDateStr, jstTodayStr } from '/js/util.js';
-import { buildEquipSelect } from '/js/equip-picker.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
-import { periodFor } from '/js/report-period.js';
+import { periodFor, fiscalYearOf, fiscalYearRange, fiscalMonths } from '/js/report-period.js';
 import { renderReport } from '/js/report-summary.js';
 
 const app = document.getElementById('app');
@@ -35,13 +36,13 @@ function destroyChart(id) {
   if (existing) existing.destroy();
 }
 
-function drawTroubleTrend(canvasId, data) {
+function drawTroubleTrend(canvasId, labels, counts) {
   destroyChart(canvasId);
   new Chart(document.getElementById(canvasId), {
     type: 'bar',
     data: {
-      labels:   data.map((d) => d.month),
-      datasets: [{ label: 'トラブル件数', data: data.map((d) => d.count), backgroundColor: CHART_COLORS.blue }],
+      labels,
+      datasets: [{ label: 'トラブル件数', data: counts, backgroundColor: CHART_COLORS.blue }],
     },
     options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } },
   });
@@ -59,231 +60,114 @@ function drawTroubleByCategory(canvasId, data) {
   });
 }
 
-// ---------------- サマリータブ ----------------
+// ジャンル別の月推移（積み上げ棒グラフ）。縦＝件数、横＝年度の12か月、色＝ジャンル
+function drawTroubleTrendByCategory(canvasId, labels, series) {
+  destroyChart(canvasId);
+  new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: series.map((s, i) => ({ label: s.category_name, data: s.counts, backgroundColor: PALETTE[i % PALETTE.length] })),
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } },
+    },
+  });
+}
 
-async function renderSummary(fromStr, toStr) {
-  render(app.querySelector('#tab-content'), el('p', { class: 'loading' }, '集計中…'));
-  const stats = await api.get(`/api/stats?from=${fromStr}&to=${toStr}`);
+// ---------------- サマリータブ（年度ごと） ----------------
 
-  const canTrend    = makeCanvas('chart-trend');
-  const canCategory = makeCanvas('chart-category');
+// 年度の12か月（10月〜翌9月）に合わせて、データの無い月は0件で埋める
+function fillMonths(months, rows) {
+  const by = new Map(rows.map((r) => [r.month, r.count]));
+  return months.map((m) => by.get(m) ?? 0);
+}
 
-  render(app.querySelector('#tab-content'), [
-    // サマリーカード
+// 月×ジャンルの行 → ジャンルごとの12か月ぶんの件数（合計の多いジャンル順）
+function seriesByCategory(months, rows) {
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.category_name)) map.set(r.category_name, new Map());
+    map.get(r.category_name).set(r.month, r.count);
+  }
+  return [...map.entries()]
+    .map(([category_name, byMonth]) => ({ category_name, counts: months.map((m) => byMonth.get(m) ?? 0) }))
+    .sort((a, b) => b.counts.reduce((x, y) => x + y, 0) - a.counts.reduce((x, y) => x + y, 0));
+}
+
+async function renderSummary(fy, currentFy, onChangeFy) {
+  const box = app.querySelector('#tab-content');
+  const { from, to } = fiscalYearRange(fy);
+  const months = fiscalMonths(fy);
+  const monthLabels = months.map((m) => `${Number(m.slice(5))}月`);
+
+  // 年度の切り替え（未来の年度は見られない＝今年度より先へは進めない）
+  const fyBar = el('div', { class: 'fy-bar' }, [
+    el('button', { class: 'btn btn-sm', type: 'button', id: 'fy-prev', onclick: () => onChangeFy(fy - 1) }, '◀ 前の年度'),
+    el('div', { class: 'fy-label', id: 'fy-label' }, [
+      el('strong', {}, `FY${fy}`),
+      el('span', { class: 'hint' }, ` ${from.replace(/-/g, '/')} 〜 ${to.replace(/-/g, '/')}`),
+    ]),
+    el('button', { class: 'btn btn-sm', type: 'button', id: 'fy-next', disabled: fy >= currentFy, onclick: () => onChangeFy(fy + 1) }, '次の年度 ▶'),
+  ]);
+
+  render(box, [fyBar, el('p', { class: 'loading' }, '集計中…')]);
+  const stats = await api.get(`/api/stats?from=${from}&to=${to}`);
+
+  const series = seriesByCategory(months, stats.trouble_trend_by_category || []);
+  const counts = fillMonths(months, stats.trouble_trend || []);
+  const hasData = stats.activity.troubles > 0;
+
+  render(box, [
+    fyBar,
     el('div', { class: 'summary-grid', style: 'grid-template-columns:1fr' }, [
       el('div', { class: 'summary-card' }, [
         el('div', { class: 'summary-label' }, 'トラブル'),
         el('div', { class: 'summary-value' }, String(stats.activity.troubles)),
-        el('div', { class: 'summary-period' }, '期間内'),
+        el('div', { class: 'summary-period' }, `FY${fy}（年度内）`),
       ]),
     ]),
-
-    // グラフ群
     el('div', { class: 'chart-grid' }, [
       el('div', { class: 'chart-wrap' }, [
         el('h3', { class: 'chart-title' }, 'トラブル月別推移'),
-        stats.trouble_trend.length > 0 ? canTrend : el('p', { class: 'empty' }, 'データがありません'),
+        hasData ? makeCanvas('chart-trend') : el('p', { class: 'empty' }, 'データがありません'),
       ]),
       el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, 'ジャンル別トラブル'),
-        stats.trouble_by_category.length > 0 ? canCategory : el('p', { class: 'empty' }, 'データがありません'),
+        el('h3', { class: 'chart-title' }, 'ジャンル別の月推移'),
+        hasData ? makeCanvas('chart-category-trend') : el('p', { class: 'empty' }, 'データがありません'),
+      ]),
+      el('div', { class: 'chart-wrap' }, [
+        el('h3', { class: 'chart-title' }, 'ジャンル別トラブル（年度合計）'),
+        stats.trouble_by_category.length > 0 ? makeCanvas('chart-category') : el('p', { class: 'empty' }, 'データがありません'),
       ]),
     ]),
   ]);
 
   // グラフ描画（DOMに追加後）
-  if (stats.trouble_trend.length > 0)         drawTroubleTrend('chart-trend', stats.trouble_trend);
-  if (stats.trouble_by_category.length > 0)   drawTroubleByCategory('chart-category', stats.trouble_by_category);
-}
-
-// ---------------- カスタムグラフタブ ----------------
-//   CLAUDE.md 08: 集計軸・期間・対象設備を選択できるカスタムグラフ。
-//   データはトラブル/点検/業務依頼を取得してクライアント側で集計する。
-//   単一系列のため凡例は出さない（円グラフのみカテゴリ凡例）。色は既存のチャート配色に合わせる。
-
-const CUSTOM_DATA_TYPES = {
-  trouble:    { label: 'トラブル件数' },
-  inspection: { label: '点検実施数' },
-  repair:     { label: '業務依頼件数' },
-};
-const CUSTOM_AXES = {
-  month:     { label: '月別' },
-  category:  { label: 'ジャンル別' },   // トラブルのみ
-  equipment: { label: '設備別' },
-  person:    { label: '担当者・記録者別' },
-};
-const CUSTOM_KINDS = { bar: '棒グラフ', line: '折れ線', doughnut: '円グラフ' };
-
-// from〜to の各月（YYYY-MM）を順に返す（最大36ヶ月で打ち切り）
-function monthKeys(fromStr, toStr) {
-  const keys = [];
-  let cur = fromStr.slice(0, 7);
-  const end = toStr.slice(0, 7);
-  while (cur <= end && keys.length < 36) {
-    keys.push(cur);
-    const [y, m] = cur.split('-').map(Number);
-    cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  if (hasData) {
+    drawTroubleTrend('chart-trend', monthLabels, counts);
+    drawTroubleTrendByCategory('chart-category-trend', monthLabels, series);
   }
-  return keys;
-}
-
-// rows: { date:'YYYY-MM-DD', category, equipment, person } の配列 → 軸ごとの集計
-function aggregateRows(rows, axis, fromStr, toStr) {
-  if (axis === 'month') {
-    const keys = monthKeys(fromStr, toStr);
-    const counts = new Map(keys.map((k) => [k, 0]));
-    for (const r of rows) {
-      const k = (r.date || '').slice(0, 7);
-      if (counts.has(k)) counts.set(k, counts.get(k) + 1);
-    }
-    return { labels: keys.map((k) => k.replace('-', '/')), data: keys.map((k) => counts.get(k)) };
-  }
-  const counts = new Map();
-  for (const r of rows) {
-    const k = r[axis] || '未設定';
-    counts.set(k, (counts.get(k) || 0) + 1);
-  }
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15); // 上位15件
-  return { labels: sorted.map((x) => x[0]), data: sorted.map((x) => x[1]) };
-}
-
-async function renderCustom(fromStr, toStr) {
-  const contentEl = app.querySelector('#tab-content');
-  render(contentEl, el('p', { class: 'loading' }, '読み込み中…'));
-  const { equipment } = await api.get('/api/equipment?limit=2000');
-
-  let dataType = 'trouble';
-  let axis = 'month';
-  let chartKind = 'bar';
-  let equipId = '';
-
-  const chartBox = el('div', { class: 'chart-wrap' });
-  const countNote = el('p', { class: 'hint', style: 'margin:4px 0 0' }, '');
-
-  const fetchRows = async () => {
-    if (dataType === 'trouble') {
-      const p = new URLSearchParams({ from: fromStr, to: toStr });
-      if (equipId) p.set('equipment_id', equipId);
-      const { troubles } = await api.get(`/api/troubles?${p}`);
-      return (troubles || []).map((t) => ({
-        date: toJstDateStr(t.occurred_at),
-        category: t.category_name || '未設定',
-        equipment: t.equipment_name || '設備未指定',
-        person: t.reporter_name || t.creator_name || '未設定',
-      }));
-    }
-    if (dataType === 'inspection') {
-      // 期間で絞って取得する（limit=5000）。期間なし・既定200件だと、6ヶ月で200件を超えたとき古い月が黙って欠けていた
-      const p = new URLSearchParams({ from: fromStr, to: toStr, limit: '5000' });
-      if (equipId) p.set('equipment_id', equipId);
-      const { inspections } = await api.get(`/api/inspections?${p}`);
-      return (inspections || [])
-        .filter((i) => { const d = toJstDateStr(i.inspected_at); return d >= fromStr && d <= toStr; })
-        .map((i) => ({
-          date: toJstDateStr(i.inspected_at),
-          category: '—',
-          equipment: i.equipment_name || '設備未指定',
-          person: i.assignee_name || '未設定',
-        }));
-    }
-    const p = new URLSearchParams();
-    if (equipId) p.set('equipment_id', equipId);
-    const { repairs } = await api.get(`/api/repairs${p.size ? '?' + p : ''}`);
-    return (repairs || [])
-      .filter((r) => { const d = toJstDateStr(r.created_at); return d >= fromStr && d <= toStr; })
-      .map((r) => ({
-        date: toJstDateStr(r.created_at),
-        category: '—',
-        equipment: r.equipment_name || '設備未指定',
-        person: r.assignee_name || '未設定',
-      }));
-  };
-
-  const draw = async () => {
-    render(chartBox, el('p', { class: 'loading' }, '集計中…'));
-    let rows;
-    try { rows = await fetchRows(); }
-    catch (err) { render(chartBox, el('p', { class: 'notice is-error' }, err.message)); return; }
-
-    const { labels, data } = aggregateRows(rows, axis, fromStr, toStr);
-    countNote.textContent = `対象 ${rows.length}件（${fromStr} 〜 ${toStr}）`;
-    if (rows.length === 0) {
-      render(chartBox, el('p', { class: 'empty' }, '該当データがありません。'));
-      return;
-    }
-    const canvas = makeCanvas('chart-custom');
-    render(chartBox, [
-      el('h3', { class: 'chart-title' }, `${CUSTOM_DATA_TYPES[dataType].label} × ${CUSTOM_AXES[axis].label}`),
-      canvas,
-    ]);
-    destroyChart('chart-custom');
-    new Chart(canvas, {
-      type: chartKind,
-      data: {
-        labels,
-        datasets: [{
-          label: CUSTOM_DATA_TYPES[dataType].label,
-          data,
-          backgroundColor: chartKind === 'doughnut' ? PALETTE.slice(0, labels.length) : CHART_COLORS.blue,
-          borderColor: chartKind === 'line' ? CHART_COLORS.blue : undefined,
-          fill: false,
-          tension: 0.2,
-        }],
-      },
-      options: {
-        responsive: true,
-        // 単一系列なので凡例は出さない（円グラフはカテゴリの識別に必要なため表示）
-        plugins: { legend: chartKind === 'doughnut' ? { position: 'bottom' } : { display: false } },
-        scales: chartKind === 'doughnut' ? {} : { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
-        // カテゴリ系の棒グラフは横棒（設備名などの長いラベルが読みやすい）
-        indexAxis: chartKind === 'bar' && axis !== 'month' ? 'y' : 'x',
-      },
-    });
-  };
-
-  // 集計軸の選択肢はデータ種別に応じて組み替える（ジャンル別はトラブルのみ）
-  const axisSel = el('select', { onchange: (e) => { axis = e.target.value; draw(); } });
-  const rebuildAxisOptions = () => {
-    const axes = Object.entries(CUSTOM_AXES).filter(([k]) => k !== 'category' || dataType === 'trouble');
-    if (!axes.some(([k]) => k === axis)) axis = 'month';
-    axisSel.replaceChildren(...axes.map(([v, { label }]) => el('option', { value: v, selected: v === axis }, label)));
-  };
-  const dataSel = el('select', { onchange: (e) => { dataType = e.target.value; rebuildAxisOptions(); draw(); } },
-    Object.entries(CUSTOM_DATA_TYPES).map(([v, { label }]) => el('option', { value: v }, label)));
-  const kindSel = el('select', { onchange: (e) => { chartKind = e.target.value; draw(); } },
-    Object.entries(CUSTOM_KINDS).map(([v, label]) => el('option', { value: v }, label)));
-  const equipSel = buildEquipSelect(equipment, {
-    value: '',
-    allLabel: '全設備',
-    onchange: (e) => { equipId = e.target.value; draw(); },
-  });
-  rebuildAxisOptions();
-
-  render(contentEl, [
-    el('div', { class: 'filter-bar' }, [
-      el('label', { class: 'filter-label' }, ['データ ', dataSel]),
-      el('label', { class: 'filter-label' }, ['集計軸 ', axisSel]),
-      el('label', { class: 'filter-label' }, ['グラフ ', kindSel]),
-      equipSel,
-    ]),
-    countNote,
-    chartBox,
-  ]);
-  await draw();
+  if (stats.trouble_by_category.length > 0) drawTroubleByCategory('chart-category', stats.trouble_by_category);
 }
 
 // ---------------- タブ付きレイアウト ----------------
 
 async function renderDashboard() {
-  // 期間の初期値は「今月」（1日〜月末）。長い期間（月別推移など）は「直近6ヶ月」ボタンか FROM〜TO で選ぶ。
-  // 期間は JST の日付で扱う（端末の時刻設定に依らず JST の今日を基準にする）
+  // 年度は JST の今日で決める（端末の時刻設定に依らない）
+  const currentFy = fiscalYearOf(jstTodayStr());
+  let fy = currentFy;
+
+  // レポートの期間の初期値は「今月」（1日〜月末）
   const { from: defaultFrom, to: defaultTo } = periodFor('month', jstTodayStr());
 
   const fromInput = el('input', { type: 'date', value: defaultFrom });
   const toInput   = el('input', { type: 'date', value: defaultTo });
   const applyBtn  = el('button', { class: 'btn btn-sm', onclick: () => loadTab() }, '集計');
 
-  // 期間のプリセット（今週・先週・今月・先月）。全タブ共通の FROM〜TO を書き換えて取り直す
+  // 期間のプリセット（今週・先週・今月・先月・直近6ヶ月）。レポートの FROM〜TO を書き換えて取り直す
   const KINDS = [['week', '今週'], ['lastweek', '先週'], ['month', '今月'], ['lastmonth', '先月'], ['last6months', '直近6ヶ月']];
   const chips = el('div', { class: 'chip-row' }, KINDS.map(([kind, label]) =>
     el('button', { class: 'chip', type: 'button', 'data-kind': kind, onclick: () => { setPreset(kind); loadTab(); } }, label)));
@@ -299,7 +183,7 @@ async function renderDashboard() {
     });
   };
 
-  // トラブル記録CSV: 画面の FROM〜TO（集計期間）で /api/troubles を取得して出力（列は 04 一覧と共通）
+  // トラブル記録CSV: レポートの FROM〜TO（集計期間）で /api/troubles を取得して出力（列は 04 一覧と共通）
   const exportTroubles = async (enc, btn) => {
     const from = fromInput.value || defaultFrom;
     const to   = toInput.value   || defaultTo;
@@ -325,9 +209,24 @@ async function renderDashboard() {
   let activeTab = startTab === 'report' ? 'report' : 'summary';
   const tabContent = el('div', { id: 'tab-content' }, []);
 
+  // 期間・CSVの操作欄はレポートタブのときだけ出す（サマリーのグラフは年度固定のため）。
+  // 印刷時は期間・CSV・タブの操作欄を隠す（rpt-controls は body.rpt-page の印刷CSSで display:none）
+  const reportBars = el('div', { id: 'report-bars', hidden: activeTab !== 'report' }, [
+    el('div', { class: 'period-bar rpt-controls' }, [
+      chips,
+      el('label', { class: 'filter-label' }, ['FROM ', fromInput]),
+      el('label', { class: 'filter-label' }, ['TO ', toInput]),
+      applyBtn,
+    ]),
+    el('div', { class: 'period-bar rpt-controls', id: 'trouble-csv-bar' }, [
+      el('span', { class: 'filter-label' }, 'トラブル記録（期間内）'),
+      csvUtf8Btn,
+      csvSjisBtn,
+    ]),
+  ]);
+
   const tabs = [
-    { id: 'summary',  label: 'サマリー/グラフ' },
-    { id: 'custom',   label: 'カスタムグラフ' },
+    { id: 'summary',  label: 'サマリー/グラフ（年度）' },
     { id: 'report',   label: '📄 レポート（印刷用）' },
   ];
   const tabBtns = tabs.map(({ id, label }) =>
@@ -343,17 +242,14 @@ async function renderDashboard() {
   );
 
   const loadTab = async () => {
-    const from = fromInput.value || defaultFrom;
-    const to   = toInput.value   || defaultTo;
-    syncChips();
+    reportBars.hidden = activeTab !== 'report';
     // 印刷用CSS（body.rpt-page）はレポートタブのときだけ効かせる
     document.body.classList.toggle('rpt-page', activeTab === 'report');
-    if (activeTab === 'custom') {
-      await renderCustom(from, to);
-    } else if (activeTab === 'report') {
-      await renderReportTab(from, to);
+    if (activeTab === 'report') {
+      syncChips();
+      await renderReportTab(fromInput.value || defaultFrom, toInput.value || defaultTo);
     } else {
-      await renderSummary(from, to);
+      await renderSummary(fy, currentFy, (next) => { fy = next; loadTab(); });
     }
   };
 
@@ -365,7 +261,7 @@ async function renderDashboard() {
     render(tabContent, [
       el('div', { class: 'rpt-controls' }, [
         el('button', { class: 'btn btn-sm btn-primary', type: 'button', id: 'rpt-print', onclick: () => window.print() }, '🖨 印刷 / PDF保存'),
-        el('p', { class: 'hint' }, '印刷ダイアログで「PDFに保存」を選ぶと、PDFとして残せます（A4・縦）。期間は上の FROM〜TO（今週・先週・今月・先月ボタン）で選べます。'),
+        el('p', { class: 'hint' }, '印刷ダイアログで「PDFに保存」を選ぶと、PDFとして残せます（A4・縦）。期間は上の FROM〜TO（今週・先週・今月・先月・直近6ヶ月ボタン）で選べます。'),
       ]),
       docBox,
     ]);
@@ -376,20 +272,9 @@ async function renderDashboard() {
     }
   };
 
-  // 印刷時は期間・CSV・タブの操作欄を隠す（rpt-controls は body.rpt-page の印刷CSSで display:none）
   render(app, [
-    el('div', { class: 'period-bar rpt-controls' }, [
-      chips,
-      el('label', { class: 'filter-label' }, ['FROM ', fromInput]),
-      el('label', { class: 'filter-label' }, ['TO ', toInput]),
-      applyBtn,
-    ]),
-    el('div', { class: 'period-bar rpt-controls', id: 'trouble-csv-bar' }, [
-      el('span', { class: 'filter-label' }, 'トラブル記録（期間内）'),
-      csvUtf8Btn,
-      csvSjisBtn,
-    ]),
     el('div', { class: 'tab-bar tab-bar-fit rpt-controls' }, tabBtns),
+    reportBars,
     tabContent,
   ]);
 

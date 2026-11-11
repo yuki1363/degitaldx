@@ -49,3 +49,23 @@ export function periodFor(kind, today) {
 export function isValidPeriod(from, to) {
   return !!parse(from) && !!parse(to) && from <= to;
 }
+
+/** 会計年度（10月始まり・翌9月終わり）。今日（JSTの 'YYYY-MM-DD'）が属する年度を、開始年の数字で返す（2026-10〜2027-09 → 2026）。不正なら null */
+export function fiscalYearOf(today) {
+  const t = parse(today);
+  if (!t) return null;
+  return t.getUTCMonth() + 1 >= 10 ? t.getUTCFullYear() : t.getUTCFullYear() - 1;
+}
+
+/** 年度 → { from: 'YYYY-10-01', to: '(YYYY+1)-09-30' } */
+export function fiscalYearRange(fy) {
+  return { from: `${fy}-10-01`, to: `${fy + 1}-09-30` };
+}
+
+/** 年度の12か月（'YYYY-MM'。10月〜翌9月の順） */
+export function fiscalMonths(fy) {
+  return Array.from({ length: 12 }, (_, i) => {
+    const m = 10 + i;
+    return m <= 12 ? `${fy}-${pad(m)}` : `${fy + 1}-${pad(m - 12)}`;
+  });
+}
