@@ -1085,3 +1085,27 @@ CREATE TABLE IF NOT EXISTS request_dedupe (
   created_by        TEXT,
   created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+-- ============================================================
+-- client_error_log — 画面エラーの自動記録（09 管理機能）
+--   現場の端末で起きた画面のエラー（JavaScript）・読み込めなかったファイル・API のサーバーエラーを
+--   js/error-report.js が自動で送る。管理画面「エラー記録」タブで見る（admin のみ）。
+--   kind: js=画面のエラー / promise=処理の失敗（未処理） / resource=ファイルの読み込み失敗 / api=サーバーエラー
+--   業務データではなく技術的な記録のため、共通監査列（deleted_* 等）は持たない（誰が・いつは
+--   created_by/created_at）。90日より古い記録は API が自動で消す。
+--   本番の D1 には API が初めて使うときに自動作成される（IF NOT EXISTS）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS client_error_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL,
+  message     TEXT NOT NULL,
+  source      TEXT,            -- 起きた場所（ファイル:行:列、API なら「GET /api/…」）
+  stack       TEXT,
+  page        TEXT,            -- 起きたページのパス（クエリは保存しない）
+  app_version TEXT,            -- 端末が使っていた版（Service Worker のキャッシュ名）
+  user_agent  TEXT,
+  created_by  TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_client_error_log_created ON client_error_log (created_at);
+CREATE INDEX IF NOT EXISTS idx_client_error_log_user ON client_error_log (created_by, created_at);

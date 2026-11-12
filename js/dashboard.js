@@ -10,6 +10,7 @@ import { el, render, toJstDateStr, jstTodayStr } from '/js/util.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { periodFor, fiscalYearOf, fiscalYearRange, fiscalMonths } from '/js/report-period.js';
 import { renderReport } from '/js/report-summary.js';
+import { formatDowntime } from '/js/downtime.js';
 
 const app = document.getElementById('app');
 
@@ -77,6 +78,39 @@ function drawTroubleTrendByCategory(canvasId, labels, series) {
   });
 }
 
+// 休止時間の月推移（積み上げ棒グラフ）。縦＝時間、横＝年度の12か月、色＝休止区分
+function drawDowntimeTrend(canvasId, labels, series) {
+  destroyChart(canvasId);
+  new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: series.map((s, i) => ({ label: s.kind, data: s.hours, backgroundColor: PALETTE[i % PALETTE.length] })),
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${formatDowntime(Math.round(c.parsed.y * 60))}` } },
+      },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: '時間' } } },
+    },
+  });
+}
+
+// 月×休止区分の行（分）→ 休止区分ごとの12か月ぶんの時間（合計の多い区分順）
+function downtimeSeries(months, rows) {
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.kind)) map.set(r.kind, new Map());
+    map.get(r.kind).set(r.month, r.minutes);
+  }
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  return [...map.entries()]
+    .map(([kind, byMonth]) => ({ kind, hours: months.map((m) => Math.round(((byMonth.get(m) ?? 0) / 60) * 100) / 100) }))
+    .sort((a, b) => sum(b.hours) - sum(a.hours));
+}
+
 // ---------------- サマリータブ（年度ごと） ----------------
 
 // 年度の12か月（10月〜翌9月）に合わせて、データの無い月は0件で埋める
@@ -119,20 +153,37 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   const series = seriesByCategory(months, stats.trouble_trend_by_category || []);
   const counts = fillMonths(months, stats.trouble_trend || []);
   const hasData = stats.activity.troubles > 0;
+  // 休止時間（トラブル入力の「休止時間」の合計）。古いAPIの応答（downtime なし）でも落ちないようにする
+  const downtime = stats.downtime || { total_minutes: 0, counted: 0, unreadable: 0, by_month: [] };
+  const dtSeries = downtimeSeries(months, downtime.by_month || []);
+  const hasDowntime = downtime.counted > 0;
 
   render(box, [
     fyBar,
-    el('div', { class: 'summary-grid', style: 'grid-template-columns:1fr' }, [
+    el('div', { class: 'summary-grid', style: 'grid-template-columns:1fr 1fr' }, [
       el('div', { class: 'summary-card' }, [
         el('div', { class: 'summary-label' }, 'トラブル'),
         el('div', { class: 'summary-value' }, String(stats.activity.troubles)),
         el('div', { class: 'summary-period' }, `FY${fy}（年度内）`),
       ]),
+      el('div', { class: 'summary-card', id: 'downtime-card' }, [
+        el('div', { class: 'summary-label' }, '休止時間'),
+        el('div', { class: 'summary-value summary-value-text' }, formatDowntime(downtime.total_minutes)),
+        el('div', { class: 'summary-period' }, `入力のあった ${downtime.counted} 件の合計`),
+      ]),
     ]),
+    downtime.unreadable > 0
+      ? el('p', { class: 'hint downtime-warn', id: 'downtime-unreadable' },
+          `⚠ 休止時間を数字で読み取れない記録が ${downtime.unreadable} 件あり、合計に入っていません（トラブル記録の休止時間を、数字（分）に直すと入ります）。`)
+      : null,
     el('div', { class: 'chart-grid' }, [
       el('div', { class: 'chart-wrap' }, [
         el('h3', { class: 'chart-title' }, 'トラブル月別推移'),
         hasData ? makeCanvas('chart-trend') : el('p', { class: 'empty' }, 'データがありません'),
+      ]),
+      el('div', { class: 'chart-wrap' }, [
+        el('h3', { class: 'chart-title' }, '休止時間の月推移（休止区分別）'),
+        hasDowntime ? makeCanvas('chart-downtime') : el('p', { class: 'empty' }, '休止時間の入力がありません'),
       ]),
       el('div', { class: 'chart-wrap' }, [
         el('h3', { class: 'chart-title' }, 'ジャンル別の月推移'),
@@ -150,6 +201,7 @@ async function renderSummary(fy, currentFy, onChangeFy) {
     drawTroubleTrend('chart-trend', monthLabels, counts);
     drawTroubleTrendByCategory('chart-category-trend', monthLabels, series);
   }
+  if (hasDowntime) drawDowntimeTrend('chart-downtime', monthLabels, dtSeries);
   if (stats.trouble_by_category.length > 0) drawTroubleByCategory('chart-category', stats.trouble_by_category);
 }
 

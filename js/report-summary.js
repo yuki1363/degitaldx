@@ -5,6 +5,7 @@
 import { api } from '/js/api.js';
 import { el, render, formatDate, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { isValidPeriod, shiftDate } from '/js/report-period.js';
+import { formatDowntime, downtimeOf } from '/js/downtime.js';
 
 const REPAIR_STATUS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
 const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
@@ -43,6 +44,10 @@ export async function renderReport(docBox, from, to, user) {
   const overduePlans = (plansRes.plans || []).filter((p) => p.status === 'overdue');
   const act = stats.activity || {};
   const equipCounts = stats.equipment_trouble_counts || [];
+  // 休止時間（トラブル入力の「休止時間」の合計）。入力の無い記録は数えない
+  const downtime = stats.downtime || { total_minutes: 0, counted: 0, unreadable: 0, by_kind: [] };
+  const dtCell = (minutes) => cell(minutes > 0 ? formatDowntime(minutes) : '', 'rpt-num');
+  const dtOfTrouble = (t) => { const d = downtimeOf(t.form_values_json); return d.minutes === null ? d.raw : formatDowntime(d.minutes); };
   const maxTrend = Math.max(1, ...(stats.trouble_trend || []).map((m) => m.count));
   const maxCat = Math.max(1, ...(stats.trouble_by_category || []).map((c) => c.count));
 
@@ -60,6 +65,7 @@ export async function renderReport(docBox, from, to, user) {
     ]),
     el('div', { class: 'rpt-tiles' }, [
       tile('トラブル', act.troubles ?? 0, '件'),
+      tile('休止時間', formatDowntime(downtime.total_minutes), `入力 ${downtime.counted} 件の合計`),
       tile('業務依頼（新規）', act.repairs ?? 0, '件'),
       tile('点検記録', act.inspections ?? 0, '件'),
       tile('日報', act.reports ?? 0, '件'),
@@ -75,19 +81,28 @@ export async function renderReport(docBox, from, to, user) {
         cell(m.month.replace('-', '/')), cell(m.count, 'rpt-num'),
         el('td', { class: 'rpt-bar-cell' }, el('span', { class: 'rpt-bar', style: `width:${Math.round((m.count / maxTrend) * 100)}%` })),
       ])), 'この期間のトラブルはありません。')),
+    section('休止時間（休止区分別）', el('div', {}, [
+      table(['休止区分', '件数', '休止時間'],
+        (downtime.by_kind || []).map((k) => el('tr', {}, [cell(k.kind), cell(k.count, 'rpt-num'), dtCell(k.minutes)])),
+        'この期間に休止時間の入力はありません。'),
+      downtime.unreadable > 0
+        ? el('p', { class: 'rpt-more' }, `休止時間を数字で読み取れない記録が ${downtime.unreadable} 件あり、合計に入っていません。`)
+        : null,
+    ])),
     section('業務依頼 ステータス内訳（全期間）', table(['状況', '件数'],
       ['open', 'in_progress', 'waiting_parts', 'done'].map((k) => el('tr', {}, [cell(REPAIR_STATUS[k]), cell((stats.repair_summary || {})[k] ?? 0, 'rpt-num')])),
       '')),
-    section(`設備別 故障件数（${equipCounts.length}設備）`, table(['設備', '件数'],
-      equipCounts.map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num')])),
+    section(`設備別 故障件数・休止時間（${equipCounts.length}設備）`, table(['設備', '件数', '休止時間'],
+      equipCounts.map((r) => el('tr', {}, [cell(r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name), cell(r.trouble_count, 'rpt-num'), dtCell(r.downtime_minutes || 0)])),
       'この期間のトラブルはありません。')),
     section(`期間内のトラブル（${troubles.length}件${troublesRes.truncated ? '・件数が多いため先頭のみ' : ''}）`, el('div', {}, [
       troublesRes.truncated
         ? el('p', { class: 'rpt-more' }, '件数が多いため先頭のみの集計です。正確な件数は期間を絞って確認してください。')
         : null,
-      table(['発生日', '設備', 'ジャンル', '現象'],
+      table(['発生日', '設備', 'ジャンル', '現象', '休止時間'],
         troubles.slice(0, TROUBLE_ROWS).map((t) => el('tr', {}, [
           cell(formatDate(toJstDateStr(t.occurred_at))), cell(t.equipment_name), cell(t.category_name), cell(trunc(t.phenomenon, 60)),
+          cell(dtOfTrouble(t), 'rpt-num'),
         ])), 'この期間のトラブルはありません。'),
       troubles.length > TROUBLE_ROWS ? el('p', { class: 'rpt-more' }, `ほか ${troubles.length - TROUBLE_ROWS} 件（一覧はトラブル記録画面で確認できます）`) : null,
     ])),

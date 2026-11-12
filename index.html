@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <script src="/js/error-report.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1e40af">
   <meta name="description" content="点検・修理・在庫・報告を現場で完結する設備保全オールインワンアプリ">
@@ -39,6 +40,7 @@
   <main class="container">
     <p class="notice is-error" id="auth-notice" hidden></p>
     <p class="notice is-warning" id="storage-alert" hidden></p>
+    <a class="notice is-warning" id="backup-alert" href="/pages/admin?tab=backup" hidden></a>
 
     <!-- ホーム概要（期限超過 / 直近 / 最近の動き をタブで切り替え。js/home-tabs.js） -->
     <div id="home-overview"></div>

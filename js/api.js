@@ -113,6 +113,14 @@ async function request(path, { method = 'GET', body, headers } = {}) {
   if (!response.ok) {
     const err = data && data.error ? data.error : {};
     const offline = err.offline === true;
+    // サーバーエラー（5xx）は管理者が後から見られるよう自動で記録する（js/error-report.js）。
+    // 電波が無いだけの応答（offline）と、記録の送信そのものの失敗は記録しない
+    if (response.status >= 500 && !offline && !String(path).startsWith('/api/client-errors')) {
+      try {
+        window.__reportClientError?.('api', err.message || `HTTP ${response.status}`,
+          { source: `${method} ${String(path).split('?')[0]} → ${response.status}` });
+      } catch { /* 記録の失敗で処理を止めない */ }
+    }
     // Service Worker が返す offline:true（Access リダイレクトの CORS 失敗を含む）も
     // オンラインなら再認証へ誘導する
     if (offline && tryReauthNavigate(method)) {

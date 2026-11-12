@@ -18,6 +18,7 @@ import { buildEquipSelect } from '/js/equip-picker.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 import { buildUsedPartsInput, recordUsedParts } from '/js/used-parts.js';
+import { DOWNTIME_TAG, parseDowntimeMinutes, isUnreadableDowntime, formatDowntime } from '/js/downtime.js';
 
 // 業務依頼ステータスの表示ラベル（このトラブルから作成された依頼の状況表示に使う）
 const REPAIR_STATUS_LABELS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
@@ -289,6 +290,7 @@ async function renderDetail(id) {
       infoRow('原因', trouble.cause),
       infoRow('対策', trouble.countermeasure),
       ...parseCustomValues(trouble.custom_fields_json).map((v) => infoRow(v.name, v.value)),
+      ...reportValueRows(trouble.form_values_json),
       infoRow('記録者', trouble.reporter_name || trouble.creator_name || maskEmail(trouble.created_by)),
     ]),
     similarBox,
@@ -410,6 +412,31 @@ function buildReportFields(templates) {
 function parseFormValues(jsonStr) {
   try { return jsonStr ? (JSON.parse(jsonStr) || {}) : {}; }
   catch { return {}; }
+}
+
+// 詳細画面に出す、帳票用の入力（休止時間・休止区分・有効性の確認・特記事項など）。
+//   以前は Excel の帳票にしか出ず、画面では入力した値を確かめられなかった。
+//   記録から入るタグ（調査対象・トラブル名など）と空の値は出さない。標準項目を先に、残りは保存順に並べる。
+//   休止時間は「1時間30分」の形に直して出す。読み取れない書き方のときは、集計に入らないことを添える。
+function reportValueRows(jsonStr) {
+  const values = parseFormValues(jsonStr);
+  const labelOf = new Map(TROUBLE_REPORT_FIELDS.map((f) => [f.tag, String(f.label || f.tag).replace(/（.*?）/g, '')]));
+  const tags = [
+    ...TROUBLE_REPORT_FIELDS.map((f) => f.tag),
+    ...Object.keys(values).filter((t) => !labelOf.has(t)),
+  ].filter((t) => !RECORD_TAGS.trouble_report.includes(t));
+  const rows = [];
+  for (const tag of tags) {
+    const raw = values[tag] == null ? '' : String(values[tag]).trim();
+    if (raw === '') continue;
+    let text = raw;
+    if (tag === DOWNTIME_TAG) {
+      const minutes = parseDowntimeMinutes(raw);
+      text = minutes === null ? `${raw}（数字で読み取れないため、集計に入りません）` : formatDowntime(minutes);
+    }
+    rows.push(infoRow(labelOf.get(tag) || tag, text));
+  }
+  return rows;
 }
 
 async function renderForm(existing, prefill = null, usedParts = []) {
@@ -561,7 +588,13 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     else if (fld.type === 'time') input = el('input', { type: 'time', value: cur });
     else input = el('input', { type: 'text', value: cur, placeholder: hint, ...(tag === '休止時間' ? { inputmode: 'numeric', placeholder: '例: 30' } : {}) });
     input.addEventListener('input', () => { reportValues[tag] = input.value; });
-    return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
+    if (tag !== DOWNTIME_TAG) return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input]);
+    // 休止時間はダッシュボードで合計するため、読み取れない書き方のときはその場で知らせる（保存は止めない）
+    const warn = el('p', { class: 'hint downtime-warn', hidden: true }, '⚠ この書き方は集計に入りません。数字（分）で入力してください。例: 30');
+    const check = () => { warn.hidden = !isUnreadableDowntime(input.value); };
+    input.addEventListener('input', check);
+    check();
+    return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input, warn]);
   };
   // 帳票入力欄は再描画できる箱にしておく（下書き復元時に reportValues を反映し直すため）
   // 帳票用の項目の置き場所。現象の上・対策の下など、入力しやすい位置に分けて置く
