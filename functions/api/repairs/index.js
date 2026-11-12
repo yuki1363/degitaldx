@@ -1,8 +1,9 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { ensureColumns } from '../_lib/db-compat.js';
+import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 
 const VALID_STATUSES = ['open', 'in_progress', 'waiting_parts', 'done'];
 const SOURCE_TABLES = ['trouble_record', 'inspection_result'];
@@ -18,7 +19,7 @@ export function normPriority(v) {
 export function parseDueDate(v) {
   if (v === undefined || v === null || v === '') return { value: null };
   const s = String(v).trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return { error: '対応期限（due_date）は YYYY-MM-DD 形式で指定してください' };
+  if (!isValidYmd(s)) return { error: '対応期限（due_date）は YYYY-MM-DD 形式（実在する日付）で指定してください' };
   return { value: s };
 }
 
@@ -108,11 +109,17 @@ export async function onRequestPost({ request, env, data }) {
   const srcTable = SOURCE_TABLES.includes(source_table) ? source_table : null;
   const srcId = srcTable && Number.isInteger(Number(source_id)) ? Number(source_id) : null;
 
+  // 同じ識別番号（client_request_id）が登録済みなら、二重に作らず最初の依頼を返す
+  const idem = await beginIdempotent(db, body, 'repair_request');
+  if (idem.error) return jsonError(400, idem.error);
+  if (idem.dup?.conflict) return jsonError(409, DEDUPE_CONFLICT_MESSAGE);
+  if (idem.dup) return json({ id: idem.dup.record_id, duplicate: true });
+
   const now = nowIso();
   const userEmail = data.user.email;
   const priorityValue = normPriority(priority);
 
-  const result = await db
+  const insertStmt = db
     .prepare(
       `INSERT INTO repair_request
          (title, equipment_id, description, assignee_name, status, source_table, source_id,
@@ -133,10 +140,21 @@ export async function onRequestPost({ request, env, data }) {
       now,
       userEmail,
       now
-    )
-    .run();
-
-  const id = result.meta?.last_row_id;
+    );
+  let id;
+  if (idem.key) {
+    // 依頼と識別番号は同じ batch（同時に2回届いたら片方は丸ごと取り消される）
+    try {
+      const results = await db.batch([insertStmt, dedupeStatement(db, idem.key, 'repair_request', userEmail, now)]);
+      id = results[0].meta?.last_row_id;
+    } catch (err) {
+      const existingId = isDedupeConflict(err) ? await resolveRaceDuplicate(db, idem.key, 'repair_request') : null;
+      if (!existingId) throw err;
+      return json({ id: existingId, duplicate: true });
+    }
+  } else {
+    id = (await insertStmt.run()).meta?.last_row_id;
+  }
 
   // ステータス変更履歴を記録（初期ステータス）
   await db

@@ -3,13 +3,14 @@
 //   GET    : 認証済みユーザー全員（viewer 以上）。R2 オブジェクトを返す。
 //            動画再生（iOS Safari 等）のため Range リクエストに対応。
 //            ?meta=1 でメタ情報のみ JSON で返す（R2 を読まない）
+//   PUT    : admin のみ。{ restore: true } で論理削除したファイルを元に戻す（物理削除済みは戻せない）。
 //   DELETE : editor 以上。論理削除（R2 オブジェクトは残し、一覧から消す）。
 //            ?physical=1 は admin のみ。R2 の実体を削除して purged_at を記録
 //            （容量を解放する完全削除。管理画面「ファイル容量」タブから実行・復元不可）
 
-import { json, jsonError } from '../_lib/http.js';
+import { json, jsonError, readJson } from '../_lib/http.js';
 import { requireRole } from '../_lib/auth.js';
-import { writeAuditLog } from '../_lib/audit.js';
+import { writeAuditLog, auditStatement } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
 
 async function findFile(env, idParam) {
@@ -166,4 +167,40 @@ export async function onRequestDelete({ request, env, data, params }) {
   });
 
   return json({ ok: true, id: file.id });
+}
+
+// PUT /api/files/:id  { restore: true } — 論理削除したファイルを元に戻す（admin のみ）
+//   写真・ファイルの削除画面には「管理画面から復元できます」と案内しているため、その復元の入口。
+//   R2 の実体は論理削除では消していないので、deleted_at を空に戻すだけで元のレコードの添付に再び出る。
+//   物理削除（容量を空けるための完全削除。purged_at あり）したものは R2 に実体が無く、戻せない。
+//   容量の集計は論理削除でも変わらない（R2 に残っているため使用量に含めている）ので、容量ガードは不要。
+export async function onRequestPut({ request, env, data, params }) {
+  const denied = requireRole(data.user, 'admin');
+  if (denied) return denied;
+
+  const body = await readJson(request);
+  if (!body || body.restore !== true) return jsonError(400, 'restore: true を指定してください。');
+  const id = Number(params.id);
+  if (!Number.isInteger(id) || id <= 0) return jsonError(400, '不正なIDです。');
+
+  const file = await env.DB.prepare(
+    `SELECT id, file_name, deleted_at, purged_at FROM files WHERE id = ?1`
+  ).bind(id).first();
+  if (!file) return jsonError(404, 'ファイルが見つかりません。');
+  if (file.purged_at) return jsonError(409, 'このファイルは完全削除済み（R2から削除済み）のため、元に戻せません。');
+  if (!file.deleted_at) return jsonError(409, 'このファイルは削除されていません（既に元に戻されています）。');
+
+  // 復元と監査ログは1つの batch（監査は復元できたときだけ。2回押しの2回目は何も記録しない）
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE files SET deleted_at = NULL, deleted_by = NULL, updated_by = ?1, updated_at = ?2
+        WHERE id = ?3 AND deleted_at IS NOT NULL AND purged_at IS NULL`
+    ).bind(data.user.email, nowIso(), id),
+    auditStatement(env.DB, {
+      tableName: 'files', recordId: id, action: 'restore', changedBy: data.user.email,
+      diff: { file_name: file.file_name },
+    }, { ifPrevChanged: true }),
+  ]);
+  if ((results[0].meta?.changes ?? 0) === 0) return jsonError(409, '既に元に戻されています。');
+  return json({ ok: true, id });
 }

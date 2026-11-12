@@ -7,7 +7,8 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDate, formatDateTime, formatBytes, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { openExcelExport } from '/js/excel-fill.js';
@@ -362,17 +363,7 @@ async function renderDetail(id) {
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : el('div', { class: 'row-list' },
-            history.map((h) =>
-              el('div', { class: 'history-row' }, [
-                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, maskEmail(h.changed_by)),
-                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-              ])
-            )
-          ),
+      buildHistoryList(history),
     ]),
   ]);
 }
@@ -422,6 +413,7 @@ function parseFormValues(jsonStr) {
 }
 
 async function renderForm(existing, prefill = null, usedParts = []) {
+  const requestId = newRequestId(); // 二重登録の防止（この入力フォーム1つにつき1つ。送信待ちに入れても同じ番号）
   // existing = 本物の編集（PUT）。prefill = 点検異常などからの新規プリフィル（POST のまま）。
   const init = existing || prefill || {};
   const [{ categories: cats }, { equipment }, { fields: customFields }, usersRes, templatesRes, partsRes] = await Promise.all([
@@ -644,6 +636,7 @@ async function renderForm(existing, prefill = null, usedParts = []) {
       form_values_json: Object.keys(reportClean).length > 0 ? reportClean : null,
       // 同時編集ガード: 編集開始時点の updated_at を送り、他の人が先に更新していたら409で知らせる
       ...(existing ? { expected_updated_at: existing.updated_at } : {}),
+      ...(existing ? {} : { client_request_id: requestId }),
     };
     if (!body.phenomenon) { alert('現象は必須です。'); return; }
     if (!body.occurred_at) { alert('発生日時は必須です。'); return; }

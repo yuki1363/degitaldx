@@ -16,6 +16,7 @@ import { normalizeJa } from '../_lib/normalize.js';
 import { buildKeywordClauses } from '../_lib/fuzzy.js';
 import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
 import { linkRowToEquipment } from '../_lib/equipment-link.js';
+import { partsListVersion } from '../_lib/parts-version.js';
 
 const IMPORTANCE_VALUES = ['高', '中', '低'];
 
@@ -36,6 +37,10 @@ const toInt = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Math.trunc(Numb
 export async function onRequestGet({ env, request }) {
   const { DB } = env;
   const url = new URL(request.url);
+  // 版だけ欲しい呼び出し（画面の自動更新が「変わったか」を確かめる用）。一覧は読まない（数行で済む）
+  if (url.searchParams.get('version') === '1') return json({ version: await partsListVersion(DB) });
+  // 一覧と一緒に版を返す（一覧を読む「前」に取る＝読んでいる間に変更が入っても、次の確認で変更として気づける）
+  const version = await partsListVersion(DB);
   const q = (url.searchParams.get('q') || '').trim();
   const lowStock = url.searchParams.get('low_stock') === '1';
   const excludeId = url.searchParams.get('exclude_id'); // 類似部品ヒントで自分自身を除外（編集時）
@@ -65,7 +70,7 @@ export async function onRequestGet({ env, request }) {
   const { results } = await (binds.length ? stmt.bind(...binds) : stmt).all();
   const parts = results || [];
 
-  if (!includeSimilar) return json({ parts });
+  if (!includeSimilar) return json({ parts, version });
 
   // --- 類似の在庫（いずれかのキーワードに一致＝OR・再現率重視）---
   //   2語以上で検索したときだけ。1語のときは AND と OR が同じ結果になり別枠にならないため。
@@ -80,7 +85,7 @@ export async function onRequestGet({ env, request }) {
     const exactIds = new Set(parts.map((p) => p.id));
     similar = (sResults || []).filter((p) => !exactIds.has(p.id)).slice(0, 30);
   }
-  return json({ parts, similar });
+  return json({ parts, similar, version });
 }
 
 export async function onRequestPost({ env, data, request }) {

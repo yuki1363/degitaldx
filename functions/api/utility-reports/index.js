@@ -10,7 +10,8 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { attachFiles } from '../_lib/storage.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
+import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 import { ensureUtilitySchema } from './_schema.js';
 import { listItems, buildValues, toReport } from './_values.js';
 
@@ -57,7 +58,18 @@ export async function onRequestPost({ request, env, data }) {
   if (!body) return jsonError(400, 'リクエストボディが不正です。');
 
   const reportDate = String(body.report_date || '').trim();
-  if (!DATE_RE.test(reportDate)) return jsonError(400, 'report_date は YYYY-MM-DD 形式で指定してください。');
+  if (!DATE_RE.test(reportDate) || !isValidYmd(reportDate)) return jsonError(400, 'report_date は YYYY-MM-DD 形式（実在する日付）で指定してください。');
+
+  // 同じ識別番号（client_request_id）が登録済みなら、二重に作らず最初の日報を返す。
+  // 1日1件ガードより先に確かめる（再送のとき、最初の登録で「その日」が埋まっているため、先に
+  // ガードに当たると「すでに登録されています」の失敗になってしまう）
+  const idem = await beginIdempotent(db, body, 'utility_report');
+  if (idem.error) return jsonError(400, idem.error);
+  if (idem.dup?.conflict) return jsonError(409, DEDUPE_CONFLICT_MESSAGE);
+  if (idem.dup) {
+    const prev = await db.prepare('SELECT has_abnormal FROM utility_report WHERE id = ?1').bind(idem.dup.record_id).first();
+    return json({ id: idem.dup.record_id, has_abnormal: prev?.has_abnormal ?? 0, duplicate: true });
+  }
 
   // 1日1件ガード: 同じ日の未削除レコードがあれば編集へ誘導する
   const dup = await db.prepare(
@@ -81,7 +93,7 @@ export async function onRequestPost({ request, env, data }) {
   const now = nowIso();
   const email = data.user.email;
   // 1日1件は INSERT の条件でも守る（上の確認と INSERT の間に、別の端末が同じ日を登録した場合も2件にしない）
-  const res = await db.prepare(
+  const insertStmt = db.prepare(
     `INSERT INTO utility_report
        (report_date, inspected_at, reporter_name, has_abnormal, values_json, note,
         created_by, created_at, updated_by, updated_at)
@@ -90,7 +102,21 @@ export async function onRequestPost({ request, env, data }) {
   ).bind(
     reportDate, inspectedAt, reporterName, built.hasAbnormal,
     JSON.stringify(built.values), note, email, now
-  ).run();
+  );
+  let res;
+  if (idem.key) {
+    // 日報と識別番号は同じ batch。識別番号は日報を登録できたとき（changes()=1）だけ記録する
+    try {
+      const results = await db.batch([insertStmt, dedupeStatement(db, idem.key, 'utility_report', email, now, { ifPrevChanged: true })]);
+      res = results[0];
+    } catch (err) {
+      const existingId = isDedupeConflict(err) ? await resolveRaceDuplicate(db, idem.key, 'utility_report') : null;
+      if (!existingId) throw err;
+      return json({ id: existingId, has_abnormal: built.hasAbnormal, duplicate: true });
+    }
+  } else {
+    res = await insertStmt.run();
+  }
   if ((res.meta?.changes ?? 0) === 0) {
     const other = await db.prepare(
       `SELECT id FROM utility_report WHERE report_date = ? AND deleted_at IS NULL`

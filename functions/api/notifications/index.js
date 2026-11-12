@@ -7,6 +7,8 @@
 //     assignee       … 担当者（通知を発生させた操作者 created_by のメール）で絞り込み
 //   未読数（unread_count）は常に返す（ホームのバッジ表示に使う）。
 //   facets … 月・担当者の選択肢一覧（フィルタUIの組み立て用。フィルタ条件に関わらず全件から集計）。
+//            全件を読むため重い（通知が数千件で約1.3万行）。通知画面だけが facets=1 で頼み、
+//            ホームのベルなど件数だけ要る呼び出しでは省く（既定は返さない）。
 //   閲覧は全ログインユーザー可（確認操作のみ editor 以上）。
 
 import { json } from '../_lib/http.js';
@@ -26,6 +28,7 @@ export async function onRequestGet({ request, env, waitUntil }) {
   const fromMonth = sp.get('from_month');    // YYYY-MM（JST）範囲開始
   const toMonth = sp.get('to_month');        // YYYY-MM（JST）範囲終了
   const assignee = sp.get('assignee');       // created_by のメール
+  const wantFacets = sp.get('facets') === '1'; // フィルタUIの選択肢が要るときだけ（全件を読むため）
   const limit = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 50), 200);
 
   let sql = `SELECT * FROM notifications WHERE deleted_at IS NULL`;
@@ -65,27 +68,32 @@ export async function onRequestGet({ request, env, waitUntil }) {
     .prepare(`SELECT COUNT(*) AS n FROM notifications WHERE deleted_at IS NULL AND acknowledged_at IS NULL`)
     .first();
 
-  // フィルタUIの選択肢（全件から集計。現在のフィルタには依存させず、選択肢を固定して使いやすくする）
-  const monthsRes = await db
-    .prepare(`SELECT DISTINCT ${JST_MONTH} AS ym FROM notifications WHERE deleted_at IS NULL ORDER BY ym DESC`)
-    .all();
-  const assigneesRes = await db
-    .prepare(
-      `SELECT n.created_by AS email, u.name AS name, COUNT(*) AS count
-         FROM notifications n
-         LEFT JOIN users u ON u.email = n.created_by AND u.deleted_at IS NULL
-        WHERE n.deleted_at IS NULL AND n.created_by IS NOT NULL AND n.created_by <> ''
-        GROUP BY n.created_by
-        ORDER BY count DESC`
-    )
-    .all();
+  // フィルタUIの選択肢（全件から集計。現在のフィルタには依存させず、選択肢を固定して使いやすくする）。
+  // 全件を読むので、頼まれたとき（facets=1）だけ集計する
+  let facets = null;
+  if (wantFacets) {
+    const monthsRes = await db
+      .prepare(`SELECT DISTINCT ${JST_MONTH} AS ym FROM notifications WHERE deleted_at IS NULL ORDER BY ym DESC`)
+      .all();
+    const assigneesRes = await db
+      .prepare(
+        `SELECT n.created_by AS email, u.name AS name, COUNT(*) AS count
+           FROM notifications n
+           LEFT JOIN users u ON u.email = n.created_by AND u.deleted_at IS NULL
+          WHERE n.deleted_at IS NULL AND n.created_by IS NOT NULL AND n.created_by <> ''
+          GROUP BY n.created_by
+          ORDER BY count DESC`
+      )
+      .all();
+    facets = {
+      months: (monthsRes.results ?? []).map((r) => r.ym).filter(Boolean),
+      assignees: assigneesRes.results ?? [],
+    };
+  }
 
   return json({
     notifications: results ?? [],
     unread_count: countRow?.n ?? 0,
-    facets: {
-      months: (monthsRes.results ?? []).map((r) => r.ym).filter(Boolean),
-      assignees: assigneesRes.results ?? [],
-    },
+    ...(facets ? { facets } : {}),
   });
 }

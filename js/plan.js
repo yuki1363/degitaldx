@@ -7,7 +7,8 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
-import { el, render, formatDate, formatDateTime, ACTION_LABELS, maskEmail, nowLocalInputValue, jstTodayStr } from '/js/util.js';
+import { el, render, formatDate, nowLocalInputValue, jstTodayStr } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { openExcelExport } from '/js/excel-fill.js';
 import { CONSTRUCTION_NOTICE_FIELDS } from '/js/permit-fields.js';
 import { AUTOFILL_HINTS, RECORD_TAGS } from '/js/report-autofill.js';
@@ -577,17 +578,7 @@ async function renderDetail(id, fromAnnual = false) {
       : null,
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      !history || history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : el('div', { class: 'row-list' },
-            history.map((h) =>
-              el('div', { class: 'history-row' }, [
-                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, maskEmail(h.changed_by)),
-                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-              ])
-            )
-          ),
+      buildHistoryList(history),
     ]),
   ]);
 }

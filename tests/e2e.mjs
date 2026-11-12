@@ -81,13 +81,13 @@ await page.waitForFunction(async () => {
   return false;
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
-  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications',
+  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'search', 'notifications',
   'report-summary', 'help', 'updates'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
 }
-check('全19ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
+check('全18ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
 
 // ---------- 2. トラブル: 登録→一覧自動表示→編集 ----------
 section('2. トラブル記録の基本フロー');
@@ -1102,7 +1102,7 @@ const homeJson = JSON.stringify(homeSecs);
 check('ホーム: タイルは「計画・点検／記録・依頼／在庫・設備／見る・探す／その他」のまとまりに分かれる',
   homeSecs.map((x) => x.title).join('/') === '計画・点検/記録・依頼/在庫・設備/見る・探す/その他'
     && homeSecs[0].tiles.join(',') === '保全計画,点検実施,電気設備点検,ユーティリティ日報'
-    && homeSecs[1].tiles.join(',') === 'トラブル記録,業務依頼,日報,チャット'
+    && homeSecs[1].tiles.join(',') === 'トラブル記録,業務依頼,日報'
     && homeSecs[2].tiles.join(',') === '部品在庫,設備台帳'
     && homeSecs[3].tiles.join(',') === 'ダッシュボード・保全レポート,横断検索'
     && homeSecs[4].tiles.join(',') === '使い方,管理,更新履歴', homeJson);
@@ -1143,135 +1143,6 @@ const dashCsv = dashDl ? (await (await dashDl.createReadStream()).toArray()).map
 check('ダッシュボード: トラブルCSVを出力（04と同じ列）',
   /^\uFEFF?発生日時,設備番号,設備,ジャンル,現象/.test(dashCsv) && dashCsv.split('\n').length >= 2,
   `file=${dashDl?.suggestedFilename()} head=${dashCsv.slice(0, 60)}`);
-
-// ---------- 9. チャット: 投稿→取得→既読 ----------
-section('9. チャット（投稿・取得・既読）');
-const chatPost = await api('/api/chat', { method: 'POST', body: { body: 'E2Eチャットテスト', channel: 'general' } });
-check('チャット投稿（201）', chatPost.status === 201, `status=${chatPost.status}`);
-const chatList = await api('/api/chat?channel=general&limit=10');
-check('投稿が一覧に反映', (chatList.json?.messages || []).some((m) => m.body === 'E2Eチャットテスト'));
-const chatRead = await api('/api/chat?channel=general', { method: 'PUT' });
-check('既読の更新（200）', chatRead.status === 200, `status=${chatRead.status}`);
-const chatUnread = await api('/api/chat?count_unread=1&channel=general');
-check('既読後の未読数が0', chatUnread.json?.unread_count === 0, JSON.stringify(chatUnread.json));
-// 送信者本人は既読に数えない（自分の投稿を自分が読んでも既読0のまま）
-const chatAfterRead = await api('/api/chat?channel=general&limit=10');
-const ownMsg = (chatAfterRead.json?.messages || []).find((m) => m.body === 'E2Eチャットテスト');
-check('自分の投稿の既読数は0（送信者除外）', ownMsg?.read_count === 0, `read_count=${ownMsg?.read_count}`);
-
-// 記録化リンク・申し送りテンプレート（チャットを業務の入り口にする2機能）
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForFunction(() => document.body.innerText.includes('E2Eチャットテスト'), { timeout: 8000 }).catch(() => {});
-const recordHref = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-record-actions a')]
-    .map((x) => x.getAttribute('href'))
-    .find((h) => h && h.includes('/pages/trouble?new=1')) || null
-);
-check('チャット: 記録化リンクが本文を引き継ぐ', !!recordHref && decodeURIComponent(recordHref).includes('E2Eチャットテスト'), `href=${recordHref}`);
-await page.waitForFunction(() => !!document.querySelector('.chat-tpl-chip'), { timeout: 10000 }).catch(() => {});
-const tplValue = await page.evaluate(() => {
-  const chip = document.querySelector('.chat-tpl-chip');
-  if (!chip) return null;
-  chip.click();
-  return document.querySelector('#chat-form textarea')?.value ?? null;
-});
-check('チャット: 申し送りテンプレートが入力欄に挿入される', !!tplValue && tplValue.includes('【'), `value=${tplValue}`);
-// 日報への記録化: new=1 が無いと日報ページは一覧を開き、本文が引き継がれない（回帰防止）
-const reportHref = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-record-actions a')]
-    .map((x) => x.getAttribute('href')).find((h) => h && h.startsWith('/pages/report?')) || null);
-check('チャット: 日報への記録化リンクに new=1 が付く', !!reportHref && new URLSearchParams(reportHref.split('?')[1]).get('new') === '1', `href=${reportHref}`);
-if (reportHref) {
-  await page.goto(`${BASE}${reportHref}`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some((t) => t.value.includes('E2Eチャットテスト')), { timeout: 8000 }).catch(() => {});
-  check('チャット: 日報の作成画面に本文が引き継がれる',
-    await page.evaluate(() => [...document.querySelectorAll('textarea')].some((t) => t.value.includes('E2Eチャットテスト'))));
-}
-
-// 👍確認リアクション（トグル）と meta 反映
-const chatMsgId = chatPost.json?.id;
-const react1 = await api(`/api/chat/${chatMsgId}`, { method: 'POST', body: { action: 'react' } });
-check('リアクション付与（reacted=true）', react1.status === 200 && react1.json?.reacted === true, `status=${react1.status}`);
-const listR = await api('/api/chat?channel=general&limit=10');
-const metaR = listR.json?.meta?.[chatMsgId];
-check('リアクションが meta に反映（名前・my_react）', (metaR?.reactions || []).length === 1 && metaR?.my_react === true, JSON.stringify(metaR));
-const react2 = await api(`/api/chat/${chatMsgId}`, { method: 'POST', body: { action: 'react' } });
-check('リアクション取り消し（reacted=false）', react2.status === 200 && react2.json?.reacted === false, `status=${react2.status}`);
-
-// 📌ピン留め → ピン一覧・上部バー表示 → 解除
-const pin1 = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: true } });
-check('ピン留め（pinned=true）', pin1.status === 200 && pin1.json?.pinned === true, `status=${pin1.status}`);
-const listP = await api('/api/chat?channel=general&limit=10');
-check('ピン一覧に反映', (listP.json?.pinned || []).some((p) => p.id === chatMsgId));
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForFunction(
-  () => (document.getElementById('chat-pinned')?.innerText || '').includes('E2Eチャットテスト'),
-  { timeout: 10000 }
-).catch(() => {});
-const pinBarText = await page.evaluate(() => document.getElementById('chat-pinned')?.innerText || '');
-check('ピン留めバーに表示される', pinBarText.includes('E2Eチャットテスト'), `bar="${pinBarText.slice(0, 60)}"`);
-const unpin = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: false } });
-check('ピン解除（pinned=false）', unpin.status === 200 && unpin.json?.pinned === false, `status=${unpin.status}`);
-
-// 画像添付のサムネイル表示（ファイルメタAPI ?meta=1 のバグ修正回帰）
-const up = await page.evaluate(async () => {
-  const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
-  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#e11'; ctx.fillRect(0, 0, 8, 8);
-  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-  const res = await fetch('/api/files?filename=e2e-chat.png', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob });
-  return { status: res.status, json: await res.json().catch(() => null) };
-});
-check('画像アップロード（201）', up.status === 201, `status=${up.status}`);
-const upId = up.json?.file?.id;
-const fileMeta = await api(`/api/files/${upId}?meta=1`);
-check('ファイルメタAPI（?meta=1）', fileMeta.status === 200 && fileMeta.json?.content_type === 'image/png', JSON.stringify(fileMeta.json));
-await api('/api/chat', { method: 'POST', body: { body: 'E2E画像添付', channel: 'general', file_ids: [upId] } });
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-// 添付メタの取得（?meta=1）→サムネイル描画は非同期のため条件待ち
-await page.waitForFunction(() => !!document.querySelector('.chat-msg img.chat-thumb'), { timeout: 10000 }).catch(() => {});
-const hasThumb = await page.evaluate(() => !!document.querySelector('.chat-msg img.chat-thumb'));
-check('画像添付がサムネイル表示される（バグ修正）', hasThumb);
-
-// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）。
-// POLL_MS=5秒。since は >= 比較のため境界の投稿が毎周期返るので、2周期以上またいで
-// 待つ（el の dataset 未対応で data-id が付かず重複ガードが外れると、周期ごとに増える）。
-await api('/api/chat', { method: 'POST', body: { body: 'E2Eポーリング新着', channel: 'general' } });
-await page.waitForTimeout(11500);
-const pollCount = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2Eポーリング新着').length);
-check('ポーリングで新着が1回だけ表示される（2周期後も重複しない）', pollCount === 1, `count=${pollCount}`);
-// メッセージ行に data-id 属性が付いている（重複ガード・削除・ピンジャンプの前提）
-const hasDataId = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg')].every((r) => !!r.getAttribute('data-id')));
-check('チャット行に data-id が付与される（el の dataset 対応）', hasDataId);
-
-// 削除: ✕ をタップするとリロードせずに消える（row.remove()）
-await api('/api/chat', { method: 'POST', body: { body: 'E2E削除テスト', channel: 'general' } });
-await page.waitForFunction(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
-  { timeout: 8000 }).catch(() => {});
-check('削除テスト用メッセージが表示される', await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 1));
-await page.evaluate(() => {
-  const row = [...document.querySelectorAll('.chat-msg')].find((r) => r.querySelector('.chat-body')?.textContent === 'E2E削除テスト');
-  row?.querySelector('button[title="削除"]')?.click(); // confirm は自動承諾
-});
-await page.waitForFunction(() =>
-  ![...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
-  { timeout: 8000 }).catch(() => {});
-check('削除すると画面更新なしで消える', await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 0));
-
-// UI送信: 実際のボタンで1回送信 → DBに1件だけ（二重POSTの回帰）
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(400);
-const uiBody = 'E2EUI二重送信-' + Date.now();
-await page.fill('textarea', uiBody);
-await page.click('button:has-text("送信")');
-await page.waitForTimeout(1500);
-const uiRows = await api(`/api/chat?channel=general&limit=50`);
-const uiDbCount = (uiRows.json?.messages || []).filter((m) => m.body === uiBody).length;
-check('UI送信: 1回の送信でDBに1件だけ（二重POSTなし）', uiDbCount === 1, `count=${uiDbCount}`);
 
 // ---------- 9.5 機能強化: 点検の前回値表示・部品の棚卸モード ----------
 section('9.5 機能強化（前回値表示・棚卸モード）');
@@ -1317,18 +1188,6 @@ const uploadTestImage = (filename) => page.evaluate(async (name) => {
   });
   return { status: res.status, json: await res.json().catch(() => null) };
 }, filename);
-
-// チャット添付: 本人がアップロードした未紐づけファイルだけを受け付け、メッセージに紐づける
-// （他の記録のファイルIDを指定すると、10日後の自動削除でそのファイルが R2 から消えるため）
-const chatUp = await uploadTestImage('e2e-chat.png');
-const chatFileId = chatUp.json?.file?.id;
-const chatWithFile = await api('/api/chat', { method: 'POST', body: { body: 'E2E添付チャット', channel: 'general', file_ids: [chatFileId] } });
-check('チャット添付: 自分の未紐づけファイルは添付できる（201）', chatWithFile.status === 201, `status=${chatWithFile.status}`);
-const chatFiles = await api('/api/files');
-check('チャット添付: ファイルがメッセージに紐づく（related_table=chat_messages）',
-  (chatFiles.json?.files ?? []).some((f) => f.id === chatFileId && f.related_table === 'chat_messages' && f.related_id === chatWithFile.json?.id));
-const chatReuse = await api('/api/chat', { method: 'POST', body: { body: 'E2E添付の使い回し', channel: 'general', file_ids: [chatFileId] } });
-check('チャット添付: 紐づけ済み（他の記録）のファイルIDは400', chatReuse.status === 400, `status=${chatReuse.status}`);
 
 // 部品CSVの差分マージ: CSVで対応付けていない列（在庫数・場所など）は既存値を保つ
 const mergePart = await api('/api/parts', { method: 'POST', body: { name: 'E2Eマージ部品', model_no: 'E2E-MERGE-001', quantity: 7, location: 'E2E棚A', supplier: 'E2E商事' } });
@@ -2828,6 +2687,274 @@ const alRen = await api(`/api/parts/${alPart2.json?.id}`);
 check('台帳の設備名を変えると、新しい名前に一致する部品が自動で紐づく。以前紐づいた部品はそのまま',
   alRen.json?.part?.equipment_id === alEq.json?.id && (await api(`/api/parts/${alPart.json?.id}`)).json?.part?.equipment_id === alEq.json?.id);
 for (const [t, id] of [['parts', alPart.json?.id], ['parts', alPart2.json?.id], ['equipment', alEq.json?.id]]) await api(`/api/${t}/${id}`, { method: 'DELETE' });
+
+// ---------- 9.31 データ保護（二重登録の防止・ファイルの復元・CSV取込の既定） ----------
+section('9.31 データ保護（二重登録の防止・削除した写真の復元・部品CSV取込の既定は差分マージ）');
+{
+  // 同じ識別番号（client_request_id）の再送は、2件目を作らず最初の記録を返す（電波が不安定で返事が届かなかったとき）
+  const rid = () => crypto.randomUUID();
+  const kinds = [
+    ['トラブル', '/api/troubles', (k) => ({ occurred_at: new Date().toISOString(), phenomenon: `E2E二重防止トラブル${k}`, client_request_id: k }), (r) => r.json?.troubles],
+    ['業務依頼', '/api/repairs', (k) => ({ title: `E2E二重防止依頼${k}`, client_request_id: k }), (r) => r.json?.repairs],
+    ['日報', '/api/reports', (k) => ({ report_date: '2031-02-03', body: `E2E二重防止日報${k}`, client_request_id: k }), (r) => r.json?.reports],
+  ];
+  for (const [label, url, mk, list] of kinds) {
+    const key = rid();
+    const a = await api(url, { method: 'POST', body: mk(key) });
+    const b = await api(url, { method: 'POST', body: mk(key) });
+    check(`二重登録の防止（${label}）: 同じ識別番号の再送は新しく作らず、最初の記録を返す`,
+      a.status === 201 && b.status === 200 && b.json?.duplicate === true && b.json?.id === a.json?.id, JSON.stringify([a.status, b.status, a.json, b.json]));
+    const all = list(await api(url + (url === '/api/reports' ? '?from=2031-02-03&to=2031-02-03' : ''))) || [];
+    const mine = all.filter((x) => JSON.stringify(x).includes(key));
+    check(`二重登録の防止（${label}）: 記録は1件だけ`, mine.length === 1, `n=${mine.length}`);
+  }
+  const badKey = await api('/api/repairs', { method: 'POST', body: { title: 'x', client_request_id: '短い' } });
+  check('二重登録の防止: 識別番号の形式が不正なら400', badKey.status === 400, `status=${badKey.status}`);
+
+  // 画面から送る: 新規トラブルの保存は識別番号（UUID）つきで POST される
+  await page.goto(`${BASE}/pages/trouble?new=1`, { waitUntil: 'networkidle' });
+  await page.evaluate(() => localStorage.removeItem('draft:trouble-new'));
+  const sentKeys = [];
+  const onReq = (req) => {
+    if (req.method() === 'POST' && /\/api\/troubles$/.test(new URL(req.url()).pathname)) {
+      try { sentKeys.push(JSON.parse(req.postData() || '{}').client_request_id || null); } catch { sentKeys.push(null); }
+    }
+  };
+  page.on('request', onReq);
+  await page.fill('textarea[placeholder*="異音"]', 'E2E識別番号つき保存');
+  await page.click('button:text-is("保存")');
+  await page.waitForURL(/\/pages\/trouble\?id=\d+/, { timeout: 10000 }).catch(() => {});
+  page.off('request', onReq);
+  check('画面: 新規トラブルの保存は識別番号（UUID）つきで送られる', sentKeys.length === 1 && /^[0-9a-f-]{36}$/.test(String(sentKeys[0])), JSON.stringify(sentKeys));
+  const savedId = Number(new URL(page.url()).searchParams.get('id'));
+  if (savedId) await api(`/api/troubles/${savedId}`, { method: 'DELETE' });
+
+  // 削除した写真・ファイルは、管理画面から元に戻せる（以前は「復元できます」と案内しながら戻す手段が無かった）
+  const png = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 4; canvas.height = 4;
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+    const res = await fetch('/api/files?filename=e2e-restore.png', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  });
+  const fid = png.json?.file?.id;
+  const del = await api(`/api/files/${fid}`, { method: 'DELETE' });
+  check('ファイルの復元: 論理削除すると取得できない（404）', del.status === 200 && (await api(`/api/files/${fid}?meta=1`)).status === 404);
+  const restoreByEditor = await apiAs(editorEmail, `/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 入力可（editor）は403（管理者のみ）', restoreByEditor.status === 403, `status=${restoreByEditor.status}`);
+  const restored = await api(`/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 管理者が元に戻せる', restored.status === 200 && (await api(`/api/files/${fid}?meta=1`)).status === 200, JSON.stringify(restored));
+  const restoredAgain = await api(`/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 2回目（既に戻っている）は409', restoredAgain.status === 409, `status=${restoredAgain.status}`);
+  const auditRestore = await api('/api/admin/audit?table=files&action=restore');
+  check('ファイルの復元: 監査ログに restore が残る', (auditRestore.json?.logs || []).some((l) => l.table_name === 'files' && Number(l.record_id) === fid && l.action === 'restore'), JSON.stringify((auditRestore.json?.logs || []).slice(0, 2)));
+  await api(`/api/files/${fid}`, { method: 'DELETE' });
+  await api(`/api/files/${fid}?physical=1`, { method: 'DELETE' });
+  const restorePurged = await api(`/api/files/${fid}`, { method: 'PUT', body: { restore: true } });
+  check('ファイルの復元: 完全削除（R2から削除済み）したものは戻せない（409）', restorePurged.status === 409, `status=${restorePurged.status}`);
+
+  // 部品CSV取込: 管理者でも既定は「差分マージ」（全置き換えは部品のIDが付け替わりQRラベルが無効になるため）
+  await page.goto(`${BASE}/pages/parts?import=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('select', { timeout: 10000 });
+  const importUi = await page.evaluate(() => {
+    const sel = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => /差分マージ/.test(o.textContent)));
+    return {
+      value: sel?.value,
+      firstLabel: sel?.options[0]?.textContent || '',
+      hasReplace: [...(sel?.options || [])].some((o) => o.value === 'replace'),
+    };
+  });
+  check('部品CSV取込: 管理者でも既定は差分マージ', importUi.value === 'merge' && /差分マージ/.test(importUi.firstLabel) && importUi.hasReplace, JSON.stringify(importUi).slice(0, 200));
+  await page.selectOption('select:has(option[value="replace"])', 'replace');
+  const warnShown = await page.evaluate(() => [...document.querySelectorAll('.notice.is-error')].some((n) => n.style.display !== 'none' && /QRラベル/.test(n.textContent)));
+  check('部品CSV取込: 全置き換えを選ぶと、QRラベルが読めなくなる旨の強い警告が出る', warnShown);
+}
+
+// ---------- 9.32 変更履歴に「何が変わったか」を出す／ホームを経由しない直接アクセスでもSWを登録する ----------
+section('9.32 変更履歴の差分表示・SW登録（全ページ）・細かい不具合の修正');
+{
+  // 保全計画: 状態とタイトルを変える → 詳細の変更履歴に「前 → 後」が出る
+  const mk = await api('/api/plans', { method: 'POST', body: { title: 'E2E履歴の計画', plan_type: 'inspection', planned_date: '2031-03-01' } });
+  const planId = mk.json?.id;
+  await api(`/api/plans/${planId}`, { method: 'PUT', body: { title: 'E2E履歴の計画（改）', status: 'done' } });
+  await page.goto(`${BASE}/pages/plan?id=${planId}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.history-diff', { timeout: 10000 }).catch(() => {});
+  const sum = await page.locator('.history-diff > summary').first().innerText().catch(() => '');
+  check('保全計画の変更履歴: 「何を変更したか」の要約が出る（タイトル・状態）', /タイトル/.test(sum) && /状態/.test(sum) && /変更/.test(sum), sum);
+  await page.locator('.history-diff > summary').first().click();
+  const diffText = await page.locator('.history-diff-list').first().innerText().catch(() => '');
+  check('保全計画の変更履歴: 開くと「項目：前 → 後」（状態は未実施 → 完了）', /状態/.test(diffText) && /未実施/.test(diffText) && /完了/.test(diffText) && /E2E履歴の計画（改）/.test(diffText), diffText.replace(/\n/g, ' | '));
+  check('保全計画の変更履歴: 登録の行には変更内容を出さない（登録＝操作だけ）', await page.locator('.history-item').count() >= 2 && await page.locator('.history-item:has(.action-badge.is-create) .history-diff').count() === 0);
+  // 変更内容を開いても、スマホ幅（375px）で横にはみ出さない
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto(`${BASE}/pages/plan?id=${planId}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.history-diff', { timeout: 10000 }).catch(() => {});
+  await page.locator('.history-diff > summary').first().click().catch(() => {});
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check('保全計画の変更履歴: 375px幅で変更内容を開いても横スクロールしない', overflow <= 0, `overflow=${overflow}`);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await api(`/api/plans/${planId}`, { method: 'DELETE' });
+
+  // 日報: 本文を変える → 詳細の変更履歴に本文の前 → 後が出る（以前は新しい値だけを記録していたため出せなかった）
+  const rep = await api('/api/reports', { method: 'POST', body: { report_date: '2031-03-02', body: 'E2E旧本文' } });
+  const repId = rep.json?.id;
+  await api(`/api/reports/${repId}`, { method: 'PUT', body: { report_date: '2031-03-02', body: 'E2E新本文' } });
+  await page.goto(`${BASE}/pages/report?id=${repId}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.history-diff', { timeout: 10000 }).catch(() => {});
+  await page.locator('.history-diff > summary').first().click().catch(() => {});
+  const repDiff = await page.locator('.history-diff-list').first().innerText().catch(() => '');
+  check('日報の変更履歴: 本文が「E2E旧本文 → E2E新本文」で出る', /本文/.test(repDiff) && /E2E旧本文/.test(repDiff) && /E2E新本文/.test(repDiff), repDiff.replace(/\n/g, ' | '));
+  await api(`/api/reports/${repId}`, { method: 'DELETE' });
+
+  // SW: ホームを経由せず、深いページを最初に開いた端末でもオフライン用の登録が行われる
+  const ctxDeep = await browser.newContext();
+  const deep = await ctxDeep.newPage();
+  await deep.goto(`${BASE}/pages/parts`, { waitUntil: 'networkidle' });
+  const registered = await deep.waitForFunction(async () => !!(await navigator.serviceWorker.getRegistration()), { timeout: 15000 }).then(() => true).catch(() => false);
+  check('SW登録: ホームを開かず部品在庫ページを直接開いても Service Worker が登録される', registered);
+  await ctxDeep.close();
+
+  // 不正な入力でも500にならない（監査ログの offset・存在しない日付・LIKE記号）
+  const au1 = await api('/api/admin/audit?offset=1.5&limit=2.5');
+  const au2 = await api('/api/admin/audit?offset=1e30');
+  const au3 = await api('/api/admin/audit?from=2026-13-45&to=2026-99-99');
+  check('監査ログ: offset が小数・桁あふれでも200（500にならない）', au1.status === 200 && au2.status === 200, `${au1.status}/${au2.status}`);
+  check('監査ログ: 期間に存在しない日付を指定しても200', au3.status === 200, `status=${au3.status}`);
+  const tr1 = await api('/api/troubles?from=2026-13-45');
+  const st1 = await api('/api/stats?from=2026-13-45&to=2026-13-46');
+  const in1 = await api('/api/inspections?from=2026-13-45');
+  check('一覧・集計: 存在しない日付で絞り込んでも200（トラブル・集計・点検）', tr1.status === 200 && st1.status === 200 && in1.status === 200, `${tr1.status}/${st1.status}/${in1.status}`);
+  const badPlan = await api('/api/plans', { method: 'POST', body: { title: 'x', plan_type: 'inspection', planned_date: '2026-02-31' } });
+  check('保全計画: 存在しない予定日は400', badPlan.status === 400, `status=${badPlan.status}`);
+  const eqPct = await api('/api/equipment?q=' + encodeURIComponent('%'));
+  const eqAll = await api('/api/equipment');
+  check('設備一覧の検索: 「%」は全件一致にならず、%を含む設備だけ', eqPct.status === 200 && (eqPct.json?.equipment?.length ?? 0) < (eqAll.json?.equipment?.length ?? 0), `${eqPct.json?.equipment?.length}/${eqAll.json?.equipment?.length}`);
+}
+
+// ---------- 9.33 開発用ファイル（CLAUDE.md・schema.sql・tests/ など）は配信しない ----------
+section('9.33 開発用ファイルの配信止め（許可リスト）');
+{
+  const get = async (p) => {
+    const res = await page.request.get(`${BASE}${p}`, { maxRedirects: 0 });
+    return { status: res.status(), text: (await res.text()).slice(0, 4000), ct: res.headers()['content-type'] || '', csp: res.headers()['content-security-policy'] || '' };
+  };
+  const hidden = ['/CLAUDE.md', '/README.md', '/schema.sql', '/wrangler.toml', '/package.json', '/tests/e2e.mjs', '/tests/package.json', '/scripts/make-icons.mjs',
+    '/functions/api/_middleware.js', '/.github/workflows/e2e.yml', '/_routes.json',
+    // 抜け道（実測で本物のファイルが返った書き方）
+    '//schema.sql', '/%43LAUDE.md', '/sch%65ma.sql', '/js/..%2fschema.sql', '/js/%2e%2e%2fschema.sql', '/css/..%2fCLAUDE.md', '/pages/..%2f..%2fwrangler.toml'];
+  const leaked = [];
+  for (const p of hidden) {
+    const r = await get(p);
+    if (r.status !== 404 || /CREATE TABLE|database_id|# CLAUDE\.md|"scripts"/.test(r.text)) leaked.push(`${p}→${r.status}`);
+  }
+  check('開発用ファイルと、その抜け道（//・%エンコード・..%2f）は 404 で、中身が返らない', leaked.length === 0, leaked.join(' '));
+  const docs = await get('/docs/' + encodeURIComponent('現場向け使い方ガイド.md'));
+  check('docs/ 配下（日本語のファイル名）も 404', docs.status === 404, `status=${docs.status}`);
+  // アプリ本体は今までどおり配信される（JS は Functions 経由・HTML は静的配信）
+  const js = await get('/js/api.js');
+  const css = await get('/css/style.css');
+  const html = await get('/pages/parts');
+  const ele = await get('/electrical/');
+  const me = await api('/api/me');
+  check('アプリのファイルは従来どおり配信される（JS・CSS・ページ・電気設備点検・API）', js.status === 200 && /javascript/.test(js.ct) && css.status === 200 && html.status === 200 && ele.status === 200 && me.status === 200, JSON.stringify([js.status, css.status, html.status, ele.status, me.status]));
+  check('JS（Functions 経由）にも CSP ヘッダーが付いている（ヘッダーが外れていない）', /script-src 'self'/.test(js.csp) && !/unsafe-inline/.test((js.csp.match(/script-src[^;]*/) || [''])[0]), js.csp.slice(0, 80));
+  check('電気設備点検の CSP は従来どおり（インラインスクリプトを許可）', /script-src[^;]*'unsafe-inline'/.test(ele.csp), ele.csp.slice(0, 120));
+  check('通常ページの CSP は従来どおり（インラインスクリプトを許可しない）', !/script-src[^;]*'unsafe-inline'/.test(html.csp) && /script-src 'self'/.test(html.csp), html.csp.slice(0, 120));
+}
+
+// ---------- 9.34 電気設備点検の異常を通知・横断検索へ／ユーティリティ日報のオフライン保存 ----------
+section('9.34 電気設備点検の異常（通知・横断検索・記録を開くリンク）／ユーティリティ日報のオフライン保存');
+{
+  // --- 電気設備点検: 異常を含む記録 → 通知 ---
+  const elecRec = {
+    id: 'e2e9001', equipmentType: 'battery', date: '2031-05-01', inspector: 'E2E点検者九', facility: 'E2E棟', weather: '', room_temp: '', humidity: '',
+    statuses: { x: 'repair', y: 'caution', z: 'good' }, measurements: {}, qualifiers: {}, categoryRemarks: {}, remarks: 'E2E備考語九', repairNotes: 'E2E端子腐食', photos: [], config: [],
+  };
+  const mkE = await api('/api/electrical-inspections', { method: 'POST', body: elecRec });
+  check('電気点検: 異常を含む記録を保存できる', mkE.status === 201, JSON.stringify(mkE));
+  const ntf = await api('/api/notifications?type=inspection_abnormal');
+  const eNtf = (ntf.json?.notifications || []).find((n) => n.link_url === '/electrical/#record=e2e9001');
+  check('電気点検: 異常を含む記録の保存で通知ができる（設備種別・件数・記録を開くリンク）',
+    !!eNtf && /蓄電池/.test(eNtf.title) && /2031-05-01/.test(eNtf.title) && /要修理1件・要注意1件/.test(eNtf.body) && eNtf.level === 'alert', JSON.stringify(eNtf));
+  await api('/api/electrical-inspections', { method: 'POST', body: { ...elecRec, remarks: '再保存' } });
+  const ntf2 = await api('/api/notifications?type=inspection_abnormal');
+  check('電気点検: 異常のままの再保存では通知を繰り返さない',
+    (ntf2.json?.notifications || []).filter((n) => n.link_url === '/electrical/#record=e2e9001').length === 1);
+  const okRec = await api('/api/electrical-inspections', { method: 'POST', body: { ...elecRec, id: 'e2e9002', date: '2031-05-02', statuses: { x: 'good' } } });
+  const ntf3 = await api('/api/notifications?type=inspection_abnormal');
+  check('電気点検: 異常の無い記録は通知しない', okRec.status === 201 && !(ntf3.json?.notifications || []).some((n) => n.link_url === '/electrical/#record=e2e9002'));
+
+  // --- 横断検索 ---
+  const sr = await api('/api/search?type=electrical&q=' + encodeURIComponent('E2E点検者九'));
+  const hit = (sr.json?.results || []).find((r) => r.id === 'e2e9001');
+  check('横断検索: 電気設備点検を点検者名で探せる（結果から記録を開くリンク付き）', !!hit && hit.type === 'electrical' && hit.url === '/electrical/#record=e2e9001' && /⚠異常あり/.test(hit.snippet), JSON.stringify(sr.json?.results));
+  const sr2 = await api('/api/search?type=electrical&q=' + encodeURIComponent('E2E端子腐食'));
+  check('横断検索: 要修理メモの語でも見つかる', (sr2.json?.results || []).some((r) => r.id === 'e2e9001'));
+  await page.goto(`${BASE}/pages/search`, { waitUntil: 'networkidle' });
+  check('横断検索の画面: 種別に「電気設備点検」がある', await page.evaluate(() => document.body.innerText.includes('電気設備点検')));
+
+  // --- 通知・検索のリンクから開くと、その記録の詳細が開く ---
+  await page.goto(`${BASE}/electrical/#record=e2e9001`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
+  const opened = await page.evaluate(() => ({
+    active: document.getElementById('modal')?.classList.contains('active'),
+    title: document.getElementById('modal-title')?.textContent || '',
+    body: document.getElementById('modal-content')?.innerText || '',
+  }));
+  check('電気点検: /electrical/#record=ID で、その記録の詳細が開く', opened.active === true && /2031/.test(opened.title) && /E2E点検者九/.test(opened.body), JSON.stringify(opened).slice(0, 200));
+  await page.goto(`${BASE}/pages/help`, { waitUntil: 'networkidle' }); // 同じページ内のハッシュ変更では再読み込みされないため、別ページを挟む
+  await page.goto(`${BASE}/electrical/#record=nonexistent`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  check('電気点検: 存在しない記録IDのリンクでは何も開かない（エラーにならない）', await page.evaluate(() => !document.getElementById('modal')?.classList.contains('active')));
+  await api('/api/electrical-inspections/e2e9001', { method: 'DELETE' });
+  await api('/api/electrical-inspections/e2e9002', { method: 'DELETE' });
+
+  // --- ユーティリティ日報: 電波が途切れたら送信待ちに保存し、復帰で自動送信（同じ日は二重にしない） ---
+  const fillUtility = async (pg, date, value) => {
+    await pg.goto(`${BASE}/pages/utility?new=1`, { waitUntil: 'networkidle' });
+    await pg.waitForSelector('.check-item', { timeout: 10000 });
+    await pg.locator('#app input[type=date]').first().fill(date);
+    const idx = await pg.evaluate(() => [...document.querySelectorAll('#app .check-item')]
+      .findIndex((c) => (c.querySelector('.check-item-name')?.childNodes[0]?.textContent || '').trim() === 'ヘッダー圧力'));
+    await pg.locator('#app .check-item').nth(idx).locator('input[type=text], input[type=number]').first().fill(value);
+  };
+  await fillUtility(page, '2031-04-01', '0.7');
+  const page2 = await context.newPage();
+  page2.on('dialog', async (d) => { dialogs.push(d.message()); await d.accept(); });
+  await fillUtility(page2, '2031-04-01', '0.9'); // 同じ日を別画面でも入力しておく（送信待ちの二重ガードの確認用）
+  await context.setOffline(true);
+  const dlg0 = dialogs.length;
+  await page.click('button:text-is("登録する")');
+  await page.waitForTimeout(1500);
+  check('ユーティリティ日報: 電波が無いと「送信待ちに保存しました」と案内する', dialogs.slice(dlg0).some((d) => d.includes('送信待ち')), dialogs.slice(dlg0).join(' / '));
+  const queued = await page.evaluate(() => new Promise((resolve) => {
+    const req = indexedDB.open('mainte-offline');
+    req.onsuccess = () => {
+      try {
+        const db = req.result; const store = db.objectStoreNames[0];
+        const all = db.transaction(store, 'readonly').objectStore(store).getAll();
+        all.onsuccess = () => resolve(all.result.filter((i) => i.kind === 'utility').map((i) => ({ date: i.payload.report_date, rid: !!i.payload.client_request_id, n: Object.keys(i.payload.values || {}).length })));
+        all.onerror = () => resolve('err');
+      } catch (e) { resolve(String(e)); }
+    };
+    req.onerror = () => resolve('open-err');
+  }));
+  check('ユーティリティ日報: 送信待ちに、日付・識別番号・点検値つきで入る', Array.isArray(queued) && queued.length === 1 && queued[0].date === '2031-04-01' && queued[0].rid === true && queued[0].n >= 1, JSON.stringify(queued));
+  const dlg1 = dialogs.length;
+  await page2.click('button:text-is("登録する")');
+  await page2.waitForTimeout(1500);
+  check('ユーティリティ日報: 同じ日が既に送信待ちにあるときは、2件目を積まず案内する（1日1件）', dialogs.slice(dlg1).some((d) => d.includes('すでにこの端末の送信待ち')), dialogs.slice(dlg1).join(' / '));
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForTimeout(3000);
+  const sentU = await api('/api/utility-reports?date=2031-04-01');
+  const sentList = sentU.json?.reports || [];
+  check('ユーティリティ日報: 電波が戻ると自動で送信され、その日の記録が1件だけできる', sentList.length === 1, JSON.stringify(sentList.map((r) => r.id)));
+  const sentDetail = sentList[0] ? await api(`/api/utility-reports/${sentList[0].id}`) : null;
+  check('ユーティリティ日報: 送信された記録に入力した点検値（ヘッダー圧力 0.7）が入っている',
+    (sentDetail?.json?.report?.values || sentDetail?.json?.values || []).some((v) => v.name === 'ヘッダー圧力' && Number(v.value) === 0.7), JSON.stringify(sentDetail?.json).slice(0, 160));
+  await page2.close();
+  if (sentList[0]) await api(`/api/utility-reports/${sentList[0].id}`, { method: 'DELETE' });
+}
 
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');

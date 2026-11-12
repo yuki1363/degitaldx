@@ -7,9 +7,9 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { attachFiles, listAttachedFiles } from '../_lib/storage.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 import { ensureUtilitySchema } from './_schema.js';
-import { listItems, buildValues, toReport } from './_values.js';
+import { listItems, buildValues, toReport, diffValues } from './_values.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -62,7 +62,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (conflict) return conflict;
 
   const reportDate = String(body.report_date || '').trim();
-  if (!DATE_RE.test(reportDate)) return jsonError(400, 'report_date は YYYY-MM-DD 形式で指定してください。');
+  if (!DATE_RE.test(reportDate) || !isValidYmd(reportDate)) return jsonError(400, 'report_date は YYYY-MM-DD 形式（実在する日付）で指定してください。');
 
   // 日付を他の日へ変更する場合も1日1件を守る（自分自身は除外）
   const dup = await db.prepare(
@@ -106,9 +106,20 @@ export async function onRequestPut({ request, params, env, data }) {
     now,
   });
 
+  // 変更した項目だけを「前→後」で記録する（詳細画面の変更履歴に何が変わったかを出すため）
+  const diff = {};
+  const same = (a, b) => String(a ?? '') === String(b ?? '');
+  if (!same(existing.report_date, reportDate)) diff.report_date = { from: existing.report_date, to: reportDate };
+  if (!same(existing.reporter_name, reporterName)) diff.reporter_name = { from: existing.reporter_name, to: reporterName };
+  if (!same(existing.note, note)) diff.note = { from: existing.note, to: note };
+  if (Number(existing.has_abnormal) !== Number(built.hasAbnormal)) diff.has_abnormal = { from: Number(existing.has_abnormal), to: Number(built.hasAbnormal) };
+  let oldValues = [];
+  try { oldValues = JSON.parse(existing.values_json || '[]'); } catch { /* 壊れた旧データは差分なし扱い */ }
+  const changedItems = diffValues(oldValues, built.values);
+  if (changedItems.length > 0) diff.changed_items = changedItems;
+  if (attached > 0) diff.attached_files = attached;
   await writeAuditLog(db, {
-    tableName: 'utility_report', recordId: id, action: 'update', changedBy: email,
-    diff: { report_date: reportDate, has_abnormal: built.hasAbnormal, note, attached_files: attached },
+    tableName: 'utility_report', recordId: id, action: 'update', changedBy: email, diff,
   });
   return json({ ok: true, has_abnormal: built.hasAbnormal, attached_files: attached });
 }

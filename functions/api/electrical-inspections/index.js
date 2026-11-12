@@ -16,8 +16,11 @@ import { json, jsonError, readJson } from '../_lib/http.js';
 import { nowIso } from '../_lib/util.js';
 import { ensureColumns } from '../_lib/db-compat.js';
 import { attachFiles } from '../_lib/storage.js';
+import { notifyTeam } from '../_lib/notify.js';
 
 export const EQUIPMENT_TYPES = ['main', 'battery', 'generator'];
+// 画面（electrical/index.html の EQ_NAMES）と同じ名称。通知の見出し・横断検索の表示に使う
+export const EQUIPMENT_LABELS = { main: '高圧受電設備', battery: '蓄電池', generator: '発電機' };
 
 // テーブルが無い旧DBでも落ちないよう、API入口で自己修復する（CREATE TABLE は冪等）。
 export async function ensureElectricalSchema(db) {
@@ -42,10 +45,19 @@ export async function ensureElectricalSchema(db) {
   ]);
 }
 
-// caution / repair が1つでもあれば異常扱い（一覧の色分け・将来の通知用）
+// caution / repair が1つでもあれば異常扱い（一覧の色分け・通知・横断検索）
 export function computeHasAbnormal(statuses) {
   if (!statuses || typeof statuses !== 'object') return 0;
   return Object.values(statuses).some((v) => v === 'caution' || v === 'repair') ? 1 : 0;
+}
+
+// 要注意・要修理の件数（通知の本文用）
+export function countAbnormal(statuses) {
+  const c = { caution: 0, repair: 0 };
+  if (statuses && typeof statuses === 'object') {
+    for (const v of Object.values(statuses)) if (v === 'caution' || v === 'repair') c[v]++;
+  }
+  return c;
 }
 
 export async function onRequestGet({ env, request, data }) {
@@ -69,7 +81,7 @@ export async function onRequestGet({ env, request, data }) {
   return json({ records });
 }
 
-export async function onRequestPost({ env, request, data }) {
+export async function onRequestPost({ env, request, data, waitUntil }) {
   const denied = requireRole(data.user, 'editor');
   if (denied) return denied;
   const db = env.DB;
@@ -96,7 +108,7 @@ export async function onRequestPost({ env, request, data }) {
 
   // client_id で冪等 upsert。論理削除済みの記録は復活させない（古い画面を開いたままの端末が
   // 保存すると、他の端末で削除した記録が黙って復活していた）。戻すときは管理画面の「削除済み」から復元する
-  const existing = await db.prepare('SELECT id, record_json, deleted_at FROM electrical_inspection WHERE client_id = ?')
+  const existing = await db.prepare('SELECT id, record_json, has_abnormal, deleted_at FROM electrical_inspection WHERE client_id = ?')
     .bind(clientId).first();
   if (existing?.deleted_at) {
     return jsonError(409, 'この記録は削除されています。必要なら管理者が管理画面の「削除済み」から復元してください。');
@@ -120,6 +132,10 @@ export async function onRequestPost({ env, request, data }) {
       // 上書き前の記録を残す（任意の editor が同じ記録を保存し直せるため、誰が何を上書きしたか追えるように）
       changedBy: email, diff: { equipment_type: type, date, attached_files: attached, before_record_json: existing.record_json },
     });
+    // 直して保存し直したことで初めて異常になったときだけ通知する（異常のままの再保存では繰り返さない）
+    if (hasAbnormal === 1 && Number(existing.has_abnormal) !== 1) {
+      await notifyAbnormal(env, waitUntil, { id: existing.id, clientId, type, date, statuses: rec.statuses, email });
+    }
     return json({ ok: true, id: existing.id, client_id: clientId, attached_files: attached });
   }
 
@@ -137,5 +153,27 @@ export async function onRequestPost({ env, request, data }) {
     tableName: 'electrical_inspection', recordId: id, action: 'create',
     changedBy: email, diff: { equipment_type: type, date, attached_files: attached },
   });
+  if (hasAbnormal === 1) {
+    await notifyAbnormal(env, waitUntil, { id, clientId, type, date, statuses: rec.statuses, email });
+  }
   return json({ ok: true, id, client_id: clientId, attached_files: attached }, 201);
+}
+
+// 異常（要注意・要修理）を含む記録を通知する。02 点検実施の異常通知と同じ type（通知センターの「点検」で絞れる）。
+//   リンクは電気設備点検ページの記録詳細（#record=記録ID でその記録を開く）。通知の失敗で保存は失敗させない
+async function notifyAbnormal(env, waitUntil, { id, clientId, type, date, statuses, email }) {
+  const { caution, repair } = countAbnormal(statuses);
+  const parts = [];
+  if (repair) parts.push(`要修理${repair}件`);
+  if (caution) parts.push(`要注意${caution}件`);
+  await notifyTeam(env, waitUntil, {
+    type: 'inspection_abnormal',
+    level: repair ? 'alert' : 'warning',
+    title: `電気設備点検で異常検知: ${EQUIPMENT_LABELS[type] || type}（${date}）`,
+    body: `${parts.join('・')}があります。内容を確認してください。`,
+    relatedTable: 'electrical_inspection',
+    relatedId: id,
+    linkUrl: `/electrical/#record=${clientId}`,
+    createdBy: email,
+  });
 }

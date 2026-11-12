@@ -64,6 +64,22 @@ async function checkForSwUpdate() {
   } catch { /* オフライン等での失敗は無視（次のチェック機会に任せる） */ }
 }
 
+// Service Worker の登録（PWA: オフラインでもアプリが起動する）。
+//   以前はホーム（home-init.js）でだけ登録していたため、QR（設備・部品）から各ページを直接開いた端末や、
+//   ホームを一度も開いていない端末ではオフライン用のキャッシュが作られなかった。全ページ共通のここで行う
+//   （同じ /sw.js を何度登録しても1つに揃うので、ページごとに呼んで構わない）。
+//   読み込みの邪魔をしないよう、ページの読み込みが終わってから登録する。
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const register = () => navigator.serviceWorker.register('/sw.js').catch((err) => {
+    console.warn('Service Worker の登録に失敗:', err);
+  });
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register, { once: true });
+}
+
+registerServiceWorker();
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => { setupBackNav(); setupUpdateToast(); setupAutoSync(); checkForSwUpdate(); });
 } else {

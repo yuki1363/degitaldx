@@ -20,7 +20,7 @@ import { completePlanAfterInspection } from '/js/plan-inspection-link.js';
 const DB_NAME = 'mainte-offline';
 const STORE = 'outbox';
 
-const KIND_LABELS = { trouble: 'トラブル記録', inspection: '点検記録', repair: '業務依頼', report: '日報', parts_tx: '部品の入出庫' };
+const KIND_LABELS = { trouble: 'トラブル記録', inspection: '点検記録', repair: '業務依頼', report: '日報', utility: 'ユーティリティ日報', parts_tx: '部品の入出庫' };
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -55,7 +55,7 @@ async function getAll() {
 
 /**
  * 送信待ちに追加する。
- * @param {'trouble'|'inspection'|'repair'|'report'|'parts_tx'} kind
+ * @param {'trouble'|'inspection'|'repair'|'report'|'utility'|'parts_tx'} kind
  * @param {object} payload 本体POSTのボディ（file_ids は含めない）
  * @param {File[]} files リサイズ済みの添付（Canvasリサイズはオフラインでも動く）
  * @param {object} [extra] 例: { planId, planDay } 点検保存後に完了化する計画ID（planDay があればその日だけ）
@@ -122,6 +122,9 @@ async function sendOne(item) {
     await api.post('/api/repairs', item.payload); // 依頼はファイル添付なし（file_ids 不要）
   } else if (item.kind === 'report') {
     await api.post('/api/reports', item.payload);
+  } else if (item.kind === 'utility') {
+    // 写真は上でアップロード済み（body.file_ids にマージ済み）。client_request_id 付きなので再送しても二重登録しない
+    await api.post('/api/utility-reports', body);
   } else if (item.kind === 'parts_tx') {
     // 部品の入出庫（入庫・出庫のみ。棚卸調整は絶対値のため後から送ると間の出庫を消すので対象外）。
     // client_tx_id 付きなので、送信が途中で切れて再送してもサーバーは2回反映しない
@@ -220,6 +223,7 @@ function describeItem(item) {
     case 'inspection': return `設備 #${p.equipment_id ?? '?'} の点検`;
     case 'repair': return cut(p.title);
     case 'report': return cut(p.body);
+    case 'utility': return `${p.report_date || ''} の日報（点検値 ${Object.keys(p.values || {}).length}項目）`;
     default: return '';
   }
 }

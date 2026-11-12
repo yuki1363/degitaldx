@@ -68,6 +68,16 @@ export function localInputToIso(value) {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+/**
+ * 登録の二重実行を防ぐ識別番号（UUID）。新規の入力フォームを開いたときに1つ作り、同じ内容の送信には
+ * ずっと同じ番号を付ける（送信待ちに入れたときも同じ）。サーバーは同じ番号を2回は登録しない
+ * （電波が不安定で「届いたのに返事が届かず、送信待ちから再送された」ときの二重登録を防ぐ。functions/api/_lib/request-dedupe.js）。
+ */
+export function newRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 /** メールアドレスを部分的に伏字にする（例: user@example.com → u***@example.com） */
 export function maskEmail(email) {
   if (!email || !email.includes('@')) return email || '';

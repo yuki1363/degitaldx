@@ -11,6 +11,7 @@ import { nowIso } from '../_lib/util.js';
 import { normalizeJa } from '../_lib/normalize.js';
 import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
 import { linkRowToEquipment, describeEquipmentLink, ensurePartsEquipmentTable } from '../_lib/equipment-link.js';
+import { partsDetailVersion } from '../_lib/parts-version.js';
 
 // NFKC 正規化＋trim（半角カナ→全角カナ・全角英数→半角。検索・表示の統一）。空は null
 const nz = (v) => { const s = normalizeJa(String(v)).trim(); return s === '' ? null : s; };
@@ -23,9 +24,14 @@ async function getPart(DB, id) {
     .first();
 }
 
-export async function onRequestGet({ env, params }) {
+export async function onRequestGet({ env, params, request }) {
   const { DB } = env;
   const id = Number(params.id);
+  // 版だけ欲しい呼び出し（詳細画面の自動更新が「変わったか」を確かめる用）。部品や履歴は読まない
+  if (request && new URL(request.url).searchParams.get('version') === '1') {
+    return json({ version: await partsDetailVersion(DB, id) });
+  }
+  const version = await partsDetailVersion(DB, id); // 読む「前」に取る（読んでいる間の変更を次の確認で拾うため）
 
   const part = await getPart(DB, id);
   if (!part) return jsonError(404, '部品が見つかりません。');
@@ -58,7 +64,7 @@ export async function onRequestGet({ env, params }) {
   ];
 
   // equipment は従来の応答（主な設備1件）との互換のため残す
-  return json({ part, transactions, equipment: primary.equipment, equipment_links: equipmentLinks, equipment_status: primary.status });
+  return json({ part, transactions, equipment: primary.equipment, equipment_links: equipmentLinks, equipment_status: primary.status, version });
 }
 
 export async function onRequestPut({ env, data, params, request }) {

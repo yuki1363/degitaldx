@@ -1,7 +1,7 @@
 // ホーム概要タブ（期限超過 / 直近 / 通知）
 //   「期限超過」: カレンダー超過 ＋ 年間計画の超過分
 //   「直近」    : カレンダー7日以内 ＋ 年間計画の今月末までの未完了（超過しそう）
-//   「通知」    : チャット未読（ユーザー別既読数付き）＋ システム通知
+//   「通知」    : システム通知
 
 import { api } from '/js/api.js';
 import { el, render, formatDate, formatDateTime, jstTodayStr } from '/js/util.js';
@@ -42,12 +42,6 @@ async function fetchAnnualAlerts() {
   overdue.sort(byDate);
   thisMonth.sort(byDate);
   return { overdue, thisMonth };
-}
-
-// ─── チャット未読ステータス取得 ──────────────────────────────────────────
-function fetchChatStatus() {
-  return api.get('/api/chat?count_unread=1&channel=general')
-    .catch(() => ({ unread_count: 0, readers: 0, total_users: 0 }));
 }
 
 // ─── 通知バッジ更新（ベル・タイル共通） ──────────────────────────────────
@@ -144,29 +138,13 @@ function notifRow(n, reload) {
   return el('div', { class: 'home-activity-item' + (isAck ? '' : ' is-unack') }, inner);
 }
 
-// ─── タブコンテンツ: 通知（チャット未読 ＋ 通知一覧） ───────────────────
-function activityTabContent(notifications, chatStatus, notifUnread) {
+// ─── タブコンテンツ: 通知一覧 ───────────────────
+function activityTabContent(notifications, notifUnread) {
   const children = [];
-
-  // チャット未読セクション
-  if (chatStatus && chatStatus.unread_count > 0) {
-    const { unread_count, readers, total_users } = chatStatus;
-    const readPart = total_users > 0
-      ? el('span', { style: 'font-size:11px;color:#64748b;margin-left:4px' },
-          `（${total_users}人中${readers}人既読）`)
-      : null;
-    children.push(el('div', { class: 'home-chat-notice' }, [
-      el('span', {}, `💬 チャット ${unread_count}件未読`),
-      readPart,
-      el('a', { href: '/pages/chat', style: 'margin-left:auto;font-size:12px' }, 'チャットを開く ›'),
-    ]));
-  }
 
   // 通知一覧（確認ボタン付き）
   if (!notifications || notifications.length === 0) {
-    if (!chatStatus?.unread_count) {
-      children.push(el('p', { class: 'home-tab-empty' }, '最近の動きはありません。'));
-    }
+    children.push(el('p', { class: 'home-tab-empty' }, '最近の動きはありません。'));
     return el('div', {}, children.filter(Boolean));
   }
 
@@ -213,28 +191,25 @@ function activityTabContent(notifications, chatStatus, notifUnread) {
 export async function loadHomeTabs(container) {
   let overdue = [], upcoming = [], notifications = [], notifUnread = 0;
   let annualAlerts = { overdue: [], thisMonth: [] };
-  let chatStatus = { unread_count: 0, readers: 0, total_users: 0 };
 
   try {
-    const [status, notif, annual, chat] = await Promise.all([
+    const [status, notif, annual] = await Promise.all([
       fetchPlanStatus(7).catch(() => ({ overdue: [], upcoming: [] })),
       api.get('/api/notifications?limit=8').catch(() => ({ notifications: [], unread_count: 0 })),
       fetchAnnualAlerts().catch(() => ({ overdue: [], thisMonth: [] })),
-      fetchChatStatus(),
     ]);
     overdue       = status.overdue || [];
     upcoming      = status.upcoming || [];
     notifications = notif.notifications || [];
     notifUnread   = notif.unread_count || 0;
     annualAlerts  = annual;
-    chatStatus    = chat;
   } catch { /* 失敗時は空のまま */ }
 
   updateNotifBadges(notifUnread);
 
   const overdueCount  = overdue.length + annualAlerts.overdue.length;
   const upcomingCount = upcoming.length + annualAlerts.thisMonth.length;
-  const activityCount = notifUnread + (chatStatus.unread_count || 0);
+  const activityCount = notifUnread;
 
   if (!overdueCount && !upcomingCount && !activityCount && !notifications.length) {
     render(container, []);
@@ -252,7 +227,7 @@ export async function loadHomeTabs(container) {
     },
     {
       key: 'activity', label: '通知', count: activityCount,
-      content: () => activityTabContent(notifications, chatStatus, notifUnread),
+      content: () => activityTabContent(notifications, notifUnread),
     },
   ];
 

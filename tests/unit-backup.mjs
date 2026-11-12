@@ -50,5 +50,38 @@ ok('SQLダンプに electrical_config の INSERT が入る', /INSERT INTO "elect
 const viewer = await onRequestGet({ request: new Request('http://x/api/admin/backup'), env: { DB: db }, data: { user: { email: 'v@x', role: 'editor' } } });
 ok('admin 以外は403', viewer.status === 403);
 
+// ---- ページ送り（keyset）: 1000件×2.5ページでも重複・欠落が無い ----
+for (let i = 0; i < 2500; i++) sqlite.exec(`INSERT INTO audit_log (table_name, record_id, action, changed_by) VALUES ('x', ${i}, 'create', 'u')`);
+const big = await (await call()).json();
+const ids = big.tables.audit_log.map((r) => r.record_id);
+ok('2500件がページをまたいでも重複・欠落なく出る（JSON）', ids.length === 2500 && new Set(ids).size === 2500, `n=${ids.length}`);
+ok('内部の並び替え用の列（_rid）が出力に混ざらない', !('_rid' in big.tables.audit_log[0]));
+const bigSql = await (await call('?format=sql')).text();
+ok('SQLダンプも2500件を重複・欠落なく出し、件数コメントが付く', (bigSql.match(/^INSERT INTO "audit_log"/mg) || []).length === 2500 && /-- Table: audit_log: 2500 rows/.test(bigSql));
+ok('SQLダンプの末尾に終了マーカーがある（途中で切れていない目印）', bigSql.trimEnd().endsWith('-- ===== バックアップ終了 ====='));
+
+// ---- 読み取り行数: OFFSET ではなく keyset（WHERE rowid > ?）で読んでいる ----
+const seen = [];
+const spyDb = { prepare: (sql) => { seen.push(sql); return wrap(sql); } };
+await (await onRequestGet({ request: new Request('http://x/api/admin/backup'), env: { DB: spyDb }, data: { user: { email: 'a@x', role: 'admin' } } })).text();
+ok('ページ送りに OFFSET を使わない（後ろのページほど読み取り行数が増えるため）', !seen.some((q) => /OFFSET/i.test(q)));
+ok('件数を数える COUNT(*) で表を二重に読まない', !seen.some((q) => /COUNT\(\*\)/i.test(q)));
+
+// ---- 失敗の扱い ----
+//   表が無い → その表だけ null（従来どおり）。途中のページの失敗 → ダウンロード自体を失敗させる（成功に見せない）
+const missingDb = { prepare: (sql) => (/FROM electrical_config/.test(sql) ? { bind: () => ({ all: async () => { throw new Error('no such table'); } }) } : wrap(sql)) };
+const missingJson = await (await onRequestGet({ request: new Request('http://x/api/admin/backup'), env: { DB: missingDb }, data: { user: { email: 'a@x', role: 'admin' } } })).json();
+ok('読めない表は null で続行（他の表は取れる）', missingJson.tables.electrical_config === null && Array.isArray(missingJson.tables.users));
+let calls = 0;
+const flakyDb = { prepare: (sql) => {
+  const w = wrap(sql);
+  if (!/FROM audit_log/.test(sql)) return w;
+  return { bind: (...a) => { const b = w.bind(...a); return { all: async () => { if (++calls === 2) throw new Error('D1 が途中で落ちた'); return b.all(); } }; } };
+} };
+const flakyRes = await onRequestGet({ request: new Request('http://x/api/admin/backup'), env: { DB: flakyDb }, data: { user: { email: 'a@x', role: 'admin' } } });
+let failed = false;
+try { await flakyRes.text(); } catch { failed = true; }
+ok('途中のページで読み取りに失敗したら、ダウンロードが失敗する（途中までを成功に見せない）', failed);
+
 console.log(`\n========== 単体（バックアップ）: ${pass} 件成功 / ${fail} 件失敗 ==========`);
 if (fail > 0) process.exit(1);

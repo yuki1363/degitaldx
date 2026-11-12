@@ -1,13 +1,14 @@
 // GET /api/search?q=キーワード&from=YYYY-MM-DD&to=YYYY-MM-DD&type=trouble,repair,...&equipment_id=N&category_id=N
 //
 // 検索対象: trouble_record / inspection_result / repair_request / daily_report / equipment_ledger
-//           parts_inventory / maintenance_plan / utility_report
+//           parts_inventory / maintenance_plan / utility_report / electrical_inspection
 // 複数キーワード: スペース区切りで AND 検索
 // 実装: D1 の LIKE 検索（FTS5 への移行は将来の課題）
 
 import { json } from '../_lib/http.js';
 import { jstDayStartUtc, jstNextDayStartUtc, toJstDate } from '../_lib/util.js';
 import { APP_VERSION } from '../me.js';
+import { EQUIPMENT_LABELS } from '../electrical-inspections/index.js';
 // あいまい検索（表記ゆれ吸収）のロジックは _lib/fuzzy.js に集約し、
 // トラブル類似検索・部品検索と共有する。ここでは複数キーワードのAND検索として使う。
 import { buildKeywordClauses, fitKeywords } from '../_lib/fuzzy.js';
@@ -74,7 +75,7 @@ export async function onRequestGet({ request, env }) {
   const limit       = Math.min(Math.max(1, Math.trunc(Number(sp.get('limit'))) || 50), 200);
 
   const keywords = q ? q.split(/\s+/).filter(Boolean).slice(0, 5) : [];
-  const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan', 'utility'];
+  const types    = typeParam ? typeParam.split(',').map((t) => t.trim()) : ['trouble', 'inspection', 'repair', 'report', 'equipment', 'parts', 'plan', 'utility', 'electrical'];
 
   const results = [];
   // ignored: bind上限のため一部の種別で使えなかったキーワード／failed: 検索に失敗した種別の数
@@ -396,6 +397,58 @@ export async function onRequestGet({ request, env }) {
         category_name:  null,
         equipment_name: null,
         url:            `/pages/utility?id=${r.id}`,
+      });
+    }
+  }
+
+  // ---------- 電気設備点検（12） ----------
+  if (types.includes('electrical')) {
+    // 記録本体（record_json）には、点検項目の設定スナップショット（config）が全記録に同じ内容で入っているため、
+    // record_json 全体は検索しない（どの語でも全記録に一致してしまう）。点検者・設備名・備考・要修理メモ・
+    // 区分ごとの備考と、設備種別の名称（高圧受電設備・蓄電池・発電機）だけを対象にする。
+    // 設備・ジャンルの絞り込みは持たない記録のため適用しない（日報・ユーティリティ日報と同じ扱い）。
+    const typeLabelExpr = `CASE equipment_type WHEN 'main' THEN '${EQUIPMENT_LABELS.main}' WHEN 'battery' THEN '${EQUIPMENT_LABELS.battery}' WHEN 'generator' THEN '${EQUIPMENT_LABELS.generator}' ELSE equipment_type END`;
+    const cols = [
+      typeLabelExpr,
+      `json_extract(record_json, '$.inspector')`,
+      `json_extract(record_json, '$.facility')`,
+      `json_extract(record_json, '$.remarks')`,
+      `json_extract(record_json, '$.repairNotes')`,
+      `json_extract(record_json, '$.categoryRemarks')`,
+    ];
+    let rows = [];
+    try {
+      const { clauses, binds: kwBinds } = buildKeywordClauses(fitKeywords(keywords, cols.length), cols);
+      markIgnored(ctx, cols.length);
+      let sql = `
+        SELECT client_id, equipment_type, inspected_date, has_abnormal,
+               json_extract(record_json, '$.inspector') AS inspector,
+               json_extract(record_json, '$.remarks') AS remarks,
+               json_extract(record_json, '$.repairNotes') AS repair_notes
+        FROM electrical_inspection
+        WHERE deleted_at IS NULL
+      `;
+      const binds = [...kwBinds];
+      if (clauses.length) sql += ' AND ' + clauses.join(' AND ');
+      if (from) { sql += ` AND inspected_date >= ?`; binds.push(from); }
+      if (to)   { sql += ` AND inspected_date <= ?`; binds.push(to); }
+      sql += ` ORDER BY inspected_date DESC LIMIT ${limit}`;
+      rows = (await db.prepare(sql).bind(...binds).all()).results ?? [];
+    } catch (err) {
+      // テーブルが無い（未マイグレーションの）環境でも検索全体を止めない
+      console.warn('search: 電気設備点検の検索をスキップしました:', String((err && err.message) || err));
+    }
+    for (const r of rows) {
+      results.push({
+        type:           'electrical',
+        id:             r.client_id,
+        date:           r.inspected_date,
+        title:          `電気設備点検 ${EQUIPMENT_LABELS[r.equipment_type] || r.equipment_type} ${r.inspected_date}`,
+        snippet:        [r.has_abnormal ? '⚠異常あり' : '', r.inspector || '', r.repair_notes || r.remarks || '']
+                          .filter(Boolean).join(' / ').slice(0, 80),
+        category_name:  null,
+        equipment_name: EQUIPMENT_LABELS[r.equipment_type] || null,
+        url:            `/electrical/#record=${r.client_id}`,
       });
     }
   }

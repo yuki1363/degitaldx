@@ -9,8 +9,9 @@ import { getCurrentUser, hasRole, getAiVisionEnabled } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { fetchEquipNames, buildEquipCascade } from '/js/equip-names.js';
 import {
-  el, render, formatDate, formatDateTime, formatBytes, maskEmail, ACTION_LABELS,
+  el, render, formatDate, formatDateTime, formatBytes,
 } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import qrcode from '/js/vendor/qrcode.mjs';
 
@@ -610,17 +611,7 @@ async function renderDetail(id) {
     buildTimelineCard(eq.id),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : el('div', { class: 'row-list' },
-            history.map((h) =>
-              el('div', { class: 'history-row' }, [
-                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, maskEmail(h.changed_by)),
-                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-              ])
-            )
-          ),
+      buildHistoryList(history),
     ]),
   ]);
 }

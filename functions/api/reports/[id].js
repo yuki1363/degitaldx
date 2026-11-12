@@ -1,7 +1,7 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson, checkEditConflict } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, isValidYmd } from '../_lib/util.js';
 
 export async function onRequestGet({ params, env }) {
   const db = env.DB;
@@ -52,6 +52,7 @@ export async function onRequestPut({ request, params, env, data }) {
   if (conflict) return conflict; // 同時編集ガード
   const { report_date, body: bodyText, category_id, reporter_name } = body ?? {};
   if (!report_date) return jsonError(400, 'report_date は必須です');
+  if (!isValidYmd(report_date)) return jsonError(400, 'report_date は YYYY-MM-DD の実在する日付で指定してください');
   const bodyValue = bodyText ? String(bodyText).trim() : '';
   const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;
 
@@ -70,7 +71,14 @@ export async function onRequestPut({ request, params, env, data }) {
     userEmail, now, id
   ).run();
 
-  await writeAuditLog(db, { tableName: 'daily_report', recordId: id, action: 'update', changedBy: userEmail, diff: { report_date, category_id, body: bodyValue, reporter_name: reporterName } });
+  // 変更した項目だけを「前→後」で記録する（詳細画面の変更履歴に何が変わったかを出すため。以前は新しい値だけを全項目書いていた）
+  const diff = {};
+  const sameStr = (a, b) => String(a ?? '') === String(b ?? '');
+  if (!sameStr(existing.report_date, report_date)) diff.report_date = { from: existing.report_date, to: report_date };
+  if (!sameStr(existing.category_id, category_id)) diff.category_id = { from: existing.category_id, to: category_id ?? null };
+  if (!sameStr(existing.body, bodyValue)) diff.body = { from: existing.body, to: bodyValue };
+  if (!sameStr(existing.reporter_name, reporterName)) diff.reporter_name = { from: existing.reporter_name, to: reporterName };
+  await writeAuditLog(db, { tableName: 'daily_report', recordId: id, action: 'update', changedBy: userEmail, diff });
   return json({ ok: true });
 }
 

@@ -1,7 +1,8 @@
 import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso } from '../_lib/util.js';
+import { nowIso, likeContains, LIKE_ESCAPE, isValidYmd } from '../_lib/util.js';
+import { beginIdempotent, dedupeStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
 
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
@@ -37,8 +38,8 @@ export async function onRequestGet({ request, env }) {
   }
   if (categoryId) { sql += ` AND dr.category_id = ?`; binds.push(categoryId); }
   if (reporter) {
-    sql += ` AND COALESCE(dr.reporter_name, u.name) LIKE ?`;
-    binds.push(`%${reporter}%`);
+    sql += ` AND COALESCE(dr.reporter_name, u.name) LIKE ?${LIKE_ESCAPE}`;
+    binds.push(likeContains(reporter));
   }
 
   sql += ` ORDER BY dr.report_date DESC, dr.id DESC LIMIT ?`;
@@ -59,6 +60,7 @@ export async function onRequestPost({ request, env, data }) {
   const { report_date, body: bodyText, category_id, reporter_name } = body ?? {};
 
   if (!report_date) return jsonError(400, 'report_date は必須です');
+  if (!isValidYmd(report_date)) return jsonError(400, 'report_date は YYYY-MM-DD の実在する日付で指定してください');
   // 本文は任意（空でも保存可）。NOT NULL 制約のため空文字で格納する。
   const bodyValue = bodyText ? String(bodyText).trim() : '';
   const reporterName = reporter_name ? String(reporter_name).trim().slice(0, 100) : null;
@@ -67,10 +69,16 @@ export async function onRequestPost({ request, env, data }) {
   const userRow = await db.prepare(`SELECT id FROM users WHERE email = ? AND deleted_at IS NULL`).bind(userEmail).first();
   if (!userRow) return jsonError(403, 'ユーザーが見つかりません');
 
+  // 同じ識別番号（client_request_id）が登録済みなら、二重に作らず最初の日報を返す
+  const idem = await beginIdempotent(db, body, 'daily_report');
+  if (idem.error) return jsonError(400, idem.error);
+  if (idem.dup?.conflict) return jsonError(409, DEDUPE_CONFLICT_MESSAGE);
+  if (idem.dup) return json({ id: idem.dup.record_id, duplicate: true });
+
   const now = nowIso();
 
   // reporter_id は NOT NULL 制約のためログインユーザーIDで埋める（入力者の表示・検索は reporter_name）
-  const result = await db.prepare(`
+  const insertStmt = db.prepare(`
     INSERT INTO daily_report
       (reporter_id, reporter_name, report_date, category_id, body,
        created_by, created_at, updated_by, updated_at)
@@ -82,9 +90,21 @@ export async function onRequestPost({ request, env, data }) {
     category_id ?? null,
     bodyValue,
     userEmail, now, userEmail, now
-  ).run();
-
-  const id = result.meta?.last_row_id;
+  );
+  let id;
+  if (idem.key) {
+    // 日報と識別番号は同じ batch（同時に2回届いたら片方は丸ごと取り消される）
+    try {
+      const results = await db.batch([insertStmt, dedupeStatement(db, idem.key, 'daily_report', userEmail, now)]);
+      id = results[0].meta?.last_row_id;
+    } catch (err) {
+      const existingId = isDedupeConflict(err) ? await resolveRaceDuplicate(db, idem.key, 'daily_report') : null;
+      if (!existingId) throw err;
+      return json({ id: existingId, duplicate: true });
+    }
+  } else {
+    id = (await insertStmt.run()).meta?.last_row_id;
+  }
   await writeAuditLog(db, {
     tableName: 'daily_report',
     recordId: id,

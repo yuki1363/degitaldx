@@ -8,7 +8,7 @@ import { requireRole } from '../_lib/auth.js';
 import { writeAuditLog } from '../_lib/audit.js';
 import { nowIso } from '../_lib/util.js';
 import { listAttachedFiles } from '../_lib/storage.js';
-import { parseEquipmentInput } from './index.js';
+import { parseEquipmentInput, duplicateCodeMessage } from './index.js';
 import { autoLinkAfterLedgerChange } from '../_lib/equipment-link.js';
 
 async function findEquipment(env, idParam) {
@@ -171,10 +171,10 @@ export async function onRequestPut({ request, env, data, params }) {
   if (!v.code) return jsonError(400, '設備番号（code）は必須です。');
 
   if (v.code !== existing.code) {
-    const dup = await env.DB.prepare('SELECT id FROM equipment_ledger WHERE code = ?1 AND id != ?2')
+    const dup = await env.DB.prepare('SELECT id, name, deleted_at FROM equipment_ledger WHERE code = ?1 AND id != ?2')
       .bind(v.code, existing.id)
       .first();
-    if (dup) return jsonError(409, `設備番号「${v.code}」は既に使われています。`);
+    if (dup) return jsonError(409, duplicateCodeMessage(v.code, dup));
   }
 
   // 変更された項目だけを差分として audit_log に残す

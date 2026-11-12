@@ -10,11 +10,13 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { buildItemInput, normalizeNumberText } from '/js/inspection-items.js';
 import { createDraft, installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
 import { buildCsvText, downloadCsv } from '/js/csv.js';
+import { enqueue as enqueueOffline, listQueued } from '/js/offline-queue.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -186,6 +188,9 @@ async function renderForm(existing, existingFiles = []) {
   }
 
   const reportDate = existing ? existing.report_date : todayStr();
+  // 二重登録を防ぐ識別番号（新規のみ）。電波が不安定で「届いたのに返事が届かず、送信待ちから再送された」ときも
+  // サーバーは同じ番号を2回登録しない（functions/api/_lib/request-dedupe.js）
+  const requestId = newRequestId();
 
   // 前回値（この日より前の直近の記録）。数値は差分（↑↓→）付き、
   // 選択式・複数選択・時刻は「前回 ○○（日付）」を入力欄の下に表示する。
@@ -309,12 +314,22 @@ async function renderForm(existing, existingFiles = []) {
   saveBtn.addEventListener('click', async () => {
     notice.hidden = true;
     saveBtn.disabled = true;
+    // 本文は try の外に置く（オフライン失敗時の送信待ちへの投入で使う）
+    let baseBody = null;
     try {
       const values = {};
       for (const { item, getValue } of inputs) {
         const v = getValue();
         if (v !== undefined && v !== '') values[item.id] = v;
       }
+      baseBody = {
+        report_date: dateIn.value,
+        inspected_at: datetimeIn.value ? new Date(datetimeIn.value).toISOString() : undefined,
+        reporter_name: reporterIn.value.trim(),
+        note: noteIn.value.trim(),
+        values,
+        ...(existing ? {} : { client_request_id: requestId }),
+      };
       // 写真・動画を先に送る（画像はリサイズ＝EXIF除去）。
       // 送信済みは uploaded へ移すので、保存が 409 等で失敗して押し直しても二重送信にならない。
       while (pendingFiles.length > 0) {
@@ -327,14 +342,7 @@ async function renderForm(existing, existingFiles = []) {
       }
       saveBtn.textContent = existing ? '保存する' : '登録する';
 
-      const body = {
-        report_date: dateIn.value,
-        inspected_at: datetimeIn.value ? new Date(datetimeIn.value).toISOString() : undefined,
-        reporter_name: reporterIn.value.trim(),
-        note: noteIn.value.trim(),
-        values,
-        file_ids: uploaded.map((m) => m.id),
-      };
+      const body = { ...baseBody, file_ids: uploaded.map((m) => m.id) };
       if (existing) {
         await api.put(`/api/utility-reports/${existing.id}`, { ...body, expected_updated_at: existing.updated_at });
       } else {
@@ -344,6 +352,30 @@ async function renderForm(existing, existingFiles = []) {
       guard.clear();
       go(existing ? `?id=${existing.id}` : '');
     } catch (err) {
+      // オフライン起因の失敗（新規のみ）は送信待ちキューに保存し、復帰時に自動送信する（日報・点検・依頼と同じ）。
+      //   写真は端末に保存しておき（縮小はオフラインでもできる）、電波が戻ってから送る。
+      //   同じ日の記録が既に送信待ちにあるときは、復帰時に1日1件のガード（409）で失敗するので保存しない
+      const offline = err?.offline === true || navigator.onLine === false;
+      if (offline && !existing && baseBody) {
+        try {
+          const queued = await listQueued('utility');
+          if (queued.some((q) => q.payload?.report_date === baseBody.report_date)) {
+            alert(`${baseBody.report_date} のユーティリティ日報は、すでにこの端末の送信待ちに保存されています。\n通信が回復して送信されるまでお待ちください（1日1件のため）。`);
+            notice.textContent = '同じ日の日報が送信待ちにあります。';
+            notice.hidden = false;
+            saveBtn.disabled = false;
+            return;
+          }
+          const remaining = [];
+          for (const f of pendingFiles) remaining.push(await resizeImageFile(f));
+          await enqueueOffline('utility', { ...baseBody, file_ids: uploaded.map((m) => m.id) }, remaining);
+          draft.clear();
+          guard.clear();
+          alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
+          go('');
+          return;
+        } catch { /* キュー保存に失敗した場合は通常のエラー表示にフォールバック */ }
+      }
       // 1日1件ガード（409）は既存記録の編集へ誘導する
       const existingId = err?.detail?.existing_id;
       if (err?.status === 409 && existingId) {
@@ -454,11 +486,7 @@ async function renderDetail(id) {
     ]) : null,
     el('div', { class: 'card' }, [
       el('h2', { class: 'card-title' }, '変更履歴'),
-      history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : history.map((h) => el('div', { class: 'history-row' }, [
-            `${formatDateTime(h.changed_at)}　${ACTION_LABELS[h.action] || h.action}　${maskEmail(h.changed_by)}`,
-          ])),
+      buildHistoryList(history),
     ]),
   ]);
 }

@@ -9,7 +9,8 @@
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
 import { uploadFile, resizeImageFile } from '/js/files.js';
-import { el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, nowLocalInputValue, isoToLocalInputValue, localInputToIso, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { openQrScanner } from '/js/qr-scan.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
 import { buildItemInput } from '/js/inspection-items.js';
@@ -108,6 +109,7 @@ async function renderList(presetEquipmentId) {
 
 
 async function renderEntry({ equipmentId, existing, planId, planDay, plannedDate, assigneeName }) {
+  const requestId = newRequestId(); // 二重登録の防止（この入力フォーム1つにつき1つ。送信待ちに入れても同じ番号）
   if (!hasRole(currentUser, 'editor')) throw new Error('点検を記録する権限がありません。');
 
   // 未保存ガード: 実際のユーザー入力があったら、ページ離脱時に「内容が消える」旨を警告する
@@ -301,6 +303,7 @@ async function renderEntry({ equipmentId, existing, planId, planDay, plannedDate
       inspected_at: inspectedAt,
       note: noteInput.value.trim(),
       items,
+      ...(existing ? {} : { client_request_id: requestId }),
     };
     const fileIds = [];
     try {
@@ -541,15 +544,7 @@ async function renderDetail(id) {
     ]),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      el('div', { class: 'row-list' },
-        history.map((h) =>
-          el('div', { class: 'history-row' }, [
-            el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-            el('span', {}, maskEmail(h.changed_by)),
-            el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-          ])
-        )
-      ),
+      buildHistoryList(history),
     ]),
   ]);
 }

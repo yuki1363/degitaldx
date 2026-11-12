@@ -19,15 +19,25 @@ import qrcode from '/js/vendor/qrcode.mjs';
 //   （E2E では window.__PARTS_REFRESH_MS__ で短くして確認する）
 const AUTO_REFRESH_MS = Number(window.__PARTS_REFRESH_MS__) || 20_000;
 
-// 長時間操作が無ければ自動更新も止める（タブレットを開いたまま放置される等で、
-// D1 の読み取り枠（無料枠 500万行/日）を無駄に消費しないように）。
-// タップ・キー操作・スクロールがあれば自動更新を再開する（E2E では __PARTS_IDLE_MS__ で短縮）。
+// 長時間操作が無ければ自動更新（変更の確認）も止める（タブレットを開いたまま放置される等で、
+// D1 の読み取り枠〈無料枠 500万行/日〉を無駄に消費しないように）。
+// タップ・キー操作・スクロールがあれば再開し、止まっていたときはその瞬間に1回確認する
+// （次の確認まで最大20秒待たせない）。E2E では __PARTS_IDLE_MS__ で短縮する。
 const IDLE_STOP_MS = Number(window.__PARTS_IDLE_MS__) || 5 * 60_000;
 let lastActivityAt = Date.now();
-['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
-  window.addEventListener(ev, () => { lastActivityAt = Date.now(); }, { passive: true })
-);
+let resumeHook = null; // 表示中の画面（一覧/詳細）が「いま確認する」処理を登録する
 const isIdle = () => Date.now() - lastActivityAt > IDLE_STOP_MS;
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
+  window.addEventListener(ev, () => {
+    const wasIdle = isIdle();
+    lastActivityAt = Date.now();
+    if (wasIdle && resumeHook) resumeHook();
+  }, { passive: true })
+);
+// 裏に回っていたタブ・アプリに戻ったときも、すぐ確認する
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && resumeHook && !isIdle()) resumeHook();
+});
 
 // 1回の入出庫の識別番号。押し直し・送信待ちの再送でも同じ番号を送り、サーバーは2回反映しない
 const newTxId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
@@ -614,10 +624,19 @@ async function renderList() {
     const resp = await api.get(`/api/parts${params.toString() ? '?' + params : ''}`);
     allParts = resp.parts;
     similarParts = resp.similar || [];
+    listVersion = resp.version ?? null;
     refreshLineOptions();
     refreshEquipOptions();
     renderParts();
-    refreshedEl.textContent = `${formatDateTime(new Date().toISOString())} 時点（${AUTO_REFRESH_MS / 1000}秒ごとに自動更新）`;
+    setRefreshedLabel();
+  };
+  // 自動更新の状態表示。止まっているとき（放置・電波なし）は、そう分かるように出す
+  let listVersion = null;
+  let lastCheckedAt = new Date();
+  const setRefreshedLabel = (state = 'active') => {
+    if (state === 'idle') { refreshedEl.textContent = `${formatDateTime(lastCheckedAt.toISOString())} 時点（自動更新は一時停止中。画面を触ると再開します）`; return; }
+    lastCheckedAt = new Date();
+    refreshedEl.textContent = `${formatDateTime(lastCheckedAt.toISOString())} 時点（他の人の入出庫を${AUTO_REFRESH_MS / 1000}秒ごとに確認して反映します）`;
   };
   const refreshedEl = el('span', { class: 'hint parts-refreshed' }, '');
 
@@ -695,15 +714,26 @@ async function renderList() {
   ]);
   await load();
 
-  // 自動更新: 画面を開いている間は一定間隔で在庫を取り直す（他の人の入出庫を反映）。
-  // 棚卸中・入力中は入力を消さないよう更新しない。裏に回っている間・オフラインの間も止める
-  setInterval(() => {
-    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode || isIdle()) return;
+  // 自動更新: 画面を開いている間は一定間隔で「変わったか」だけを確かめ、変わっていたときだけ在庫を取り直す
+  // （他の人の入出庫を反映するため。一覧を毎回全件読むと D1 の読み取り枠を使うので、軽い「版」で確認する）。
+  // 棚卸中・入力中は入力を消さないよう更新しない。裏に回っている間・オフライン・放置の間も止める
+  let checking = false;
+  const checkForChanges = async () => {
+    if (checking) return;
+    if (document.visibilityState !== 'visible' || navigator.onLine === false || stocktakeMode) return;
+    if (isIdle()) { setRefreshedLabel('idle'); return; }
     const active = document.activeElement;
     if (active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)) return;
     if (document.querySelector('.modal-backdrop, .sheet-backdrop, .order-dialog')) return;
-    load({ quiet: true }).catch(() => { /* 次の回に再試行 */ });
-  }, AUTO_REFRESH_MS);
+    checking = true;
+    try {
+      const { version } = await api.get('/api/parts?version=1');
+      if (version !== listVersion) await load({ quiet: true });
+      else setRefreshedLabel();
+    } catch { /* 次の回に再試行 */ } finally { checking = false; }
+  };
+  setInterval(checkForChanges, AUTO_REFRESH_MS);
+  resumeHook = checkForChanges;
 }
 
 // ---------------- 詳細（入出庫履歴） ----------------
@@ -814,7 +844,7 @@ async function renderDetail(id) {
   qr.addData(partUrl);
   qr.make();
 
-  const refreshedEl = el('span', { class: 'hint parts-refreshed' }, `${formatDateTime(updatedAt.toISOString())} 時点の在庫（${AUTO_REFRESH_MS / 1000}秒ごとに自動更新）`);
+  const refreshedEl = el('span', { class: 'hint parts-refreshed' }, `${formatDateTime(updatedAt.toISOString())} 時点の在庫（他の人の入出庫を${AUTO_REFRESH_MS / 1000}秒ごとに確認して反映します）`);
 
   render(app, [
     queued.length
@@ -920,16 +950,27 @@ async function renderDetail(id) {
     ]),
   ]);
 
-  // 自動更新: 画面を開いている間は一定間隔で取り直す（他の人の入出庫を反映）。入力中は邪魔しない
+  // 自動更新: 画面を開いている間は一定間隔で「変わったか」だけを確かめ、変わっていたときだけ取り直す
+  // （他の人の入出庫を反映するため。毎回読み直すと D1 の読み取り枠を使うので、軽い「版」で確認する）。
+  // 入力中は邪魔しない。放置・裏に回っている間・電波なしの間は止める
   clearInterval(detailTimer);
-  detailTimer = setInterval(() => {
+  const detailVersion = data.version ?? null;
+  let detailChecking = false;
+  const checkDetail = async () => {
+    if (detailChecking) return;
     if (document.visibilityState !== 'visible' || navigator.onLine === false || isIdle()) return;
     const active = document.activeElement;
     const typing = active && app.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
     const touched = txQtyEl.value !== '1' || txNoteEl.value !== '' || txTypeEl.value !== 'in';
     if (typing || touched || txBtn.disabled || document.querySelector('.quick-qty-value')?.textContent !== '1') return;
-    renderDetail(id).catch(() => { /* 次の回に再試行 */ });
-  }, AUTO_REFRESH_MS);
+    detailChecking = true;
+    try {
+      const { version } = await api.get(`/api/parts/${id}?version=1`);
+      if (version !== detailVersion) await renderDetail(id);
+    } catch { /* 次の回に再試行 */ } finally { detailChecking = false; }
+  };
+  detailTimer = setInterval(checkDetail, AUTO_REFRESH_MS);
+  resumeHook = checkDetail;
 }
 
 // ---------------- 登録・編集フォーム ----------------
@@ -1072,7 +1113,9 @@ async function renderImport() {
   let mapping = {};
   // 全置き換え（全部品を作り直す）は管理者のみ。入力可（editor）は差分マージだけ使える（サーバー側でも403）
   const canReplace = hasRole(currentUser, 'admin');
-  let importMode = canReplace ? 'replace' : 'merge'; // 'replace' | 'merge'
+  // 既定は差分マージ（管理者でも）。全置き換えは部品の番号（ID）が全部付け替わり、印刷済みの部品QRラベルが
+  // すべて読めなくなる等の影響が大きいため、既定にせず、選んだときだけ強い警告を出す
+  let importMode = 'merge'; // 'replace' | 'merge'
 
   const mappingBox = el('div', {}, []);
   const previewBox = el('div', {}, []);
@@ -1112,16 +1155,24 @@ async function renderImport() {
     });
   };
 
-  // CSV内で重複する型番（model_no）を検出する
+  // CSV内で重複する行を検出する。同じ型番でも、設備名・機器名が違えば別の部品（別のライン・機器で使う部品）。
+  // 以前は型番だけで見て、2件目以降を黙って捨てていた。型番・設備名・機器名がすべて同じ行だけを重複とする
+  const cellOf = (row, field) => (mapping[field] === '' || mapping[field] === undefined ? '' : (row[Number(mapping[field])] ?? '').trim());
+  const partKey = (row) => [cellOf(row, 'model_no'), cellOf(row, 'line_name'), cellOf(row, 'equipment_name')].join('\u0001');
   const detectDuplicates = () => {
     const modelNoIdx = mapping['model_no'];
     if (modelNoIdx === '' || modelNoIdx === undefined) return [];
     const counts = new Map();
     for (const row of csvRows) {
-      const v = row[Number(modelNoIdx)]?.trim();
-      if (v) counts.set(v, (counts.get(v) || 0) + 1);
+      const model = cellOf(row, 'model_no');
+      if (!model) continue;
+      const k = partKey(row);
+      counts.set(k, (counts.get(k) || 0) + 1);
     }
-    return [...counts.entries()].filter(([, n]) => n > 1).map(([v, n]) => `${v}（${n}件）`);
+    return [...counts.entries()].filter(([, n]) => n > 1).map(([k, n]) => {
+      const [model, line, equip] = k.split('\u0001');
+      return `${model}${line || equip ? `（${[line, equip].filter(Boolean).join(' / ')}）` : ''}（${n}件）`;
+    });
   };
 
   const buildPreview = () => {
@@ -1137,7 +1188,7 @@ async function renderImport() {
     const dups = detectDuplicates();
     const dupWarn = dups.length > 0
       ? el('p', { class: 'notice is-error', style: 'margin:8px 0;font-size:12px' },
-          `⚠ CSV内で型番が重複しています: ${dups.join(' / ')}（先着の行を優先します）`)
+          `⚠ CSV内で同じ部品（型番・設備名・機器名がすべて同じ）の行が重複しています: ${dups.join(' / ')}（先着の行だけ取り込みます）`)
       : null;
 
     render(previewBox, [
@@ -1181,7 +1232,8 @@ async function renderImport() {
   };
 
   importBtn.onclick = async () => {
-    // 型番重複を除去（先着優先）
+    // 同じ部品（型番・設備名・機器名がすべて同じ）の重複行を除去（先着優先）。
+    // 型番だけが同じで設備名・機器名が違う行は、別のライン・機器の部品なので残す
     const seen = new Set();
     const rows = csvRows.map((row) => {
       const obj = {};
@@ -1191,18 +1243,18 @@ async function renderImport() {
       return obj;
     }).filter((r) => {
       if (!r.name) return false;
-      const key = r.model_no || '';
-      if (key && seen.has(key)) return false;
-      if (key) seen.add(key);
+      if (!r.model_no) return true; // 型番が空の行は常に新規追加（重複判定しない）
+      const key = [r.model_no, r.line_name || '', r.equipment_name || ''].join('\u0001');
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
 
     if (rows.length === 0) { alert('取り込める行がありません（部品名が必須です）。'); return; }
 
-    const modeLabel = importMode === 'merge' ? '差分マージ（追加・更新のみ）' : '全置き換え';
     const confirmMsg = importMode === 'merge'
-      ? `差分マージを実行します。\n・型番が一致する既存部品は更新されます\n・CSV に新規型番は追加されます\n・CSV にない既存部品は変更されません\n（CSV ${rows.length}件）\n実行しますか？`
-      : `既存の部品データをすべて削除し、CSV ${rows.length}件で置き換えます。\nこの操作は元に戻せます（削除済みデータから復元可能）が、現在の在庫数は上書きされます。\n実行しますか？`;
+      ? `差分マージを実行します。\n・型番（CSV に設備名・機器名があればそれも）が一致する既存部品は更新されます\n・CSV に新規の部品は追加されます\n・CSV にない既存部品は変更されません\n（CSV ${rows.length}件）\n実行しますか？`
+      : `【全置き換え】既存の部品をすべて削除し、CSV ${rows.length}件で作り直します。\n\n・すべての部品の番号が付け替わり、印刷済みの部品QRラベルがすべて読めなくなります\n・入出庫の履歴や、業務依頼・トラブルへの使用部品の紐づけは旧い部品に残ったまま切り離されます\n・現在の在庫数は CSV の値で上書きされます\n・元に戻すには、管理画面「削除済み」から1件ずつ復元します\n\n本当に実行しますか？（通常は「差分マージ」を使います）`;
     if (!confirm(confirmMsg)) return;
 
     importBtn.disabled = true;
@@ -1239,14 +1291,22 @@ async function renderImport() {
       mergeTipEl.style.display  = importMode === 'merge'   ? '' : 'none';
     },
   }, [
-    canReplace ? el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）') : null,
-    el('option', { value: 'merge' },   '差分マージ（型番一致で更新・新規のみ追加）'),
+    el('option', { value: 'merge' },   '差分マージ（型番一致で更新・新規のみ追加）【通常はこちら】'),
+    canReplace ? el('option', { value: 'replace' }, '全置き換え（既存データを削除して CSV で再作成）※影響が大きい') : null,
   ]);
 
   const modeWarnEl = el('p', { class: 'notice is-error', style: `margin-bottom:8px${importMode === 'replace' ? '' : ';display:none'}` },
-    '⚠ 既存の部品データはすべて置き換えられます。CSVの内容が新しい正データになります（現在の在庫数も上書き）。');
+    '⚠ 全置き換えは、既存の部品をすべて削除して作り直します。次の影響があります。\n'
+    + '・すべての部品の番号（ID）が付け替わるため、印刷済みの部品QRラベルがすべて読めなくなります（読むと「見つかりません」）。\n'
+    + '・入出庫の履歴・業務依頼やトラブルへの使用部品の紐づけ・設備との追加の紐づけ・発注中の印が、旧い部品に残ったまま切り離されます。\n'
+    + '・現在の在庫数も CSV の値で上書きされます。\n'
+    + '通常は「差分マージ」を使ってください。（元に戻すには、管理画面「削除済み」から部品を1件ずつ復元します）');
+  modeWarnEl.style.whiteSpace = 'pre-line';
   const mergeTipEl = el('p', { class: 'notice', style: `margin-bottom:8px${importMode === 'merge' ? '' : ';display:none'}` },
-    'ℹ 型番（model_no）が一致する既存部品は更新されます。CSV にない既存部品はそのまま残ります。型番が空の行は常に新規追加されます。');
+    'ℹ 型番（model_no）が一致する既存部品は更新されます。CSV にない既存部品はそのまま残ります。型番が空の行は常に新規追加されます。\n'
+    + '同じ型番を別のライン・機器で使っている部品は、CSV の「設備名」「機器名」も対応付けると、型番＋設備名＋機器名が一致するものだけが更新されます'
+    + '（対応付けないと、同じ型番の部品が複数あるときは取り込まず、理由を表示します）。');
+  mergeTipEl.style.whiteSpace = 'pre-line';
 
   const fileInput = el('input', {
     type: 'file',

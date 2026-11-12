@@ -2,10 +2,16 @@
 // GET /api/admin/backup?format=sql — SQLダンプ形式（スキーマ＋データ、他DBへ移植可）
 //
 // データは全テーブル・全件が対象のため、一度に全部メモリへ読んでから組み立てると、
-// 年数が経ってデータが増えたときにメモリを使い切ったりタイムアウトしたりしてバックアップが
-// 失敗する恐れがある。そのため各テーブルを BACKUP_PAGE_SIZE 件ずつページ送りで読み、
-// 読めた分からすぐレスポンスのストリームへ書き出す（一度にメモリに持つのは1ページ分だけ）。
-// 出力される内容（JSON・SQLの文面）は以前の一括生成版と同じになるようにしている。
+// 年数が経ってデータが増えたときにメモリを使い切ったりタイムアウトしたりして失敗する恐れがある。
+// そのため各テーブルを BACKUP_PAGE_SIZE 件ずつ読み、読めた分からレスポンスのストリームへ書き出す。
+//
+//   ★ ページ送りは「LIMIT n OFFSET m」ではなく「前回の最後の rowid より後ろ」で読む（keyset 方式）。
+//     OFFSET は読み飛ばす行も D1 の「読み取り行数」に数えられ、後ろのページほど重くなる
+//     （6万行の表で OFFSET 方式は約200万行ぶん＝無料枠 500万行/日 の約4割を1回のバックアップで使った）。
+//     keyset 方式なら全体で表の行数ぶんだけで済む。
+//   ★ 読み取りに失敗したら null や空で続けず、ストリームごとエラーにする（ダウンロードを失敗させる）。
+//     途中までのバックアップを「成功」と見間違えて、復元できない版を保管しないため。
+//   ★ 引っ張り方式（pull）で書き出すので、受け取る側が遅いときは読み込みも待つ（メモリに溜めない）。
 import { requireRole } from '../_lib/auth.js';
 import { nowIso } from '../_lib/util.js';
 
@@ -25,10 +31,10 @@ export const TABLES = [
   'plan_reset_log', 'annual_plan_status',
   'electrical_inspection', 'electrical_config',
   'parts_equipment',
+  'request_dedupe',
 ];
 
-// 1テーブルを一度に読む件数。小さすぎるとクエリ数が増えて遅く、大きすぎるとメモリを使うため、
-// 無料枠で想定される規模（数万行程度）に対して十分小さい値にしている
+// 1テーブルを一度に読む件数。小さすぎるとクエリ数が増えて遅く、大きすぎるとメモリを使う
 const BACKUP_PAGE_SIZE = 1000;
 
 // SQL文字列エスケープ（SQLiteのシングルクォートは '' で表現）
@@ -39,155 +45,146 @@ function sqlVal(val) {
   return `'${String(val).replace(/'/g, "''")}'`;
 }
 
-// テーブルを rowid 順に BACKUP_PAGE_SIZE 件ずつ読み、ページ（行の配列）を順に渡す。
+// テーブルを rowid 順に BACKUP_PAGE_SIZE 件ずつ読み、ページ（行の配列）を順に渡す（keyset 方式）。
 // id 列が無いテーブル（electrical_config 等）も rowid は常にあるため対応できる。
-// テーブルが存在しない等で最初のページから失敗したら null を返す（従来の「取得失敗時は
-// tables[table] = null」と同じ扱い）。途中のページで失敗した場合は、そこまで読めた分で
-// 打ち切る（全く読めないよりはまし。通常は起きない想定）。
+// 失敗は握りつぶさず、そのまま投げる（呼び出し側が「最初のページ＝表が無い等」か「途中＝本当の失敗」かを区別する）。
 async function* readTablePages(db, table) {
-  let offset = 0;
+  let lastRid = 0;
   for (;;) {
-    let page;
-    try {
-      page = await db
-        .prepare(`SELECT * FROM ${table} ORDER BY rowid ASC LIMIT ? OFFSET ?`)
-        .bind(BACKUP_PAGE_SIZE, offset)
-        .all();
-    } catch (err) {
-      if (offset === 0) throw err; // 最初のページから失敗 → テーブル自体が無い等
-      return; // 途中からの失敗は、それまでの分で打ち切る
-    }
-    const rows = page.results ?? [];
-    if (rows.length === 0) return;
-    yield rows;
-    if (rows.length < BACKUP_PAGE_SIZE) return; // 最後のページ
-    offset += BACKUP_PAGE_SIZE;
+    const page = await db
+      .prepare(`SELECT rowid AS _rid, * FROM ${table} WHERE rowid > ?1 ORDER BY rowid ASC LIMIT ?2`)
+      .bind(lastRid, BACKUP_PAGE_SIZE)
+      .all();
+    const raw = page.results ?? [];
+    if (raw.length === 0) return;
+    lastRid = raw[raw.length - 1]._rid;
+    yield raw.map((r) => { const row = { ...r }; delete row._rid; return row; });
+    if (raw.length < BACKUP_PAGE_SIZE) return;
   }
 }
 
-const ENC = new TextEncoder();
-
-// ---- JSON形式（ストリーミング） ----
-//   {"exported_at":"...","tables":{"table1":[...],"table2":null,...}}
-function buildJsonBackupStream(db) {
-  return new ReadableStream({
-    async start(controller) {
-      const push = (s) => controller.enqueue(ENC.encode(s));
-      try {
-        push(`{"exported_at":${JSON.stringify(nowIso())},"tables":{`);
-        for (let i = 0; i < TABLES.length; i++) {
-          const table = TABLES[i];
-          if (i > 0) push(',');
-          push(`${JSON.stringify(table)}:`);
-          // 先に存在確認（軽いクエリ）。ここで失敗するテーブルは従来どおり null にする
-          // （[] で配列を開いてしまうと、後続のページ読み取りが失敗したときに閉じられない）
-          let readable = true;
-          try {
-            await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).all();
-          } catch {
-            readable = false;
-          }
-          if (!readable) {
-            push('null');
-            continue;
-          }
-          push('[');
-          let firstRow = true;
-          for await (const rows of readTablePages(db, table)) {
-            for (const row of rows) {
-              if (!firstRow) push(',');
-              firstRow = false;
-              push(JSON.stringify(row));
-            }
-          }
-          push(']');
-        }
-        push('}}');
-      } finally {
-        controller.close();
-      }
-    },
-  });
+// 最初のページを読んでみる。表が無い・読めないときは { unreadable: true }（従来どおり null / スキップ扱い）。
+async function openTable(db, table) {
+  const pages = readTablePages(db, table);
+  try {
+    const first = await pages.next();
+    return { pages, first };
+  } catch {
+    return { unreadable: true };
+  }
 }
 
-// ---- SQLダンプ形式（ストリーミング） ----
+// ---- JSON形式 ----
+//   {"exported_at":"...","tables":{"table1":[...],"table2":null,...}}
+//   （表が読めないときだけ null。途中で失敗したときはストリームごとエラー）
+async function* jsonChunks(db) {
+  yield `{"exported_at":${JSON.stringify(nowIso())},"tables":{`;
+  for (let i = 0; i < TABLES.length; i++) {
+    const table = TABLES[i];
+    yield `${i > 0 ? ',' : ''}${JSON.stringify(table)}:`;
+    const t = await openTable(db, table);
+    if (t.unreadable) { yield 'null'; continue; }
+    yield '[';
+    let firstRow = true;
+    let step = t.first;
+    while (!step.done) {
+      yield step.value.map((row) => {
+        const s = JSON.stringify(row);
+        const out = firstRow ? s : `,${s}`;
+        firstRow = false;
+        return out;
+      }).join('');
+      step = await t.pages.next();
+    }
+    yield ']';
+  }
+  yield '}}';
+}
 
-function buildSqlDumpStream(db) {
+// ---- SQLダンプ形式 ----
+async function* sqlChunks(db) {
+  const now = nowIso();
+  const head = [
+    '-- ==================================================',
+    '-- 設備保全アプリ データベース完全バックアップ',
+    `-- Exported at: ${now}`,
+    '-- Compatible with SQLite 3.x',
+    '-- 使い方: sqlite3 mainte-db.sqlite < backup.sql',
+    '-- ==================================================',
+    '',
+    'PRAGMA journal_mode = WAL;',
+    'PRAGMA foreign_keys = ON;',
+    '',
+    '-- ===== テーブル定義（Schema） =====',
+    '',
+  ];
+  yield head.join('\n') + '\n';
+
+  // スキーマ（CREATE TABLE / CREATE INDEX）を sqlite_master から取得。
+  // 読めないとこのバックアップは単体では復元できないため、握りつぶさず失敗として扱う
+  const { results: schemaDefs } = await db.prepare(
+    `SELECT name, sql FROM sqlite_master
+     WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'd1_%'
+     ORDER BY type DESC, name ASC`
+  ).all();
+  let schemaOut = '';
+  for (const row of schemaDefs ?? []) {
+    if (!row.sql) continue;
+    // CREATE TABLE → CREATE TABLE IF NOT EXISTS に正規化
+    const normalized = row.sql
+      .replace(/^CREATE TABLE\s+/i, 'CREATE TABLE IF NOT EXISTS ')
+      .replace(/^CREATE INDEX\s+/i, 'CREATE INDEX IF NOT EXISTS ')
+      .replace(/^CREATE UNIQUE INDEX\s+/i, 'CREATE UNIQUE INDEX IF NOT EXISTS ');
+    schemaOut += `${normalized};\n\n`;
+  }
+  yield schemaOut;
+
+  yield '-- ===== データ（Data） =====\n\n';
+  for (const table of TABLES) {
+    const t = await openTable(db, table);
+    if (t.unreadable) {
+      yield `-- Table: ${table} (スキップ: テーブルが存在しないか取得失敗)\n\n`;
+      continue;
+    }
+    if (t.first.done) {
+      yield `-- Table: ${table} (0 rows)\n\n`;
+      continue;
+    }
+    yield `-- Table: ${table}\n`;
+    let total = 0;
+    let step = t.first;
+    while (!step.done) {
+      const rows = step.value;
+      const cols = Object.keys(rows[0]);
+      const colList = cols.map((c) => `"${c}"`).join(', ');
+      yield rows.map((row) => `INSERT INTO "${table}" (${colList}) VALUES (${cols.map((c) => sqlVal(row[c])).join(', ')});\n`).join('');
+      total += rows.length;
+      step = await t.pages.next();
+    }
+    // 件数は読み終わってから書く（先に数えると表を二度読むことになり、読み取り行数が倍になるため）
+    yield `-- Table: ${table}: ${total} rows\n\n`;
+  }
+
+  yield '-- ===== バックアップ終了 =====\n';
+}
+
+// 非同期ジェネレーター（文字列を順に出す）→ 引っ張り方式のストリーム。途中の失敗はストリームのエラーにする
+function streamFrom(makeGen, label) {
+  const ENC = new TextEncoder();
+  let it;
   return new ReadableStream({
-    async start(controller) {
-      const push = (s) => controller.enqueue(ENC.encode(s + '\n'));
-      const now = nowIso();
-
-      push('-- ==================================================');
-      push('-- 設備保全アプリ データベース完全バックアップ');
-      push(`-- Exported at: ${now}`);
-      push('-- Compatible with SQLite 3.x');
-      push('-- 使い方: sqlite3 mainte-db.sqlite < backup.sql');
-      push('-- ==================================================');
-      push('');
-      push('PRAGMA journal_mode = WAL;');
-      push('PRAGMA foreign_keys = ON;');
-      push('');
-
-      // スキーマ（CREATE TABLE / CREATE INDEX）を sqlite_master から取得
-      push('-- ===== テーブル定義（Schema） =====');
-      push('');
+    async pull(controller) {
       try {
-        const { results: schemaDefs } = await db.prepare(
-          `SELECT name, sql FROM sqlite_master
-           WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'd1_%'
-           ORDER BY type DESC, name ASC`
-        ).all();
-        for (const row of schemaDefs ?? []) {
-          if (row.sql) {
-            // CREATE TABLE → CREATE TABLE IF NOT EXISTS に正規化
-            const normalized = row.sql
-              .replace(/^CREATE TABLE\s+/i, 'CREATE TABLE IF NOT EXISTS ')
-              .replace(/^CREATE INDEX\s+/i, 'CREATE INDEX IF NOT EXISTS ')
-              .replace(/^CREATE UNIQUE INDEX\s+/i, 'CREATE UNIQUE INDEX IF NOT EXISTS ');
-            push(normalized + ';');
-            push('');
-          }
-        }
-      } catch (e) {
-        push(`-- スキーマ取得エラー: ${e.message}`);
-        push('');
+        it ??= makeGen();
+        const { value, done } = await it.next();
+        if (done) controller.close();
+        else controller.enqueue(ENC.encode(value));
+      } catch (err) {
+        console.error(`backup(${label}) failed:`, err && err.stack ? err.stack : err);
+        controller.error(err);
       }
-
-      // 各テーブルのデータを INSERT 文で出力（テーブルごとにページ送りで読む）
-      push('-- ===== データ（Data） =====');
-      push('');
-
-      for (const table of TABLES) {
-        try {
-          // 件数を先に数える（軽いクエリ）。コメントに件数を書くため、データより先に必要
-          const countResult = await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).all();
-          const rowCount = countResult.results?.[0]?.n ?? 0;
-          if (rowCount === 0) {
-            push(`-- Table: ${table} (0 rows)`);
-            push('');
-            continue;
-          }
-          push(`-- Table: ${table} (${rowCount} rows)`);
-          // 1ページずつ読んで、そのまま書き出す（テーブル全体をメモリに持たない）
-          for await (const rows of readTablePages(db, table)) {
-            const cols = Object.keys(rows[0]);
-            const colList = cols.map((c) => `"${c}"`).join(', ');
-            for (const row of rows) {
-              const vals = cols.map((c) => sqlVal(row[c])).join(', ');
-              push(`INSERT INTO "${table}" (${colList}) VALUES (${vals});`);
-            }
-          }
-          push('');
-        } catch {
-          push(`-- Table: ${table} (スキップ: テーブルが存在しないか取得失敗)`);
-          push('');
-        }
-      }
-
-      push('-- ===== バックアップ終了 =====');
-      controller.close();
     },
+    cancel() { return it?.return?.(); },
   });
 }
 
@@ -202,7 +199,7 @@ export async function onRequestGet({ request, env, data }) {
   const date = nowIso().slice(0, 10);
 
   if (format === 'sql') {
-    return new Response(buildSqlDumpStream(db), {
+    return new Response(streamFrom(() => sqlChunks(db), 'sql'), {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Content-Disposition': `attachment; filename="backup-${date}.sql"`,
@@ -211,7 +208,7 @@ export async function onRequestGet({ request, env, data }) {
   }
 
   // デフォルト: JSON
-  return new Response(buildJsonBackupStream(db), {
+  return new Response(streamFrom(() => jsonChunks(db), 'json'), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': `attachment; filename="backup-${date}.json"`,

@@ -24,6 +24,8 @@
 | **R2** | 10GB・Class A 100万回/月・Class B 1000万回/月 | $0.015/GB（ストレージ） |
 | **Access（Zero Trust）** | ユーザー50名まで無料 | 50名超: $7/ユーザー/月 |
 
+※ **JS ファイルの取得も Pages Functions を通る**（開発用ファイルの配信止め。09参照）。Service Worker のキャッシュ優先で通常は少なく、3名規模で1日数千回程度の見込み（10万回/日に対して余裕）。利用者が大きく増えたら見直す。
+
 **10名・小規模運用であれば無料枠を超えるリスクはほぼゼロ。**
 
 課金が発生するとすれば主に R2 のストレージ（動画を大量保存した場合）。そのためアプリ側で 8GB 警告・9GB 上限ガードを実装済み（`R2_WARN_BYTES` / `R2_HARD_LIMIT_BYTES` 環境変数で変更可）。
@@ -37,9 +39,9 @@
 - **アクセス制御**: Cloudflare Access のワンタイムコード認証（会社メールの許可リスト方式）。アプリ側にログイン画面は実装しない。ログインユーザーの識別は Access が付与するヘッダー `Cf-Access-Authenticated-User-Email` を Functions 側で読み取り、`users` テーブルと突合する。環境変数 `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` を設定すると、ヘッダーの代わりに Access の署名付きJWT（`Cf-Access-Jwt-Assertion`／Cookie `CF_Authorization`）を Web Crypto で検証して email を取り出す（`functions/api/_lib/access-jwt.js`。署名鍵は `https://<チーム>/cdn-cgi/access/certs` から取得し1時間キャッシュ）。設定時はメールヘッダーと `DEV_USER_EMAIL` を無視する＝保護漏れのURL（プレビューURL等）でもヘッダー偽装でなりすませない。未設定なら従来どおりヘッダーで識別
 - **利用端末**: PC / iPhone / iPad。現場はスマホ中心（スマホファーストUI必須）
 - **PWA必須**: 本アプリは PWA として実装し、ネイティブアプリ同等の体験を提供する。`manifest.json`（アイコン・アプリ名・`display: standalone`・テーマカラー）と Service Worker を必ず実装。iPhone は「ホーム画面に追加」、PC は Edge/Chrome の「インストール」で配布
-- **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期（**送信できなかった（failed）記録は、送信待ちバーの「失敗を確認」で理由（サーバーのメッセージ）を見て、1件ずつ「再送」か「破棄」ができる**（在庫不足・部品の削除・権限なしなどで失敗すると、理由が見えず捨てられないまま全ページ下部のバーに出続けた。在庫不足の出庫は失敗のまま残す＝在庫は黙って書き換えない。`openFailedDialog`）。**送信は Web Locks（`mainte-outbox-flush`）で端末内の1タブに絞る**＝PWAの窓とブラウザのタブなど複数開いた状態で復帰しても二重登録しない。送信しなかった側のタブはロックが空くのを待ってから送信待ちバーを更新する＝古い件数が残らない。`js/offline-queue.js`）。**ページ遷移はクエリを無視してキャッシュと照合する**（`sw.js` の `ignoreSearch`。`/pages/ledger?id=` 等のクエリ付きページもオフラインで開ける）。未キャッシュ時の代替表示は `/`（`/index.html` は Pages が `/` へリダイレクトするため、リダイレクト済み応答はページ遷移に使えない）
+- **オフライン考慮**: Service Worker で静的アセットをキャッシュし、オフラインでもアプリが起動すること。入力中データは IndexedDB に一時保存し、オンライン復帰時に API へ自動同期（**送信できなかった（failed）記録は、送信待ちバーの「失敗を確認」で理由（サーバーのメッセージ）を見て、1件ずつ「再送」か「破棄」ができる**（在庫不足・部品の削除・権限なしなどで失敗すると、理由が見えず捨てられないまま全ページ下部のバーに出続けた。在庫不足の出庫は失敗のまま残す＝在庫は黙って書き換えない。`openFailedDialog`）。**送信は Web Locks（`mainte-outbox-flush`）で端末内の1タブに絞る**＝PWAの窓とブラウザのタブなど複数開いた状態で復帰しても二重登録しない。送信しなかった側のタブはロックが空くのを待ってから送信待ちバーを更新する＝古い件数が残らない。`js/offline-queue.js`）。**ページ遷移はクエリを無視してキャッシュと照合する**（`sw.js` の `ignoreSearch`。`/pages/ledger?id=` 等のクエリ付きページもオフラインで開ける）。未キャッシュ時の代替表示は `/`（`/index.html` は Pages が `/` へリダイレクトするため、リダイレクト済み応答はページ遷移に使えない）。**Service Worker は全ページ共通の `js/nav.js` で登録する**（以前はホームでだけ登録していたため、QR〔設備・部品〕から各ページを直接開いた端末や、ホームを一度も開いていない端末にはオフライン用のキャッシュができなかった。電気設備点検ページは `/sw.js` を登録する＝以前の `./sw.js` は存在しない `/electrical/sw.js` を指して失敗していた）。**オフライン送信キューの対象**は トラブル・点検・業務依頼・日報・ユーティリティ日報・部品の入出庫
 - **ログイン切れ時の「再ログイン」ボタン**: Access セッション切れで API に届かないとき、`js/api.js` が自動で再認証へ誘導する（1回のみ・15秒ガード）。それでも届かない（メールアプリ内ブラウザ・PCのPWA窓など）かつオンラインなら、画面上部に「🔑 再ログインする」バナーを出す（`showReloginBanner`）。押すと `/cdn-cgi/access/logout?returnTo=現在のURL` へ移動して Access を再認証させる。本当のオフライン（`navigator.onLine === false`）では出さない
-- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）。**重複の判定は「未確認の通知がある」または「同じ対象・同じ本文の通知がある（確認済みも含む）」**（`hasNotificationFor`。本文に期限＝予定日・対応期限・年度に当てはめた予定月が入るので、期限が変われば新しい通知になる。未確認だけで判定すると、誰かが確認した直後から期限超過が続く限り毎時通知とプッシュが出続けた）。未印刷リマインドは本文の「あと◯日」が変わる1日1回だけ改めて出る。**繰り返し予定（`recurrence_rule`）は期限超過の通知の対象外**（展開しないと開始日基準で超過になるため）。単体テストは `tests/unit-overdue.mjs`（schema.sql を node:sqlite に流し込んでチェックを2回呼ぶ。`npm test` に含む）。年間計画の期限超過は 01 と同じ年度（最後にリセットした年度＋1）で判定する
+- **画面内通知（通知センター）**: 在庫切れ・発注アラート・入庫、点検の異常値・NG（電気設備点検の要注意・要修理を含む）、トラブル登録、**保全計画・業務依頼の期限超過**（`plan_overdue`/`repair_overdue`）、**工事連絡書の未印刷リマインド**（`plan_print_reminder`＝工事予定の3日前までに帳票を印刷していない）を通知化（`functions/api/_lib/notify.js` の `createNotification`）。チーム共有方式（誰か1人が確認すると全員の未読が減る）。期限超過・未印刷リマインドは `functions/api/_lib/overdue-notify.js` が1時間に1回チェックし、同じ対象への重複通知はしない（`js/notifications.js`・ホームのベルアイコン）。**重複の判定は「未確認の通知がある」または「同じ対象・同じ本文の通知がある（確認済みも含む）」**（`hasNotificationFor`。本文に期限＝予定日・対応期限・年度に当てはめた予定月が入るので、期限が変われば新しい通知になる。未確認だけで判定すると、誰かが確認した直後から期限超過が続く限り毎時通知とプッシュが出続けた）。未印刷リマインドは本文の「あと◯日」が変わる1日1回だけ改めて出る。**繰り返し予定（`recurrence_rule`）は期限超過の通知の対象外**（展開しないと開始日基準で超過になるため）。単体テストは `tests/unit-overdue.mjs`（schema.sql を node:sqlite に流し込んでチェックを2回呼ぶ。`npm test` に含む）。年間計画の期限超過は 01 と同じ年度（最後にリセットした年度＋1）で判定する
 - **プッシュ通知（Web Push）**: 上記の通知が発生するたびに、購読中の端末へブラウザ経由でも通知する（アプリを開いていなくても気づける）。RFC 8291（メッセージ暗号化）・RFC 8292（VAPID）を Web Crypto API のみで自前実装（`functions/api/_lib/webpush.js`。npm依存・ビルド工程なしの方針を維持）。通知作成の共通関数 `notifyTeam`（`functions/api/_lib/notify.js`）が `createNotification` と Web Push 送信をまとめて行う。VAPID鍵は `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`（+任意 `VAPID_SUBJECT`）環境変数で設定し、未設定の間はこの機能自体が無効になる（画面内通知は今までどおり動く）。購読は `js/notifications.js` の「🔔 プッシュ通知を有効にする」ボタンから（`POST /api/push/subscribe`／解除は `/api/push/unsubscribe`）。失効した購読（404/410応答）は自動で削除する。**送信先は有効なユーザー（`users` に存在し `deleted_at IS NULL`）の購読に限り、ユーザー削除時は購読も物理削除する**（退職者等の端末へ業務内容が届き続けないように）。**購読の endpoint は各社のプッシュサービス（fcm.googleapis.com／push.services.mozilla.com／notify.windows.com／push.apple.com）の https URL に限定**する（任意URLを登録されるとサーバーがそこへPOSTする＝SSRFのため。`isAllowedPushEndpoint`。登録時に400、送信時もスキップ）
 ### バージョン復元（3層の安全網）— 必須要件
 「編集してアプリが動かなくなる」事故に備え、以下を必ず運用・実装する。
@@ -51,9 +53,8 @@
 - 全業務テーブルに共通列を持たせる: `created_by`, `created_at`, `updated_by`, `updated_at`, `deleted_by`, `deleted_at`
 - **削除は論理削除**（`deleted_at` に日時を入れる）を基本とし、削除者・削除日時が後から確認できる。一覧表示では除外し、管理画面の「削除済み」タブから閲覧・復元可能
   - **例外: `users` テーブルは物理削除**（`DELETE FROM users`）。各テーブルは作成者等をメール文字列で保持しFK参照しないため過去レコードは壊れない。物理削除で同一メールの再登録も可能になる。誰を削除したかは `audit_log`（diff にメール・氏名・権限）に残す
-  - **例外: `chat_messages` は送信から10日で物理削除**（短期の申し送り用途のため。📌ピン留め中は対象外・添付はR2ごと削除。削除件数と対象ID一覧を `audit_log` に記録。詳細は機能10）
 - すべての追加・編集・削除操作を `audit_log` テーブルに記録: `(id, table_name, record_id, action[create/update/delete/restore], changed_by, changed_at, diff_json)`
-- 各レコードの詳細画面に「変更履歴」表示（誰がいつ何を変えたか）
+- 各レコードの詳細画面に「変更履歴」表示（誰がいつ何を変えたか）。**変更した項目は「状態・担当者を変更」の要約と、タップで開く「項目：前 → 後」で見られる**（`js/history-view.js`。差分の解釈は純粋関数 `js/history-diff.js`＝記録形式が機能ごとに違う3種類〔`{項目:{from,to}}`・`{項目:{before,after}}`・`{before:{…},after:{…}}`〕とユーティリティ日報の `changed_items`〔点検項目ごとの前後〕・`attached_files` をそろえる。コードは日本語に直し、日時はJST、長文は60文字で切る）。日報・ユーティリティ日報も更新時に変えた項目だけ前→後で記録する（以前は新しい値だけで出せなかった）。以前の形式の履歴・登録・削除・復元は変更内容を出さない（操作そのものが履歴）。単体テスト `tests/unit-history-diff.mjs`
 - 操作者は Cloudflare Access のメールアドレスから自動取得（手入力させない）
 ### 初回セットアップ手順
 1. Cloudflare アカウント（無料プラン）を作成し、**2FA を必ず設定**
@@ -82,7 +83,7 @@
   3. SQLがプリペアドステートメントか
   4. 権限チェックが Functions 側にあるか
   5. スマホ幅（375px）でレイアウトが崩れていないか
-  6. E2Eテスト（`cd tests && npm test`）が全項目パスするか
+  6. ESLint と単体・E2Eテスト（`cd tests && npm test`。先頭で `npm run lint` を実行する）が全項目パスするか
 - エラー修正時は、原因の説明 → 最小限の修正、の順で行う。無関係なリファクタリングを混ぜない
 - この CLAUDE.md と実装が食い違う変更を行った場合は、CLAUDE.md も同時に更新する
 ---
@@ -140,17 +141,18 @@
 - **入出庫のオフライン送信待ち**: 電波が無いとき入庫・出庫は送信待ち（`js/offline-queue.js` の `parts_tx`）に保存し、復帰時に同じ識別番号で自動送信する。**棚卸調整（絶対値）は送信待ちにしない**（後から送ると間の出庫を消すため）。詳細画面に「📤 送信待ち」を表示する。電波のない画面で1回記録したあとも続けて記録できる（成功時にボタンを戻す）。電波なしで開いた画面で電波が戻って記録できたら、権限情報（`getCurrentUser`）を取り直して通常の部品画面に切り替える。電波の無い倉庫で部品QRを開いたときは（**この端末で閲覧のみと確認済み＝localStorage `auth:role`＝viewer のときは記録欄を出さず理由を表示**。権限不明の端末は出し、権限はサーバーが送信時に確認。`getCachedRole`）、この端末で最後に見た名前・在庫の目安（localStorage `parts:snap:<id>`）とその場で記録を出す（`renderOfflineDetail`。権限は送信時にサーバーが確認）
 - **数量の上限**: 在庫数・安全在庫・1回の入出庫/棚卸の数量は 1,000,000 まで（`_lib/parts-limits.js` の `MAX_PART_QTY`）。入出庫API・部品登録・安全在庫の更新は超えると400、CSV取込は範囲外（負数含む）の行をスキップしてエラーに載せる（黙って丸めない）。画面の入力欄にも `max` を付ける
 - **識別番号の列が使えない環境でも入出庫は止まらない**: `ensureColumns`（`_lib/db-compat.js`）は duplicate 以外で失敗したら成功扱いにせず `false` を返し、次のリクエストで再試行する（最大3回で諦める）。`client_tx_id` 列を追加できない間は識別番号なしで履歴を登録する（二重反映の防止は効かない）
-- **自動更新**: 部品一覧・詳細は画面を開いている間20秒ごとに取り直し、「◯時点（自動更新）」を表示する（他の人の入出庫を反映）。裏に回っている間・オフライン・棚卸中・入力中・ダイアログ表示中は更新しない
+- **自動更新**: 部品一覧・詳細は、画面を開いている間20秒ごとに他の人の入出庫を確認して反映する（表示は「◯時点（他の人の入出庫を20秒ごとに確認して反映）」）。**毎回全件を取り直さず、軽い「版」だけを確かめて、変わったときだけ取り直す**（一覧の版＝`MAX(updated_at)`＋入出庫の最新ID／詳細の版＝その部品の更新日時・入出庫の最新ID・設備の紐づけの更新日時。`functions/api/_lib/parts-version.js`、`GET /api/parts?version=1`・`/api/parts/:id?version=1`。20秒ごとの確認は数行の読み取り。以前は毎回一覧を全件読み、部品1,500件で1時間に約54万行だった）。裏に回っている間・オフライン・棚卸中・入力中・ダイアログ表示中は更新しない。長時間操作が無いときは「一時停止中（触ると再開）」と表示して止め、触る・タブに戻ると再開してすぐ確認する
 - 発注アラート（安全在庫割れで通知）、発注 → 入庫 → 利用の一元管理
 - **棚卸モード**: 一覧の「📋 棚卸」で行が「帳簿数 → 実数入力」に切り替わり、差異のある行だけ赤表示。「差異N件を一括確定」で棚卸調整（`type=adjust`・note=棚卸）として入出庫履歴に記録（editor以上。入力値はフィルタ変更をまたいで保持）
 - **発注状態管理**: 発注メール作成時に「📨 発注中」バッジを付与（`parts_inventory.ordered_at/ordered_by`・API `/api/parts/:id/order`）。入庫（type=in）で自動解除。二重発注・発注漏れの防止。詳細画面から手動解除も可
 - **発注メールの宛先自動入力・納期指定**: 部品マスタに登録済みの仕入先メール（`supplier_email`）を発注メール作成時の宛先へ自動セット（未登録なら空欄）。希望納期（任意）を入力すると本文に追記される（`js/parts.js` の `openOrderDialog`/`buildOrderEmail`）
 - **あいまい検索・類似部品の表示**: 一覧の検索ボックス（`GET /api/parts?q=`）は横断検索11と同じあいまい検索（全角半角・ひらがなカタカナのゆれを吸収・複数語はAND・`functions/api/_lib/fuzzy.js` を共有）。**在庫検索は完全一致（全キーワードを含む＝AND）に加え、「類似の在庫」（いずれかのキーワードに一致＝OR）を別枠で表示する**（`include_similar=1` のとき `similar` 配列を返す。2語以上で検索したときだけ・完全一致で出た分は除外・最大30件。1語検索は AND と OR が同じになるため類似枠は出ない）。登録・編集フォームで部品名・型番を入力すると、型番・部品名が近い既存部品を最大5件ヒント表示し、うっかり重複登録を防ぐ（`exclude_id` で自分自身を除外。**保存は妨げない**＝型番は設計上重複可のため「重複」ではなく「類似」と表現する）
 - **既存 PowerApps 部品管理アプリからのデータ移行機能**:
-  - SharePoint リストを CSV エクスポート → 管理画面の「CSVインポート」で取り込み。**全置き換え（`mode=replace`）は管理者のみ**（全部品を作り直すため）、差分マージは入力可（editor）でも実行できる
+  - SharePoint リストを CSV エクスポート → 管理画面の「CSVインポート」で取り込み。**全置き換え（`mode=replace`）は管理者のみ**（全部品を作り直すため）、差分マージは入力可（editor）でも実行できる。**画面の既定は「差分マージ」**（管理者でも。全置き換えは部品のIDが付け替わり、印刷済みの部品QRラベル〔`/pages/parts?id=N`〕が読めなくなる・入出庫履歴との結び付きが切れるため、選ぶと強い警告を出す）
   - インポート画面で CSV列 ↔ アプリ項目の**列マッピングUI**を提供（文字コードは UTF-8 / Shift_JIS 両対応）
   - 取込前にプレビュー表示、重複部品番号の検出、取込結果レポート表示
   - **差分マージ（`mode=merge`）は CSV で対応付けた列だけを更新する**（対応付けていない列はキーごと送られないので既存値を保つ。全列更新だと型番と部品名だけのマージで在庫数・場所等が0／空になった。`functions/api/parts/import.js` の `MERGE_UPDATABLE`）。**在庫数が変わる分は入出庫履歴に「調整（CSV取込（差分マージ））」として残し、監査ログに `quantity_changes:[{id,from,to}]` を残す**（取り込み・履歴・監査は1つの batch）
+  - **差分マージは同じ型番を別のライン・機器で持つ部品を取り違えない**: 型番で突き合わせ、CSV に設備名（`line_name`）・機器名（`equipment_name`）があればそれも一致を条件にする。型番が1件に決まるときは従来どおり型番だけで更新。決められない行（同じ型番が複数あり、設備名・機器名も対応付けていない）は取り込まず、行番号つきの理由を返す（黙って1件だけ更新しない）。設備名・機器名が既存のどれとも違う同じ型番は別の部品として追加。1回の取り込みで同じ部品を指す行が重なったら2行目を飛ばす（画面の重複検出も同じキー。`functions/api/parts/import.js`）。単体テスト `tests/unit-parts-import.mjs`
   - 移行後は本アプリを正とし、PowerApps側は参照のみ → 廃止
 **テーブル**: `parts_inventory`（+監査列）、`parts_transaction`（入出庫履歴、client_tx_id＝識別番号）
 ### 06. 設備台帳
@@ -187,32 +189,22 @@
 - ユーザー・グループ・権限管理（閲覧のみ / 入力可 / 管理者 の3段階。承認者ロールは不要のため削除）。**ユーザー削除は物理削除**（無効化ではなく完全に削除。過去に無効化したユーザーは「再有効化」または「完全削除」が可能）
 - マスタ管理画面: 点検項目・設備・部品・トラブルジャンル・ユーザーの各マスタを画面から**追加・削除可能**
 - マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**。電気設備点検の設定（`electrical_config`。設備種別単位で id 列が無いため `restoreElectricalConfig` で別扱い）と帳票テンプレート（更新前の定義＝入力項目 `fields_json` を含めて退避）も戻せる
-- **バックアップ**（管理画面「バックアップ」タブ・admin のみ）: JSON／SQLダンプ（スキーマ＋データ）／**表ごとのCSV（ZIP）**の3形式。対象は `functions/api/admin/backup.js` の `TABLES`（電気設備点検・電気設定・帳票テンプレ・年度リセット履歴・チャットの👍／既読を含む。`push_subscriptions` は端末の暗号鍵を含むため意図的に除外）。`id` 列が無いテーブルもあるため `ORDER BY rowid`。**新しいテーブルを `schema.sql` に足したら `TABLES` にも足す**（足し忘れは `tests/unit-backup.mjs` が検出する）。CSV(ZIP)は管理画面側で JSON を取得して作る（`js/backup-csv.js`＋JSZip。BOM付きUTF-8・`escCsv` 経由なので `=` 等で始まる値は先頭に `'` が付く＝閲覧・集計用で、復元にはJSON／SQLを使う）。R2の写真・動画は含まれない
+- **バックアップ**（管理画面「バックアップ」タブ・admin のみ）: JSON／SQLダンプ（スキーマ＋データ）／**表ごとのCSV（ZIP）**の3形式。対象は `functions/api/admin/backup.js` の `TABLES`（電気設備点検・電気設定・帳票テンプレ・年度リセット履歴・チャットの👍／既読を含む。`push_subscriptions` は端末の暗号鍵を含むため意図的に除外）。`id` 列が無いテーブルもあるため `ORDER BY rowid`。**新しいテーブルを `schema.sql` に足したら `TABLES` にも足す**（足し忘れは `tests/unit-backup.mjs` が検出する）。CSV(ZIP)は管理画面側で JSON を取得して作る（`js/backup-csv.js`＋JSZip。BOM付きUTF-8・`escCsv` 経由なので `=` 等で始まる値は先頭に `'` が付く＝閲覧・集計用で、復元にはJSON／SQLを使う）。R2の写真・動画は含まれない。**ページ送りは keyset（`rowid > 前回`）**で OFFSET を使わない（OFFSET は読み飛ばした行も読み取り行数に数えるため、約6万件で1回約199万行→約7万行）。件数の事前 COUNT はしない。**途中で読み取りに失敗したらダウンロード自体を失敗させる**（途中までのファイルを成功に見せない）。pull 方式のストリームでメモリに溜めない。`request_dedupe` も対象
 - `audit_log` の閲覧画面（誰がいつ何を追加・編集・削除したかを検索）
 - **機能別の利用状況**（管理画面「利用状況」タブ・admin のみ）: 監査ログを機能（テーブル）ごとに数え、登録・更新・削除の件数と最終操作日時、期間内に操作した人数を表示する（直近30日・90日・1年。`GET /api/admin/feature-usage`・`functions/api/admin/feature-usage.js` の `FEATURE_LABELS` に無いテーブルは「その他」）。期間内に一度も使われていない主要機能も 0 件で並べ、使われていない機能が分かる。**個人ごとの操作数は出さない**（人数だけ）。画面を見ただけの閲覧は監査ログに残らないため数えられない。単体テストは `tests/unit-feature-usage.mjs`
 - 削除済みデータの閲覧・復元（論理削除の復元）。対象はトラブル・業務依頼・部品・点検・日報・保全計画・設備・ユーティリティ日報・電気設備点検・帳票テンプレート（`admin/restore/index.js` の `ALLOWED_TABLES`）。**200件ずつページ送り**（`offset`。大量削除時も全件を復元できる）。ユーティリティ日報は同じ日の記録があると 409（1日1件）。**部品は同じ型番・部品名の部品が既にあると 409**（CSVの全置き換えで作り直された部品の旧版を戻すと重複するため）。重複の確認・復元・監査は1つの batch の条件付き UPDATE（同時操作でもすり抜けない）。最後のページの最後の1件を復元したら前のページを表示する
+- **削除したファイル（写真）の復元**: 論理削除したファイルは管理画面「ファイル容量」から**元に戻せる**（`PUT /api/files/:id` `{restore:true}`・admin のみ。完全削除〔R2から削除済み＝`purged_at`〕したもの・既に戻したものは409。復元と監査ログ〔restore〕は1つの batch）。R2の実体は論理削除では消さないので、戻すと元の記録の添付に再び出る
+- **開発用ファイルの配信止め**: ビルドなしでリポジトリ全体を配信するため、`CLAUDE.md`・`schema.sql`・`wrangler.toml`・`tests/`・`docs/` 等も URL で取得できた。ルートの Functions ミドルウェア（`functions/_middleware.js`・判定は `functions/api/_lib/blocked-paths.js`）が**許可リスト**（ホーム・`js/ css/ icons/ pages/ electrical/ api/ .well-known/`・`sw.js`・`manifest.json`）以外を 404 にする（新しい開発用ファイルを足しても自動で隠れる）。`_routes.json` は「全部 Functions を通す（`include: /*`）」を基本に、HTML ページ・css・アイコン・ホーム・`sw.js`・`manifest.json` だけを**ファイル名の完全一致**で除外して静的配信のままにする（HTML の CSP などのヘッダーを静的配信側に任せるため）。**フォルダ単位の除外（`/js/*`）は使わない**: `wrangler pages dev` の実測で、`/js/..%2fschema.sql`・`//schema.sql`・`/%43LAUDE.md` から本物のファイルが返った。パスは正規化（%デコード3回まで・連続スラッシュの圧縮・`..`／バックスラッシュ／NULの拒否・小文字化）してから判定する。**JS は Functions を通る＝取得のたびに Workers の無料枠を数える**（無料枠の注記参照）。**新しいページ（`pages/*.html`）を足したら `_routes.json` の exclude にも足す**（足し忘れても動くが Functions を通る。`tests/unit-blocked-paths.mjs` が検出する）。本番での `_routes.json` の細かい挙動は未確認（ローカルでの確認のみ）。根本対策は出力ディレクトリを `public/` 等へ分けること（未実施）
+- **ESLint（静的検査）**: `cd tests && npm run lint`（`npm test` の先頭でも実行＝CIで毎回）。設定は `tests/eslint.config.mjs`。未定義変数・重複キー・到達しないコード等の書き間違いをエラーにする（未使用変数は警告）。ビルド工程なしの方針のため、検査の依存は `tests/node_modules` だけ
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）。**タグ確認機能**: テンプレ編集画面の「🔍 Excelのタグを確認」で、アップロード済みExcelの `{{タグ}}` を抽出し、差込対象と突合して「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの（＝出力されない）」を表示（休止時間が出ない・○が付かない等のタグ名不一致を管理者が自力で発見できる。`js/excel-fill.js` の `extractTemplateTags`）
 **テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
-### 10. チャット
-- グループチャットでシフト間の引き継ぎ
-- ※ レコード別のコメントスレッドは運用簡素化のため**廃止**（UI・API とも削除済み。`comments` テーブルは過去データ保持のためスキーマに残置）
-- 画面表示中は**5秒ポーリング**でほぼ即時表示（タブが裏に回ったら停止して無駄なリクエストを出さない）。必要なら Durable Objects + WebSocket へ拡張
-- **既読数は送信者本人を数えない**（自分の投稿を自分が見ても既読は付かない。ホームの「◯人中N人既読」も送信者を除いた人数）
-- **👍確認リアクション**: 既読（=見た）とは別に「了解した」をタップで表明できる（editor以上・他人の投稿のみ。誰が確認したか名前で表示）。`chat_reactions` テーブルにトグル保存し audit_log に記録。`POST /api/chat/:id`（action=react）
-- **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり（メッセージを削除するとピン留めも外れる＝削除済みが永久に残らない）、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
-- **既読数・👍・📌はライブ更新**: `GET /api/chat` が直近20件の meta（既読数・リアクション）と pinned 一覧を返し、5秒ポーリングでリロードなしに反映される
-- **添付ファイルは本人がアップロードした未紐づけファイルのみ**（`POST /api/chat` の `file_ids`。それ以外は400）。投稿時に `attachFiles` で `related_table='chat_messages'` に紐づける。自動削除がR2から消すのも「そのメッセージに紐づくファイル」と紐づけ導入前の「投稿者本人の未紐づけファイル」だけ（他の記録のファイルIDを指定されて、そのファイルが消えるのを防ぐ）
-- **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。1件ずつ「ピン留めされていなければ本体を削除」し、消せたものだけ添付・リアクションを片付ける＝一覧を読んだ後にピン留めされても画像が消えない。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）。**投稿時の audit_log には本文を残さない**（`channel`・`body_length`・`file_ids` のみ。`audit_log` は10日で消えず永続するため、本文を書くと「個人情報を入力しない／10日で消える」という運用前提と食い違う）
-- **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?new=1&body=`。日報は `new=1` が無いと一覧が開き本文が引き継がれない）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
-- **申し送りテンプレート**: 定型文（【引き継ぎ】【対応中】【要確認】【完了報告】【部品発注】）をタップで入力欄へ挿入（現場スマホの入力を軽く・書き方を統一。`js/chat.js` の `HANDOFF_TEMPLATES`）
-- **個人情報の入力防止**:
-  - 入力欄に注意書きを常設（「氏名・電話番号・住所等の個人情報は入力しないでください」）
-  - 送信時に電話番号・メールアドレス・郵便番号等のパターンを検知したら**警告ダイアログ**を表示（送信前に本人へ確認。検知はクライアント側の正規表現で実施）
-**テーブル**: `chat_messages`（+監査列、pinned_at/pinned_by）、`chat_reactions`（👍確認）
+### 10. チャット（廃止）
+- 使われていないため**画面・API・ホームのタイル／未読表示・自動削除処理は削除済み**（`pages/chat.html`・`js/chat.js`・`functions/api/chat/`）。**テーブル（`chat_messages`・`chat_reactions`・`chat_channel_reads`）と過去データは残し**、バックアップ（`TABLES`）の対象のまま。性能索引 `idx_chat_messages_pinned` と、`css/style.css` の `.chat-*` スタイルも未使用のまま残してある（無害なため）。添付ファイルがR2に残っている場合は、管理画面「ファイル容量」から管理者が必要に応じて削除する。チャットの代わりの引き継ぎは日報（07）を使う
 ### 11. 横断検索（過去データの検索・抽出）
 蓄積したトラブル記録・点検履歴・修理履歴・日報をキーワードで横断検索し、過去の事例をすぐに確認できるようにする（AIは使わない通常検索）。
 - 検索ボックスにキーワードを入力（例「コンプレッサ 異音」「3号機 漏れ」）すると、対象テーブルを横断して該当レコードを一覧表示
-- 検索対象: トラブル記録（現象・原因・対策）/ 点検結果 / 業務依頼 / 日報本文 / 設備台帳 / 部品在庫 / 保全計画
+- 検索対象: トラブル記録（現象・原因・対策）/ 点検結果 / 業務依頼 / 日報本文 / 設備台帳 / 部品在庫 / 保全計画 / ユーティリティ日報 / 電気設備点検（点検者・設備名称・備考・要修理メモ・設備種別。点検項目の設定スナップショットは対象外。12参照）
+- **検索語の `%` `_` はワイルドカードではなく文字として探す**（`util.js` の `likeContains`／`LIKE_ESCAPE`＝`LIKE ? ESCAPE '\'`。横断検索・部品・トラブル類似・設備一覧・日報の記録者・監査ログのユーザー検索）。以前は「100%」で全件が一致し、「A_1」の `_` が任意の1文字になった
 - 絞り込みフィルタ: **期間指定 × カテゴリ/ジャンル × 設備 × データ種別**（種別チェックボックスで対象テーブルを絞れる）。カテゴリ/ジャンルは**トラブルのジャンルにのみ適用**（日報カテゴリは別マスタでIDの意味が違うため、日報には適用しない）
 - 検索結果から各レコードの詳細画面へ直接ジャンプ。**キーワードのハイライトは元の文字列を全キーワードの正規表現で1回だけ分割して `<mark>` 要素を組み立てる**（`innerHTML` は使わない。エスケープ後の文字列を語ごとに置換すると、語が「mark」「amp」等のとき表示が崩れた）
 - **CSV出力（旧・抽出レポートの集約先）**: 検索結果（絞り込み後）を CSV でダウンロード（**UTF-8/BOM と Shift_JIS を選択可** = Excelで文字化けしない）。ダッシュボード08にあった「抽出レポート」機能はここへ集約した。設備番号列は Excel の日付変換よけに `excelText`（`="値"`）で囲む
@@ -237,7 +229,7 @@
 - **API**: `functions/api/electrical-inspections/`（`index.js` GET一覧`{records:{[client_id]:Record}}`/POST upsert、`[id].js` DELETE論理削除）、`functions/api/electrical-config/`（GET`{main,battery,generator,defaults}`/PUT admin・`master_history`退避）。
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから添付できる（editor以上）。アップロードはアプリ共通の `js/files.js`（`uploadFile`/`resizeImageFile`＝長辺1280pxへ縮小しEXIF除去・R2容量ガード）を使い、classic script のこのページへは末尾の module から `window.ElecFiles` として渡す。「保存する」で先に送信し、記録（`record_json`）に `photos:[{id,file_name,content_type}]` として持つ。サーバー側は `attachFiles` で `related_table='electrical_inspection'` に紐づけ、記録詳細・印刷にサムネイルを出す。保存後はフォームから外す（次の記録へ持ち越さない）。**添付は入力・編集画面の「🗑 削除」から削除できる**（`DELETE /api/files/:id` の論理削除。記録側の参照は「保存する」で消えるため、未保存のまま残っても壊れたサムネイルが出ないよう `onerror` で隠す）。
 - **XSS対策**: 記録（`record_json`）は他の利用者が保存した値で、記録内の `config` スナップショットも含め任意の文字列が入り得る。`innerHTML` に入れる値は必ず `esc()`、`onclick` の引数は `jsArg()`（JSON化＋属性エスケープ）を通す。サーバー側も `record.id` を英数字・`_`・`-`（64文字まで）に限定し、`date` は検証済みの `YYYY-MM-DD` で保存し直す
-- **スコープ外（後日）**: 横断検索(11)・通知への載せ込み（`has_abnormal`が足場）。
+- **異常の通知・横断検索**: 要注意（caution）・要修理（repair）を含む記録を保存すると通知する（`inspection_abnormal`＝点検と同じ種類で、通知センターの「点検」に出る。要修理を含めば alert・要注意のみなら warning。見出し「電気設備点検で異常検知: 蓄電池（2026-10-06）」・本文「要修理1件・要注意1件があります」）。**異常のままの再保存では繰り返さず、直して保存し直した後でまた異常になったときだけ改めて通知**（保存前の `has_abnormal` と比べる）。リンクは `/electrical/#record=記録ID`（電気設備点検ページが起動時に `openRecordFromHash` でその記録の詳細を開く。該当が無ければ何もしない）。横断検索(11)に種別 `electrical` を追加（点検者・設備名称・備考・要修理メモ・区分ごとの備考と設備種別の名称〔高圧受電設備・蓄電池・発電機〕を `json_extract` で探す。**全記録に同じ内容が入る点検項目の設定スナップショット `config` は対象にしない**。期間は点検日。設備・ジャンルの絞り込みは持たない）。単体テスト `tests/unit-electrical.mjs`
 **テーブル**: `electrical_inspection`（client_id, equipment_type[main/battery/generator], inspected_date, has_abnormal, record_json, +共通監査列）、`electrical_config`（equipment_type PK, config_json, default_json, updated_by/at）
 ### 13. ユーティリティ日報（工場ユーティリティ設備の日常点検）
 灯油・ボイラー・空気圧縮機・各種タンク・蒸気ボイラー・ドレン・号機別運転時間を、毎日1件の日報として記録する（`/pages/utility`・`js/utility.js`）。元は PowerApps + SharePoint の構想だったが、Cloudflare 完結の方針に合わせて本アプリの機能として実装した（外部サービス非依存）。
@@ -251,7 +243,8 @@
 - **CSV出力**: 一覧から期間指定でCSV出力（UTF-8/BOM・Shift_JIS を選択可）。列は項目マスタから組み立てる
 - **横断検索(11)**: 種別 `utility` として `values_json`・特記事項・入力者名を検索対象にする
 - **写真・動画の添付**: 入力画面の「写真・動画」カードから複数枚添付できる（editor以上）。02 点検実施と同じ流儀＝保存時に `js/files.js` の `uploadFile`（長辺1280pxへ縮小・EXIF除去・R2容量ガード）で送ってから `file_ids` を本文に載せ、サーバーは `attachFiles` で `related_table='utility_report'` に紐づける。詳細画面（`GET /api/utility-reports/:id` の `files`）と編集画面にサムネイルを表示する。送信済みのファイルは再送しないので、保存が409等で失敗して押し直しても二重登録にならない。**添付は詳細・編集画面の × から削除できる**（editor以上・`DELETE /api/files/:id` の論理削除。06 設備台帳と同じ `thumb-cell`/`thumb-del`。R2の容量を実際に空けるのは管理画面「ファイル容量」の物理削除）
-- **スコープ外**: オフライン送信キュー、未入力リマインド通知
+- **オフライン保存**: 入力画面を開いたあとに電波が途切れて保存できないときは、送信待ち（`js/offline-queue.js` の `utility`）に保存し、復帰で自動送信する（新規のみ。写真は縮小して端末に保存し後で送る。`client_request_id` つきなので再送しても二重登録しない）。**同じ日の記録が既に送信待ちにあるときは2件目を積まず案内する**（復帰時に1日1件のガード〔409〕で失敗するため）。入力画面そのものを電波なしで開くことはできない（点検項目マスタを取得するため。他の記録と同じ）
+- **スコープ外**: 未入力リマインド通知
 **テーブル**: `utility_item`（section, name, input_type[number/select/multi/time/text], unit, min_value, max_value, options_json, alert_options_json, sort_order, +共通監査列）、`utility_report`（report_date, inspected_at, reporter_name, has_abnormal, values_json, note, +共通監査列）
 ### 14. AIサポート（廃止）
 - 専用画面（`/pages/ai-support`・`js/ai-support.js`）とホームのタイルは**不要のため削除済み**。過去事例の検索は横断検索11、類似トラブルの表示は 04 トラブル記録の登録・編集フォームで行う（`/api/troubles/similar` は 04 が使うため残す）。テキストのAI（原因・対策の提案）も廃止した
@@ -262,14 +255,16 @@
 ├── index.html              # ホーム（機能タイル・通知ベル・容量警告）
 ├── manifest.json / sw.js   # PWA（Service Worker）
 ├── _headers                # 静的ファイルのセキュリティヘッダー（CSP 等）
+├── _routes.json            # Functions を通すパス（開発用ファイルの配信止め。HTML・css・アイコン等はファイル名の完全一致で除外）
 ├── icons/                  # PWAアイコン（scripts/make-icons.mjs で生成）
 ├── electrical/index.html   # 12 電気設備点検（独立ドキュメント）
 ├── pages/                  # 各機能のHTML（plan / plan-annual / inspection / inspection-batch /
 │                           #   inspection-report / repair / trouble / parts / ledger / labels / report /
-│                           #   utility / dashboard / admin / chat / search / notifications）
+│                           #   utility / dashboard / admin / search / notifications）
 ├── css/style.css
 ├── js/
 │   ├── api.js auth.js nav.js util.js home-tabs.js   # 共通（fetch・権限・ナビ・DOMヘルパ）
+│   ├── history-diff.js history-view.js              # 変更履歴の差分表示（純粋関数＋共通部品）
 │   ├── offline-queue.js draft.js                    # オフライン送信キュー・入力下書き
 │   ├── files.js admin-files.js                      # R2アップロード（縮小・EXIF除去）・容量管理
 │   ├── csv.js trouble-csv.js                        # CSV出力（インジェクション対策）
@@ -284,21 +279,23 @@
 │   ├── report.js           # 07 日報
 │   ├── dashboard.js        # 08 グラフ
 │   ├── admin.js            # 09 管理機能・監査ログ・復元
-│   ├── chat.js notifications.js  # 10 チャット・通知センター／Web Push購読
+│   ├── notifications.js    # 通知センター／Web Push購読
 │   ├── search.js           # 11 横断検索
 │   ├── utility.js          # 13 ユーティリティ日報
 │   └── vendor/             # 同梱ライブラリ（CSPで外部CDN禁止のため）
+├── functions/_middleware.js # 開発用ファイルの配信止め（許可リスト。判定は api/_lib/blocked-paths.js）
 ├── functions/api/
 │   ├── _middleware.js      # 認証・未捕捉エラーのJSON化・セキュリティヘッダー
 │   ├── _lib/               # access-jwt / auth / audit / history / fuzzy / trouble-similar /
-│   │                       #   notify / overdue-notify / webpush / storage / ai-models 等
+│   │                       #   notify / overdue-notify / webpush / storage / ai-models /
+│   │                       #   request-dedupe / blocked-paths / perf-indexes / parts-version 等
 │   ├── [[path]].js         # 未定義APIの404
 │   ├── me.js
 │   ├── equipment/ equipment-names/ inspections/ plans/ troubles/ repairs/ reports/
 │   ├── parts/              # CRUD + import.js（CSV取込）・import-from-equipment.js
 │   ├── utility-reports/    # 13（items/ = 項目マスタ）
 │   ├── electrical-inspections/ electrical-config/  # 12
-│   ├── chat/ notifications/ push/                  # 10・通知・Web Push
+│   ├── notifications/ push/                        # 通知・Web Push
 │   ├── search/index.js     # 11 横断検索
 │   ├── stats/              # 集計
 │   ├── files/              # R2アップロード/取得
@@ -306,7 +303,7 @@
 │   ├── ai/                 # Workers AI（read-meter / extract-equipment＝画像を読むAIのみ）。画面から呼ばれない API（analyze-trouble / parse-search / parse-trouble-pdf / chat）と AI アシスタント FAB は削除済み
 │   ├── users/
 │   └── admin/              # audit/ restore/ masters/ users/ backup.js usage.js normalize.js
-├── tests/                  # E2Eテスト（実ブラウザ検証。cd tests && npm test）
+├── tests/                  # 単体テスト・E2Eテスト（実ブラウザ）・ESLint（cd tests && npm test。lint のみは npm run lint）
 ├── docs/                   # 現場向け使い方ガイド
 ├── schema.sql              # D1テーブル定義
 └── wrangler.toml           # D1/R2/Secretバインディング
@@ -319,13 +316,16 @@
 | Phase 2 | 保全計画（工事予定含む）+ トラブル記録（ジャンル抽出） | 01, 04 |
 | Phase 3 | 業務依頼 + 部品在庫（PowerAppsデータのCSV移行） | 03, 05 |
 | Phase 4 | 日報（カテゴリ絞り込み）+ ダッシュボード/抽出レポート/CSV・PDF出力 | 07, 08 |
-| Phase 5 | 管理機能（監査ログ閲覧・復元）+ チャット/コメント | 09, 10 |
+| Phase 5 | 管理機能（監査ログ閲覧・復元）+ チャット/コメント（チャットは後に廃止） | 09, 10 |
 | Phase 6 | 横断検索（キーワード検索） | 11 |
 ## 共通の技術的注意事項
 - **SQLインジェクション対策**: D1 へのクエリは必ずプリペアドステートメント。SQL文字列連結禁止
 - **一覧APIの `limit` は下限1・上限ありで丸める**（`Math.min(Math.max(1, Math.trunc(Number(v)) || 既定), 上限)`。`limit=-1` が `LIMIT -1`＝無制限になり、全件読み取りで D1 の読み取り枠を消費されるのを防ぐ）
 - **権限チェックはサーバー側（Functions）で必ず実施**。フロントの出し分けはUX目的のみ
 - **複数の書き込みを伴う処理は D1 の batch（1トランザクション）で行う**（途中で失敗しても一部だけ残らない）。監査ログも同じ batch に入れる（`functions/api/_lib/audit.js` の `auditStatement`。INSERT 直後の監査は `recordId: LAST_INSERT_ID`＝`last_insert_rowid()`）。対象: 予定の一括登録（`plans/batch.js`）・1日削除/1日完了（`plans/[id]/delete-day.js`・`complete-day.js`。未マイグレーション列は `runPlanBatch` が外して batch ごと再試行）・点検まとめ入力（`inspections/batch.js`）・設備番号の振り直し（`equipment/renumber.js`）・部品の入出庫と履歴（`parts/[id]/transaction.js`。在庫不足時は `WHERE changes() = 1` で履歴も作らない。棚卸調整の増減は書き込む瞬間の在庫から計算）・部品CSVの差分マージ（`parts/import.js`）・業務依頼の更新とステータス履歴（`repairs/[id].js`）・トラブル記録の登録と監査（`troubles/index.js` の `insertTroubleRecord` の `after`）・年度リセット（`plans/annual-reset.js`）・削除済みの復元（`admin/restore`）
+- **登録の二重防止（識別番号）**: トラブル・業務依頼・日報・点検・ユーティリティ日報の新規登録は、入力画面を開いたときに作る識別番号（`client_request_id`・UUID。`js/util.js` の `newRequestId`）を付けて送る。サーバーは `request_dedupe` テーブル（UNIQUE）へ登録と同じ batch で記録し、同じ番号の再送は新しく作らず最初の記録を返す（`duplicate:true`）。電波が不安定で「届いたのに返事が届かず送信待ちから再送された」ときの二重登録を防ぐ。同時に届いた場合も後の方は UNIQUE 違反で batch ごと取り消され、最初の記録を返す。監査ログの記録IDは `last_insert_rowid()` を使うため、重複判定の INSERT を「登録の INSERT と監査の間」に挟まない（トラブルは before／fix の文で順序を守る）。送信待ちの再送も同じ番号。`functions/api/_lib/request-dedupe.js`・単体テスト `tests/unit-dedupe.mjs`
+- **日付だけの入力は実在する日付だけ保存する**: 予定日・日報の日付・対応期限・ユーティリティ日報の日付は `isValidYmd`（`util.js`。2026-02-31・2026-13-45・文字列は400）。期間絞り込みの `jstDayStartUtc`／`jstNextDayStartUtc` は存在しない日付でも例外にしない（以前は5つのAPIが500になっていた）。監査ログの `offset` は整数・0〜10億に丸める（小数・桁あふれで D1 が datatype mismatch になっていた）。設備番号の重複は、削除済みの設備が原因のときそう案内する（`duplicateCodeMessage`）。単体テスト `tests/unit-small-fixes.mjs`
+- **D1 の読み取り行数を節約する**（無料枠 500万行/日）: 性能索引は `functions/api/_lib/perf-indexes.js`（`schema.sql` にも同じものを追記）に置き、API の入口で `CREATE INDEX IF NOT EXISTS` を1プロセスにつき1回だけ自動作成する（既存の本番DBにも効く）。OFFSET のページ送りは読み飛ばした行も数えるため、大きな表は keyset（`rowid > 前回`）にする（バックアップ）。画面を開いている間の自動更新は、軽い「版」だけを確かめて変わったときだけ取り直す（部品）。通知の月・担当者の選択肢（全件集計）は `facets=1` を頼む通知画面だけが取得する（ホームのベルは省く）。保全計画の月/週表示は、単日と複数日を別の検索にして索引を使う（`+p.planned_date` の単項プラスで索引の選択を誘導）。測定は `meta.rows_read`。単体テスト `tests/unit-perf.mjs`
 - **期間予定の分割（1日削除・1日完了）は同時操作を 409 で止める**（batch の先頭を `guardedPlanUpdate`＝読んだ時点の日程・状態のままのときだけ元の予定を書き換える条件付き UPDATE にし、後続の INSERT・監査は `ifPrevChanged`（`WHERE changes() = 1`）で連鎖させる。競合した側は何も作らない。2回押しで完了済みの単日レコードが2件できるのを防ぐ。updated_at は秒精度で同じ秒の2回押しを区別できないため使わない）。分割した予定には工事連絡書の印刷日（`printed_at`/`printed_by`）も引き継ぐ
 - **削除は論理削除 + audit_log 記録が全機能で必須**（共通データ設計の章を参照）
 ### AI機能（Workers AI）の出し分け

@@ -6,7 +6,8 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser, hasRole } from '/js/auth.js';
-import { el, render, formatDateTime, maskEmail, ACTION_LABELS, jstTodayStr, toJstDateStr } from '/js/util.js';
+import { el, render, formatDateTime, maskEmail, jstTodayStr, toJstDateStr, newRequestId } from '/js/util.js';
+import { buildHistoryList } from '/js/history-view.js';
 import { installUnsavedGuard, saveErrorMessage } from '/js/draft.js';
 import { enqueue as enqueueOffline } from '/js/offline-queue.js';
 
@@ -172,17 +173,7 @@ async function renderDetail(id) {
       : null,
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '変更履歴'),
-      !history || history.length === 0
-        ? el('p', { class: 'empty' }, '履歴はありません。')
-        : el('div', { class: 'row-list' },
-            history.map((h) =>
-              el('div', { class: 'history-row' }, [
-                el('span', { class: `action-badge is-${h.action}` }, ACTION_LABELS[h.action] || h.action),
-                el('span', {}, maskEmail(h.changed_by)),
-                el('span', { class: 'list-item-sub' }, formatDateTime(h.changed_at)),
-              ])
-            )
-          ),
+      buildHistoryList(history),
     ]),
   ]);
 }
@@ -198,6 +189,7 @@ function field(label, input, hint) {
 }
 
 async function renderForm(existing) {
+  const requestId = newRequestId(); // 二重登録の防止（この入力フォーム1つにつき1つ。送信待ちに入れても同じ番号）
   // 点検・トラブル詳細からのプリフィル（本文・日付・カテゴリ。記録の紐づけは行わない）
   const urlParams   = new URLSearchParams(window.location.search);
   const prefillDate = urlParams.get('date');
@@ -270,7 +262,7 @@ async function renderForm(existing) {
         guard.clear();
         go(`?id=${existing.id}`);
       } else {
-        const { id } = await api.post('/api/reports', { report_date, body: bodyText, reporter_name, category_id });
+        const { id } = await api.post('/api/reports', { report_date, body: bodyText, reporter_name, category_id, client_request_id: requestId });
         guard.clear();
         renderSaved(id);
       }
@@ -279,7 +271,7 @@ async function renderForm(existing) {
       const offline = err?.offline === true || navigator.onLine === false;
       if (offline && !existing) {
         try {
-          await enqueueOffline('report', { report_date, body: bodyText, reporter_name, category_id });
+          await enqueueOffline('report', { report_date, body: bodyText, reporter_name, category_id, client_request_id: requestId });
           guard.clear();
           alert('オフラインのため「送信待ち」に保存しました。\n通信が回復すると自動で送信されます。');
           go('');
