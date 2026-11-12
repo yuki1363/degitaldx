@@ -12,6 +12,7 @@ import { normalizeJa } from '../_lib/normalize.js';
 import { MAX_PART_QTY, PART_QTY_MESSAGE } from '../_lib/parts-limits.js';
 import { linkRowToEquipment, describeEquipmentLink, ensurePartsEquipmentTable } from '../_lib/equipment-link.js';
 import { partsDetailVersion } from '../_lib/parts-version.js';
+import { loadPartUsage } from '../_lib/parts-usage.js';
 
 // NFKC 正規化＋trim（半角カナ→全角カナ・全角英数→半角。検索・表示の統一）。空は null
 const nz = (v) => { const s = normalizeJa(String(v)).trim(); return s === '' ? null : s; };
@@ -63,8 +64,12 @@ export async function onRequestGet({ env, params, request }) {
     ...(extras ?? []).filter((e) => e.id !== primary.equipment?.id).map((e) => ({ ...e, kind: 'extra' })),
   ];
 
+  // 使用実績（直近12か月の月別出庫数）。取れなくても詳細は表示する
+  let usage = null;
+  try { usage = await loadPartUsage(DB, id); } catch { usage = null; }
+
   // equipment は従来の応答（主な設備1件）との互換のため残す
-  return json({ part, transactions, equipment: primary.equipment, equipment_links: equipmentLinks, equipment_status: primary.status, version });
+  return json({ part, transactions, usage, equipment: primary.equipment, equipment_links: equipmentLinks, equipment_status: primary.status, version });
 }
 
 export async function onRequestPut({ env, data, params, request }) {

@@ -3193,3 +3193,11 @@ input.is-abnormal {
 .help-list li { margin-bottom: 4px; }
 
 .usage-zero td { color: var(--color-text-muted); }
+
+/* 05 部品在庫: 使用実績（直近12か月の月別出庫数）。375px 幅で12本が収まる */
+.usage-summary { margin: 0 0 8px; font-size: 14px; }
+.usage-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; height: 110px; align-items: end; margin-bottom: 6px; }
+.usage-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; min-width: 0; }
+.usage-num { font-size: 10px; line-height: 1.2; color: var(--color-text-muted); }
+.usage-bar { width: 100%; min-height: 1px; background: var(--color-primary); border-radius: 2px 2px 0 0; }
+.usage-month { font-size: 9px; line-height: 1.4; color: var(--color-text-muted); white-space: nowrap; }

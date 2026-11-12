@@ -738,6 +738,33 @@ async function renderList() {
 
 // ---------------- 詳細（入出庫履歴） ----------------
 
+// 使用実績（直近12か月の月別出庫数）。必要数や発注数を決める目安にする。
+//   棒は DOM で描く（部品ページはグラフライブラリを読み込まない）。出庫が1件も無ければ棒は出さない。
+function usageCard(usage, part) {
+  if (!usage || !Array.isArray(usage.months)) return null;
+  const max = Math.max(1, ...usage.months.map((m) => m.out));
+  const need = Number(part.safety_stock) || 0;
+  return el('div', { class: 'card', id: 'parts-usage' }, [
+    el('h3', { class: 'card-title' }, '使用実績（直近12か月の出庫数）'),
+    usage.total_out === 0
+      ? el('p', { class: 'empty' }, 'この12か月の出庫はありません。')
+      : el('div', {}, [
+          el('p', { class: 'usage-summary' }, [
+            '合計 ', el('strong', {}, String(usage.total_out)),
+            '　月平均 ', el('strong', {}, String(usage.avg_out)),
+            need > 0 ? `　（必要数 ${need}）` : '',
+          ]),
+          el('div', { class: 'usage-bars', role: 'img', 'aria-label': '月別の出庫数' }, usage.months.map((m) =>
+            el('div', { class: 'usage-col', title: `${m.month.replace('-', '/')}: ${m.out}` }, [
+              el('span', { class: 'usage-num' }, m.out > 0 ? String(m.out) : ''),
+              el('span', { class: 'usage-bar', style: `height:${Math.round((m.out / max) * 100)}%` }),
+              el('span', { class: 'usage-month' }, `${Number(m.month.slice(5))}月`),
+            ]))),
+        ]),
+    el('p', { class: 'hint' }, '出庫だけを数えています（棚卸の調整・入庫は含みません）。必要数や発注数を決める目安にしてください。'),
+  ]);
+}
+
 function infoRow(label, value) {
   return el('div', { class: 'info-row' }, [
     el('span', { class: 'info-label' }, label),
@@ -800,7 +827,7 @@ async function renderDetail(id) {
     if (err?.offline === true || navigator.onLine === false) { await renderOfflineDetail(id); return; }
     throw err;
   }
-  const { part, transactions, equipment_links: equipmentLinks = [], equipment_status: equipmentStatus = 'none' } = data;
+  const { part, transactions, usage = null, equipment_links: equipmentLinks = [], equipment_status: equipmentStatus = 'none' } = data;
   saveSnapshot(part);
   const canEdit = hasRole(currentUser, 'editor');
   const isLow = part.quantity < part.safety_stock; // 在庫数 < 必要数 で要発注
@@ -929,6 +956,7 @@ async function renderDetail(id) {
       el('p', { class: 'hint' }, '棚や部品箱に貼っておくと、読み取ってすぐ出庫・入庫を記録できます（電波が無くても送信待ちに保存）。'),
       el('a', { class: 'btn btn-sm', href: `/pages/labels?type=parts&ids=${part.id}` }, '🏷 ラベルを印刷'),
     ]),
+    usageCard(usage, part),
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, '入出庫履歴（直近50件）'),
       transactions.length === 0
