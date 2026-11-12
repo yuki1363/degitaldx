@@ -48,6 +48,7 @@ async function renderList(equipmentId) {
   // 開いた時点で直近30日分を自動表示する（期間は入力で変更可）
   let filterCategory = '';
   let filterEquipment = equipmentId ? String(equipmentId) : '';
+  let filterReporter = '';
   let filterFrom = toJstDateStr(new Date(Date.now() - 30 * 86400000).toISOString());
   let filterTo = '';
   let currentTroubles = []; // 現在表示中の絞り込み結果（CSV出力用）
@@ -66,6 +67,7 @@ async function renderList(equipmentId) {
     const params = new URLSearchParams();
     if (filterCategory) params.set('category_id', filterCategory);
     if (filterEquipment) params.set('equipment_id', filterEquipment);
+    if (filterReporter.trim()) params.set('reporter', filterReporter.trim());
     if (filterFrom) params.set('from', filterFrom);
     if (filterTo) params.set('to', filterTo);
     // 件数の上限（既定500）より多く拾えるよう明示的に増やす（CSV出力・件数表示が黙って欠けないように。
@@ -111,6 +113,11 @@ async function renderList(equipmentId) {
     allLabel: '全設備',
     onchange: (e) => { filterEquipment = e.target.value; },
   });
+  const reporterInput = el('input', {
+    type: 'text', placeholder: '例: 山田（一部でも可）', maxlength: 100,
+    oninput: (e) => { filterReporter = e.target.value; },
+    onkeydown: (e) => { if (e.key === 'Enter' && !e.isComposing) load().catch(showError); },
+  });
   const fromInput = el('input', { type: 'date', value: filterFrom, onchange: (e) => { filterFrom = e.target.value; } });
   const toInput   = el('input', { type: 'date', onchange: (e) => { filterTo   = e.target.value; } });
   const searchBtn = el('button', { class: 'btn btn-primary', onclick: () => load().catch(showError) }, '🔍 検索');
@@ -130,6 +137,7 @@ async function renderList(equipmentId) {
         el('div', { class: 'field' }, [el('label', {}, 'ジャンル'), catSel]),
         el('div', { class: 'field' }, [el('label', {}, '設備'), eqSel]),
       ]),
+      el('div', { class: 'field' }, [el('label', {}, '担当者（記録者）'), reporterInput]),
       el('div', { class: 'field-pair' }, [
         el('div', { class: 'field' }, [el('label', {}, '期間（から）'), fromInput]),
         el('div', { class: 'field' }, [el('label', {}, '〜（まで）'), toInput]),
@@ -153,7 +161,7 @@ async function renderList(equipmentId) {
     await load();
   } else {
     render(listBox, el('p', { class: 'empty', style: 'text-align:center;margin-top:24px' },
-      '条件（ジャンル・設備・期間）を選び「🔍 検索」を押すと表示されます。\n期間は初期で直近30日です。'));
+      '条件（ジャンル・設備・担当者・期間）を選び「🔍 検索」を押すと表示されます。\n期間は初期で直近30日です。'));
   }
 }
 
