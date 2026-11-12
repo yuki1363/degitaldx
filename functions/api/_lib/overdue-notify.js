@@ -171,6 +171,19 @@ async function notifyUnprintedConstruction(env) {
   }
 }
 
+// 確認済みの通知は、確認から30日たったら物理削除する（一覧が増え続けないように）。
+//   確認した直後には消さない: 期限超過などの重複判定は「確認済みも含めて同じ通知があるか」で行うため、
+//   すぐ消すと期限超過が続く限り毎時間また通知・プッシュが出る。30日後は、続いている期限超過の再通知が
+//   月1回の催促になる。未確認の通知は消さない。
+export const ACK_RETENTION_DAYS = 30;
+export async function purgeOldAcknowledgedNotifications(db, nowMs = Date.now()) {
+  const cutoff = new Date(nowMs - ACK_RETENTION_DAYS * 86400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const res = await db.prepare(
+    `DELETE FROM notifications WHERE acknowledged_at IS NOT NULL AND acknowledged_at < ?1`
+  ).bind(cutoff).run();
+  return res.meta?.changes ?? 0;
+}
+
 export async function checkOverdueAndNotify(env) {
   if (Date.now() - lastCheckAt < CHECK_INTERVAL_MS) return;
   lastCheckAt = Date.now();
@@ -188,5 +201,10 @@ export async function checkOverdueAndNotify(env) {
     await notifyUnprintedConstruction(env);
   } catch (err) {
     console.error('checkOverdueAndNotify (unprinted construction) failed:', err && err.stack ? err.stack : err);
+  }
+  try {
+    await purgeOldAcknowledgedNotifications(env.DB);
+  } catch (err) {
+    console.error('checkOverdueAndNotify (purge) failed:', err && err.stack ? err.stack : err);
   }
 }
