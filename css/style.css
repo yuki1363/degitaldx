@@ -229,12 +229,17 @@ a.notice[hidden] { display: none; }
 .tile-section.is-minor .tile { min-height: 64px; box-shadow: none; border: 1px solid var(--color-border); border-top: 3px solid var(--sec); }
 .tile-section.is-minor .tile-icon { font-size: 20px; }
 
-/* 「在庫・設備」と「見る・探す」は横に並べる（スマホは1つずつ縦に重ねたタイルを2列に） */
+/* 「在庫・設備」と「見る・探す」は横に並べる（スマホは1つずつ縦に重ねたタイルを2列に）。
+   すき間をほかの段と同じ 12px にそろえる＝上下の段とタイルの縦の線がそろう。
+   左右のタイルの高さもそろえる（片方だけ名前が折り返しても段がずれない） */
 .tile-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.tile-row .tile-grid { grid-template-columns: 1fr; }
+.tile-row .tile-section { display: flex; flex-direction: column; min-width: 0; }
+.tile-row .tile-grid { flex: 1; grid-template-columns: 1fr; grid-auto-rows: 1fr; }
+/* ホームのタイルは 2列（スマホ）か 4列（タブレット・PC）だけにする
+   （3列の幅だと、横に並べた段〔2＋2＝4列〕とタイルの幅が合わない） */
 @media (min-width: 600px) {
-  .tile-row { gap: 18px; }
-  .tile-row .tile-grid { grid-template-columns: 1fr 1fr; }
+  .tile-sections .tile-grid { grid-template-columns: repeat(4, 1fr); }
+  .tile-sections .tile-row .tile-grid { grid-template-columns: 1fr 1fr; }
 }
 
 /* 下にまだ続きがあるときの目印（ホーム） */
