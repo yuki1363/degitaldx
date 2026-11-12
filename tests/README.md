@@ -35,7 +35,7 @@ npm test
 | 10 | オフラインでもアプリが起動する（SWプリキャッシュ） |
 | 単体 | Access JWT 検証（`access-jwt.mjs`。偽造・期限切れ・別の鍵・aud/iss違い・ヘッダーだけの偽装を拒否。ブラウザ不要で最初に実行） |
 | 静的検査 | **ESLint**（`npm run lint`。`npm test` の先頭でも実行）。未定義変数・重複キー・到達しないコード等のエラーを検出（警告＝未使用変数は許容）。設定は `eslint.config.mjs` |
-| 単体 | 二重登録の防止（`unit-dedupe.mjs`）・部品CSV取込（`unit-parts-import.mjs`）・DB読み取り行数の節約（`unit-perf.mjs`）・バックアップ（`unit-backup.mjs`）・細かい不具合（`unit-small-fixes.mjs`＝不正な日付・offset・LIKE記号・設備番号の案内）・変更履歴の差分表示（`unit-history-diff.mjs`）・電気設備点検の通知と検索（`unit-electrical.mjs`）・開発用ファイルの配信止め（`unit-blocked-paths.mjs`＝リポジトリの全ファイルが「配信」か「拒否」に分類され、拒否するファイルは必ず Functions を通ることを確認） |
+| 単体 | 二重登録の防止（`unit-dedupe.mjs`）・部品CSV取込（`unit-parts-import.mjs`）・DB読み取り行数の節約（`unit-perf.mjs`）・バックアップ（`unit-backup.mjs`）・細かい不具合（`unit-small-fixes.mjs`＝不正な日付・offset・LIKE記号・設備番号の案内）・変更履歴の差分表示（`unit-history-diff.mjs`）・電気設備点検の通知と検索（`unit-electrical.mjs`）・休止時間の読み取りと集計（`unit-downtime.mjs`）・バックアップの取り忘れ防止（`unit-backup-status.mjs`）・部品の使用実績（`unit-parts-usage.mjs`）・画面エラーの自動記録（`unit-client-errors.mjs`）・開発用ファイルの配信止め（`unit-blocked-paths.mjs`＝リポジトリの全ファイルが「配信」か「拒否」に分類され、拒否するファイルは必ず Functions を通ることを確認） |
 | 9.31〜9.34 | 二重登録の防止・削除ファイルの復元・CSV取込の既定／変更履歴の差分表示・SWの全ページ登録・不正入力で500にならない／開発用ファイルの配信止め（抜け道を含む）／電気設備点検の異常通知・横断検索・記録を開くリンク・ユーティリティ日報のオフライン保存 |
 
 ## 失敗したときは

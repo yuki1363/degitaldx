@@ -2956,6 +2956,80 @@ section('9.34 電気設備点検の異常（通知・横断検索・記録を開
   if (sentList[0]) await api(`/api/utility-reports/${sentList[0].id}`, { method: 'DELETE' });
 }
 
+// ---------- 9.26 休止時間・部品の使用実績・バックアップ取り忘れ・画面エラーの記録 ----------
+section('9.26 休止時間の見える化・部品の使用実績・バックアップの記録・画面エラーの自動記録');
+{
+  const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
+
+  // 休止時間: 詳細に出る・集計APIに入る・ダッシュボードにカードとグラフが出る
+  const dt = await api('/api/troubles', { method: 'POST', body: {
+    occurred_at: new Date().toISOString(), phenomenon: 'E2E休止時間テスト',
+    form_values_json: { 休止時間: '1時間30分', 休止種別: '故障休止', 特記事項: 'E2E特記' } } });
+  const dtBad = await api('/api/troubles', { method: 'POST', body: {
+    occurred_at: new Date().toISOString(), phenomenon: 'E2E休止時間（読み取れない）', form_values_json: { 休止時間: '半日くらい' } } });
+  await page.setViewportSize({ width: 375, height: 720 });
+  await page.goto(`${BASE}/pages/trouble?id=${dt.json?.id}`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => document.body.innerText.includes('E2E休止時間テスト'), { timeout: 10000 }).catch(() => {});
+  const dtText = await page.evaluate(() => document.body.innerText);
+  check('トラブル詳細: 休止時間（1時間30分）・休止区分・特記事項が表示される',
+    dtText.includes('1時間30分') && dtText.includes('故障休止') && dtText.includes('E2E特記'));
+  check('トラブル詳細（375px）: 横にはみ出さない', await noOverflow());
+  const fyStats = await api(`/api/stats?from=2000-01-01&to=2099-12-31`);
+  check('集計API: 休止時間の合計に入り、読み取れない記録は件数だけ数える',
+    fyStats.json?.downtime?.total_minutes >= 90 && fyStats.json.downtime.unreadable >= 1
+    && fyStats.json.downtime.by_kind.some((k) => k.kind === '故障休止' && k.minutes >= 90), JSON.stringify(fyStats.json?.downtime).slice(0, 200));
+  await page.goto(`${BASE}/pages/dashboard`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#downtime-card', { timeout: 10000 }).catch(() => {});
+  const card = await page.evaluate(() => document.getElementById('downtime-card')?.innerText || '');
+  check('ダッシュボード: 休止時間のカードとグラフが出る', /時間|分/.test(card) && await page.evaluate(() => !!document.getElementById('chart-downtime')), card);
+  check('ダッシュボード: 読み取れない休止時間の件数を知らせる', await page.evaluate(() => (document.getElementById('downtime-unreadable')?.innerText || '').includes('合計に入っていません')));
+  check('ダッシュボード（375px）: 横にはみ出さない', await noOverflow());
+  for (const t of [dt, dtBad]) if (t.json?.id) await api(`/api/troubles/${t.json.id}`, { method: 'DELETE' });
+
+  // 部品の使用実績
+  const up = await api('/api/parts', { method: 'POST', body: { name: 'E2E使用実績部品', model_no: 'E2E-USAGE-1', quantity: 10, safety_stock: 2 } });
+  await api(`/api/parts/${up.json?.id}/transaction`, { method: 'POST', body: { type: 'out', quantity: 3 } });
+  await api(`/api/parts/${up.json?.id}/transaction`, { method: 'POST', body: { type: 'adjust', quantity: 1 } }); // 棚卸調整は使用に数えない
+  const upd = await api(`/api/parts/${up.json?.id}`);
+  check('部品API: 使用実績は出庫だけ（合計3・12か月）', upd.json?.usage?.total_out === 3 && upd.json.usage.months.length === 12, JSON.stringify(upd.json?.usage).slice(0, 160));
+  await page.goto(`${BASE}/pages/parts?id=${up.json?.id}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#parts-usage', { timeout: 10000 }).catch(() => {});
+  const usageText = await page.evaluate(() => document.getElementById('parts-usage')?.innerText || '');
+  check('部品詳細: 使用実績（合計・月平均・12本の棒）が出る', usageText.includes('合計 3') && usageText.includes('月平均')
+    && await page.evaluate(() => document.querySelectorAll('#parts-usage .usage-col').length === 12), usageText.slice(0, 80));
+  check('部品詳細（375px）: 横にはみ出さない', await noOverflow());
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // バックアップを取った記録
+  await page.evaluate(async () => { await (await fetch('/api/admin/backup?format=sql')).text(); });
+  const bs = await api('/api/admin/backup-status');
+  check('バックアップ: SQL を取ると前回の日時が記録される（注意は出ない）', bs.json?.last?.format === 'sql' && bs.json.days_since === 0 && bs.json.overdue === false, JSON.stringify(bs.json));
+  await page.goto(`${BASE}/pages/admin?tab=backup`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => (document.getElementById('backup-status')?.innerText || '').includes('前回のバックアップ'), { timeout: 10000 }).catch(() => {});
+  check('管理画面: バックアップに前回の日時が出る', await page.evaluate(() => (document.getElementById('backup-status')?.innerText || '').includes('今日')));
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  check('ホーム: バックアップを取ったばかりなら注意は出ない', await page.evaluate(() => document.getElementById('backup-alert')?.hidden === true));
+
+  // 画面エラーの自動記録（わざとエラーを起こす → 記録され、管理画面でまとめて見える）
+  await page.goto(`${BASE}/pages/help?e2e=secret-query`, { waitUntil: 'networkidle' });
+  const errBefore = pageErrors.length;
+  await page.evaluate(() => { setTimeout(() => { throw new Error('E2E画面エラー記録テスト'); }, 0); });
+  let logged = null;
+  for (let i = 0; i < 20 && !logged; i++) {
+    await page.waitForTimeout(300);
+    logged = ((await api('/api/client-errors')).json?.errors || []).find((e) => e.message.includes('E2E画面エラー記録テスト')) || null;
+  }
+  pageErrors.splice(errBefore); // わざと起こしたエラーは、以降の「pageerror なし」の確認から外す
+  check('画面エラー: 自動で記録される（種類・ページ・版つき）', !!logged && logged.kind === 'js' && /^v\d+\.\d+\.\d+$/.test(logged.app_version || ''), JSON.stringify(logged).slice(0, 200));
+  check('画面エラー: ページはパスだけ（クエリは記録しない）', logged?.page === '/pages/help', String(logged?.page));
+  await page.setViewportSize({ width: 375, height: 720 });
+  await page.goto(`${BASE}/pages/admin?tab=client-errors`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#client-error-list', { timeout: 10000 }).catch(() => {});
+  check('管理画面: エラー記録タブに出る', await page.evaluate(() => (document.getElementById('client-error-list')?.innerText || '').includes('E2E画面エラー記録テスト')));
+  check('管理画面のエラー記録（375px）: 横にはみ出さない', await noOverflow());
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
+
 // ---------- 10. オフラインでの静的表示 ----------
 section('10. オフラインでアプリが起動する（SWプリキャッシュ）');
 await context.setOffline(true);

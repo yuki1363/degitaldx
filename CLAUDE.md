@@ -133,6 +133,7 @@
 - **設備が一覧に無いとき**: 設備欄の下に「＋ 設備台帳で追加」（別タブで台帳の新規登録へ）と「🔄 一覧を更新」を**常に**出す。さらに設備欄（`buildEquipSelect`。`.unmatchedText`＝入力したのに一覧のどれにも一致しない文字）に一覧に無い名前を入れると、「設備台帳に追加してください」の案内（別タブで台帳を開く＋「🔄 追加したので一覧を更新」＝`setEquipment`）を出し、**そのままでは保存させない**（黙って設備なしの記録になるのを防ぐ）
 - **AI（原因・対策の提案）は廃止**: 入力欄のボタンと `/api/ai/suggest-trouble`・`ai_enabled` は削除した。過去事例の確認は、入力欄の類似トラブル事例の自動表示と、ホームの横断検索11で行う（トラブル一覧の上に検索欄は置かない）。画像を読むAI（計器・銘板。`AI_VISION_ENABLED=1` のときだけ）は別機能として残る
 - **帳票出力（トラブル報告書）**: 記録詳細から、管理者が登録したExcel用紙にデータを差し込んで出力できる（後述「帳票テンプレート」）。トラブル入力画面には、休止時間・休止区分(○選択)・有効性の確認・特記事項などの帳票用の項目が**ほかの入力欄と同じ枠に並ぶ**（「帳票の入力」という別の枠・見出しで区分けしない）。入力した値は `form_values_json` に保存→出力時に自動差込（出力時の再入力不要）。**調査日時・調査日付＝発生日時**（日時を二つに分けず統合。入力画面の欄の名前も「発生日時・調査日付」。`{{調査日時}}`・`{{調査日付}}`・`{{調査年月日}}`・`{{調査年}}`・`{{調査月}}`・`{{調査日}}` は発生日時から入る）。帳票用の項目は入力しやすい位置に分けて並べる（`slots`）: **休止区分は現象の上**、**対策の下に 有効性の確認 → 休止時間 → 略図 → 特記事項**の順（略図は管理画面で定義した項目〔カスタム項目または帳票テンプレートの入力項目〕で、名前が「略図」のものをこの位置に置く）、残り（整理NO等）はその下。休止時間は数字キーパッド。**トラブルの入力画面には写真・動画の欄を置かない**（詳細画面の「添付写真・ファイル」から追加・削除できる。過去に保存した添付は消えない）。**設備・現象・原因・対策・記録者は、トラブル記録の入力を**そのまま反映する**（帳票用の入力欄は出さない＝同じことを二度入力しない）。Excel 用紙の差込タグ名は変えず、出力時に記録から差し込む（調査対象←設備名／トラブル名←現象／処置←対策／原因←原因／担当者印←記録者の苗字を自動で押印。**用紙のタグ名は `{{担当者印}}`・`{{担当印}}`・`{{担当社印}}` のどれでも押す**＝工事連絡書と同じ赤シャチハタ）。**記録の値が空のときだけ、以前に帳票入力欄へ保存した値が使われる**。テンプレートがこれらのタグを入力項目として定義していても入力欄には出さない（`RECORD_TAGS`）。入力欄に並ぶのは、整理NO・休止時間・休止区分(○選択)・有効性の確認・特記事項など、記録に無い項目だけ（標準項目は `js/permit-fields.js` の `TROUBLE_REPORT_FIELDS`）。出力時にだけ反映し、データは二重に持たない（`js/report-autofill.js` の `applyReportFallbacks`。単体テスト `tests/unit-autofill.mjs`）
+- **休止時間の見える化**: 帳票用の入力（休止時間・休止区分・有効性の確認・特記事項など＝`form_values_json`）は、以前は Excel の帳票にしか出なかった。**詳細画面に表示**し（`reportValueRows`）、**CSV に「休止時間（分）」「休止区分」の列**を足し、ダッシュボード（08）で合計する。休止時間は文字で保存したまま（帳票にそのまま差し込むため）、集計のときに `js/downtime.js` の `parseDowntimeMinutes` で分に直す（「30」「30分」「1時間30分」「1:30」・全角数字は読み取る。上限は1件30日）。**読み取れない書き方（「半日」など）は 0 にせず集計から外し、件数を画面に出す**。入力欄は読み取れないときその場で注意を出すが、保存は止めない。`js/downtime.js` は画面とサーバー（`functions/api/stats/index.js` が `../../../js/downtime.js` を import）の両方で使う純粋関数（単体テスト `tests/unit-downtime.mjs`）
 **テーブル**: `trouble_record`（id, equipment_id, category_id, occurred_at, phenomenon, cause, countermeasure, attachments_json, custom_fields_json, form_values_json, +監査列）、`trouble_category`（ジャンルマスタ）
 ### 05. 部品在庫管理（PowerAppsからのデータ移行あり）
 - 使用部品を記録すると在庫に自動反映。+/−ボタンでワンタップ更新
@@ -154,6 +155,7 @@
   - **差分マージ（`mode=merge`）は CSV で対応付けた列だけを更新する**（対応付けていない列はキーごと送られないので既存値を保つ。全列更新だと型番と部品名だけのマージで在庫数・場所等が0／空になった。`functions/api/parts/import.js` の `MERGE_UPDATABLE`）。**在庫数が変わる分は入出庫履歴に「調整（CSV取込（差分マージ））」として残し、監査ログに `quantity_changes:[{id,from,to}]` を残す**（取り込み・履歴・監査は1つの batch）
   - **差分マージは同じ型番を別のライン・機器で持つ部品を取り違えない**: 型番で突き合わせ、CSV に設備名（`line_name`）・機器名（`equipment_name`）があればそれも一致を条件にする。型番が1件に決まるときは従来どおり型番だけで更新。決められない行（同じ型番が複数あり、設備名・機器名も対応付けていない）は取り込まず、行番号つきの理由を返す（黙って1件だけ更新しない）。設備名・機器名が既存のどれとも違う同じ型番は別の部品として追加。1回の取り込みで同じ部品を指す行が重なったら2行目を飛ばす（画面の重複検出も同じキー。`functions/api/parts/import.js`）。単体テスト `tests/unit-parts-import.mjs`
   - 移行後は本アプリを正とし、PowerApps側は参照のみ → 廃止
+- **使用実績（直近12か月の月別出庫数）**: 部品の詳細に、今月を含む12か月の月ごとの出庫数・合計・月平均を出す（必要数や発注数を決める目安。`GET /api/parts/:id` の `usage`・`functions/api/_lib/parts-usage.js`）。**出庫（type='out'）だけを数え、棚卸調整・入庫は含めない**。月は JST。棒は DOM で描く（部品ページはグラフライブラリを読まない。`usageCard`）。単体テスト `tests/unit-parts-usage.mjs`
 **テーブル**: `parts_inventory`（+監査列）、`parts_transaction`（入出庫履歴、client_tx_id＝識別番号）
 ### 06. 設備台帳
 - 設備の基本情報、関連資料、トラブル・点検・修理履歴を一元管理
@@ -177,6 +179,7 @@
 **テーブル**: `daily_report`（id, reporter_id, report_date, category_id, body, +監査列。`linked_records_json` 列は残るが未使用＝紐づけ機能は廃止）、`report_category`（カテゴリマスタ）
 ### 08. ダッシュボード・レポート出力
 - **ダッシュボードのグラフは会計年度（10月始まり9月終わり）で固定**し、「◀ 前の年度／次の年度 ▶」で切り替える（今年度より先へは進めない。年度は JST の今日で決める。`js/report-period.js` の `fiscalYearOf`／`fiscalYearRange`／`fiscalMonths`）。グラフは トラブル月別推移（10月〜翌9月の12か月・データの無い月は0件）・**ジャンル別の月推移（積み上げ棒グラフ。`GET /api/stats` の `trouble_trend_by_category`＝月×ジャンル）**・ジャンル別トラブル（年度合計）と、「トラブル」件数カード。**画面の見出し・ホームのタイルは「ダッシュボード・保全レポート」**。**カスタムグラフは廃止**。タブは「サマリー/グラフ（年度）」「📄 レポート（印刷用）」の2つで横スクロールさせない（`.tab-bar-fit`）。依頼〔未完了〕・日報のカード、業務依頼ステータス内訳、設備別の故障件数はサマリーには出さず、レポートタブだけに出す。**期間（今週・先週・今月・先月・直近6ヶ月・FROM〜TO）とトラブルCSVはレポートタブだけ**
+- **休止時間の集計**: `GET /api/stats` の `downtime`（`total_minutes`・`counted`＝入力のあった件数・`unreadable`＝読み取れず合計に入っていない件数・`by_month`〔月×休止区分〕・`by_kind`）と、`equipment_trouble_counts` の各行の `downtime_minutes`。サマリーに「休止時間」カードと「休止時間の月推移（休止区分別・積み上げ）」グラフ、レポートに概要のタイル・「休止時間（休止区分別）」・設備別の休止時間の列・トラブル一覧の休止時間の列を出す。読み取れない記録があれば件数を注意書きで出す（04 参照）
 - カスタムグラフ（集計軸・期間・対象設備を選択）
 - **役割分担（機能重複の解消）**: ダッシュボードは「**見る（グラフ）**」に専念する。データの絞り込み抽出→一覧表→CSV出力は**横断検索（11）に集約**した。以前あった「抽出レポート」タブは廃止し、同等のフィルタ＋CSV出力を横断検索側へ移設済み（探す＆出す=横断検索／見る=ダッシュボード）
 - **例外: トラブル記録CSV**: ダッシュボード上部の「トラブル記録（期間内）📥 CSV」で、集計期間（FROM〜TO）のトラブル記録をそのままCSV出力できる（UTF-8/BOM・Shift_JIS）。列は04トラブル一覧のCSVと共通（`js/trouble-csv.js` の `TROUBLE_CSV_COLUMNS`／`exportTroubleCsv`。取得は既存 `GET /api/troubles?from=&to=` でAPI変更なし）
@@ -190,6 +193,8 @@
 - マスタ管理画面: 点検項目・設備・部品・トラブルジャンル・ユーザーの各マスタを画面から**追加・削除可能**
 - マスタ変更履歴（`master_history`）の閲覧と**旧バージョンへの復元**。電気設備点検の設定（`electrical_config`。設備種別単位で id 列が無いため `restoreElectricalConfig` で別扱い）と帳票テンプレート（更新前の定義＝入力項目 `fields_json` を含めて退避）も戻せる
 - **バックアップ**（管理画面「バックアップ」タブ・admin のみ）: JSON／SQLダンプ（スキーマ＋データ）／**表ごとのCSV（ZIP）**の3形式。対象は `functions/api/admin/backup.js` の `TABLES`（電気設備点検・電気設定・帳票テンプレ・年度リセット履歴・チャットの👍／既読を含む。`push_subscriptions` は端末の暗号鍵を含むため意図的に除外）。`id` 列が無いテーブルもあるため `ORDER BY rowid`。**新しいテーブルを `schema.sql` に足したら `TABLES` にも足す**（足し忘れは `tests/unit-backup.mjs` が検出する）。CSV(ZIP)は管理画面側で JSON を取得して作る（`js/backup-csv.js`＋JSZip。BOM付きUTF-8・`escCsv` 経由なので `=` 等で始まる値は先頭に `'` が付く＝閲覧・集計用で、復元にはJSON／SQLを使う）。R2の写真・動画は含まれない。**ページ送りは keyset（`rowid > 前回`）**で OFFSET を使わない（OFFSET は読み飛ばした行も読み取り行数に数えるため、約6万件で1回約199万行→約7万行）。件数の事前 COUNT はしない。**途中で読み取りに失敗したらダウンロード自体を失敗させる**（途中までのファイルを成功に見せない）。pull 方式のストリームでメモリに溜めない。`request_dedupe` も対象
+- **バックアップの取り忘れ防止**: JSON／SQL のバックアップを**最後まで出し終えたとき**に監査ログへ記録する（`table_name='backup'`・`action='create'`・`record_id=0`・`diff` に形式。新しい表は作らない。`streamFrom` の `onDone`）。CSV(ZIP) 用の取得（`?purpose=csv`）と途中でやめたダウンロードは数えない。`GET /api/admin/backup-status`（admin のみ）が前回の日時・取った人・経過日数・`overdue`（記録なし、または `BACKUP_REMIND_DAYS`＝35日超）を返す。管理画面「バックアップ」の先頭に前回の日時を出し、`overdue` のときは**管理者のホームにだけ**1行の注意（`#backup-alert`・`js/home-init.js`）を出す。**通知（ベル・プッシュ）にはしない**（通知はチーム共有で管理者以外にも届くため）。単体テスト `tests/unit-backup-status.mjs`
+- **画面エラーの自動記録**（管理画面「エラー記録」タブ・admin のみ）: 現場の端末で起きたエラーは申告が無いと分からなかったため、`js/error-report.js` が ①画面のエラー（JavaScript の例外・未処理の Promise）②読み込めなかったスクリプト・スタイル ③API のサーバーエラー（5xx。`js/api.js` が `window.__reportClientError` を呼ぶ）を `POST /api/client-errors` へ自動で送る。**`js/error-report.js` はモジュールではない普通のスクリプトで、全ページの `<head>` の先頭（charset の直後）で読み込む**（モジュールの読み込み失敗も拾うため。**新しいページを作るときもこの1行を入れる**）。送るのはエラーの文・場所・ページのパス（クエリは付けない＝検索語や本文を送らない）・版（Service Worker のキャッシュ名）だけで、入力内容は送らない。同じエラーは1回・1ページ表示につき5件・1端末1時間20件まで、電波が無いときは送らない。サーバーは1人1時間30件まで（`MAX_PER_HOUR`。超えた分は保存せず 200 を返す＝画面を止めない）・文字数を切り詰める。記録は全ログインユーザー（閲覧のみも）、一覧は admin のみ。**`client_error_log` は業務データではなく技術的な記録**のため共通監査列・論理削除・監査ログは持たず、90日より古い記録は自動で物理削除する（表は API が初回に自動作成）。管理画面は同じエラー（種類・内容・場所・ページ）を1行にまとめ、回数・最後の日時・起きた人・端末の種類・版を出す（`js/client-error-group.js`）。単体テスト `tests/unit-client-errors.mjs`
 - `audit_log` の閲覧画面（誰がいつ何を追加・編集・削除したかを検索）
 - **機能別の利用状況**（管理画面「利用状況」タブ・admin のみ）: 監査ログを機能（テーブル）ごとに数え、登録・更新・削除の件数と最終操作日時、期間内に操作した人数を表示する（直近30日・90日・1年。`GET /api/admin/feature-usage`・`functions/api/admin/feature-usage.js` の `FEATURE_LABELS` に無いテーブルは「その他」）。期間内に一度も使われていない主要機能も 0 件で並べ、使われていない機能が分かる。**個人ごとの操作数は出さない**（人数だけ）。画面を見ただけの閲覧は監査ログに残らないため数えられない。単体テストは `tests/unit-feature-usage.mjs`
 - 削除済みデータの閲覧・復元（論理削除の復元）。対象はトラブル・業務依頼・部品・点検・日報・保全計画・設備・ユーティリティ日報・電気設備点検・帳票テンプレート（`admin/restore/index.js` の `ALLOWED_TABLES`）。**200件ずつページ送り**（`offset`。大量削除時も全件を復元できる）。ユーティリティ日報は同じ日の記録があると 409（1日1件）。**部品は同じ型番・部品名の部品が既にあると 409**（CSVの全置き換えで作り直された部品の旧版を戻すと重複するため）。重複の確認・復元・監査は1つの batch の条件付き UPDATE（同時操作でもすり抜けない）。最後のページの最後の1件を復元したら前のページを表示する
@@ -197,7 +202,7 @@
 - **開発用ファイルの配信止め**: ビルドなしでリポジトリ全体を配信するため、`CLAUDE.md`・`schema.sql`・`wrangler.toml`・`tests/`・`docs/` 等も URL で取得できた。ルートの Functions ミドルウェア（`functions/_middleware.js`・判定は `functions/api/_lib/blocked-paths.js`）が**許可リスト**（ホーム・`js/ css/ icons/ pages/ electrical/ api/ .well-known/`・`sw.js`・`manifest.json`）以外を 404 にする（新しい開発用ファイルを足しても自動で隠れる）。`_routes.json` は「全部 Functions を通す（`include: /*`）」を基本に、HTML ページ・css・アイコン・ホーム・`sw.js`・`manifest.json` だけを**ファイル名の完全一致**で除外して静的配信のままにする（HTML の CSP などのヘッダーを静的配信側に任せるため）。**フォルダ単位の除外（`/js/*`）は使わない**: `wrangler pages dev` の実測で、`/js/..%2fschema.sql`・`//schema.sql`・`/%43LAUDE.md` から本物のファイルが返った。パスは正規化（%デコード3回まで・連続スラッシュの圧縮・`..`／バックスラッシュ／NULの拒否・小文字化）してから判定する。**JS は Functions を通る＝取得のたびに Workers の無料枠を数える**（無料枠の注記参照）。**新しいページ（`pages/*.html`）を足したら `_routes.json` の exclude にも足す**（足し忘れても動くが Functions を通る。`tests/unit-blocked-paths.mjs` が検出する）。本番での `_routes.json` の細かい挙動は未確認（ローカルでの確認のみ）。根本対策は出力ディレクトリを `public/` 等へ分けること（未実施）
 - **ESLint（静的検査）**: `cd tests && npm run lint`（`npm test` の先頭でも実行＝CIで毎回）。設定は `tests/eslint.config.mjs`。未定義変数・重複キー・到達しないコード等の書き間違いをエラーにする（未使用変数は警告）。ビルド工程なしの方針のため、検査の依存は `tests/node_modules` だけ
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）。**タグ確認機能**: テンプレ編集画面の「🔍 Excelのタグを確認」で、アップロード済みExcelの `{{タグ}}` を抽出し、差込対象と突合して「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの（＝出力されない）」を表示（休止時間が出ない・○が付かない等のタグ名不一致を管理者が自力で発見できる。`js/excel-fill.js` の `extractTemplateTags`）
-**テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
+**テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`client_error_log`（kind[js/promise/resource/api], message, source, stack, page, app_version, user_agent, created_by, created_at）、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
 ### 10. チャット（廃止）
 - 使われていないため**画面・API・ホームのタイル／未読表示・自動削除処理は削除済み**（`pages/chat.html`・`js/chat.js`・`functions/api/chat/`）。**テーブル（`chat_messages`・`chat_reactions`・`chat_channel_reads`）と過去データは残し**、バックアップ（`TABLES`）の対象のまま。性能索引 `idx_chat_messages_pinned` と、`css/style.css` の `.chat-*` スタイルも未使用のまま残してある（無害なため）。添付ファイルがR2に残っている場合は、管理画面「ファイル容量」から管理者が必要に応じて削除する。チャットの代わりの引き継ぎは日報（07）を使う
 ### 11. 横断検索（過去データの検索・抽出）
@@ -265,6 +270,8 @@
 ├── js/
 │   ├── api.js auth.js nav.js util.js home-tabs.js   # 共通（fetch・権限・ナビ・DOMヘルパ）
 │   ├── history-diff.js history-view.js              # 変更履歴の差分表示（純粋関数＋共通部品）
+│   ├── error-report.js client-error-group.js        # 画面エラーの自動記録（全ページの先頭で読む）・管理画面のまとめ表示
+│   ├── downtime.js                                  # 休止時間を分に直す・集計（画面とサーバーで共有）
 │   ├── offline-queue.js draft.js                    # オフライン送信キュー・入力下書き
 │   ├── files.js admin-files.js                      # R2アップロード（縮小・EXIF除去）・容量管理
 │   ├── csv.js trouble-csv.js                        # CSV出力（インジェクション対策）
@@ -298,11 +305,12 @@
 │   ├── notifications/ push/                        # 通知・Web Push
 │   ├── search/index.js     # 11 横断検索
 │   ├── stats/              # 集計
+│   ├── client-errors/      # 画面エラーの自動記録（POST=全員／GET=admin）
 │   ├── files/              # R2アップロード/取得
 │   ├── print-templates/    # 帳票テンプレート
 │   ├── ai/                 # Workers AI（read-meter / extract-equipment＝画像を読むAIのみ）。画面から呼ばれない API（analyze-trouble / parse-search / parse-trouble-pdf / chat）と AI アシスタント FAB は削除済み
 │   ├── users/
-│   └── admin/              # audit/ restore/ masters/ users/ backup.js usage.js normalize.js
+│   └── admin/              # audit/ restore/ masters/ users/ backup.js backup-status.js usage.js normalize.js
 ├── tests/                  # 単体テスト・E2Eテスト（実ブラウザ）・ESLint（cd tests && npm test。lint のみは npm run lint）
 ├── docs/                   # 現場向け使い方ガイド
 ├── schema.sql              # D1テーブル定義
