@@ -18,6 +18,7 @@ for (const st of schema.split(/;\s*(?:\n|$)/)) {
 const wrap = (sql, args = []) => ({
   bind: (...a) => wrap(sql, a),
   async all() { return { results: sqlite.prepare(sql).all(...args) }; },
+  async run() { sqlite.prepare(sql).run(...args); return { success: true }; }, // バックアップを取った記録（監査ログ）
 });
 const db = { prepare: (sql) => wrap(sql) };
 
@@ -53,11 +54,12 @@ ok('admin 以外は403', viewer.status === 403);
 // ---- ページ送り（keyset）: 1000件×2.5ページでも重複・欠落が無い ----
 for (let i = 0; i < 2500; i++) sqlite.exec(`INSERT INTO audit_log (table_name, record_id, action, changed_by) VALUES ('x', ${i}, 'create', 'u')`);
 const big = await (await call()).json();
-const ids = big.tables.audit_log.map((r) => r.record_id);
+// バックアップを取った記録（table_name='backup'）も監査ログに入るため、ここでは投入した 'x' の行だけを数える
+const ids = big.tables.audit_log.filter((r) => r.table_name === 'x').map((r) => r.record_id);
 ok('2500件がページをまたいでも重複・欠落なく出る（JSON）', ids.length === 2500 && new Set(ids).size === 2500, `n=${ids.length}`);
 ok('内部の並び替え用の列（_rid）が出力に混ざらない', !('_rid' in big.tables.audit_log[0]));
 const bigSql = await (await call('?format=sql')).text();
-ok('SQLダンプも2500件を重複・欠落なく出し、件数コメントが付く', (bigSql.match(/^INSERT INTO "audit_log"/mg) || []).length === 2500 && /-- Table: audit_log: 2500 rows/.test(bigSql));
+ok('SQLダンプも2500件を重複・欠落なく出し、件数コメントが付く', (bigSql.match(/^INSERT INTO "audit_log" .*'x', \d+, 'create'/mg) || []).length === 2500 && /-- Table: audit_log: \d+ rows/.test(bigSql));
 ok('SQLダンプの末尾に終了マーカーがある（途中で切れていない目印）', bigSql.trimEnd().endsWith('-- ===== バックアップ終了 ====='));
 
 // ---- 読み取り行数: OFFSET ではなく keyset（WHERE rowid > ?）で読んでいる ----

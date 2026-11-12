@@ -7,6 +7,7 @@ import { el, render, formatDate, formatDateTime, maskEmail, jstTodayStr } from '
 import { renderPrintTemplates } from '/js/print-templates.js';
 import { renderFileManager } from '/js/admin-files.js';
 import { buildEquipSelect } from '/js/equip-picker.js';
+import { groupClientErrors } from '/js/client-error-group.js';
 
 const app = document.getElementById('app');
 let currentUser = null;
@@ -27,6 +28,7 @@ const TABS = [
   { id: 'print-templates', label: '帳票テンプレート' },
   { id: 'backup',  label: 'バックアップ' },
   { id: 'feature-usage', label: '利用状況' },
+  { id: 'client-errors', label: 'エラー記録' },
 ];
 
 let activeTab = 'users';
@@ -51,6 +53,7 @@ async function loadTab() {
   if (activeTab === 'print-templates') await renderPrintTemplates(tabContent);
   if (activeTab === 'backup')  await renderBackup();
   if (activeTab === 'feature-usage') await renderFeatureUsage();
+  if (activeTab === 'client-errors') await renderClientErrors();
 }
 
 // ---------------- ユーザー管理 ----------------
@@ -788,6 +791,43 @@ async function renderBackup() {
       el('p', { class: 'hint', style: 'margin-top:4px' }, 'D1データベースはCloudflareのTime Travel機能で過去30日間の任意の時点に復元できます。万一の際はCloudflareダッシュボードから操作してください。'),
     ]),
   ]);
+}
+
+// ---------------- エラー記録（画面エラーの自動記録） ----------------
+
+const ERROR_KIND_LABELS = { js: '画面のエラー', promise: '処理の失敗', resource: '読み込み失敗', api: 'サーバーエラー' };
+
+async function renderClientErrors() {
+  const res = await api.get('/api/client-errors');
+  const groups = groupClientErrors(res.errors);
+  render(tabContent, el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title' }, 'エラー記録'),
+    el('p', { class: 'hint' }, `利用者の端末で起きた画面のエラー・読み込めなかったファイル・サーバーエラーを自動で記録しています（入力した内容は記録しません）。同じエラーは1行にまとめています。${res.retention_days}日より古い記録は自動で消えます。`),
+    res.truncated ? el('p', { class: 'hint' }, '件数が多いため、新しい順に300件までを表示しています。') : null,
+    groups.length === 0
+      ? el('p', { class: 'empty' }, '記録されたエラーはありません。')
+      : el('div', { class: 'row-list', id: 'client-error-list' }, groups.map((g) =>
+          el('details', { class: 'client-error' }, [
+            el('summary', {}, [
+              el('span', { class: `action-badge ${g.kind === 'api' ? 'is-delete' : 'is-update'}` }, ERROR_KIND_LABELS[g.kind] || g.kind),
+              el('span', { class: 'client-error-msg' }, g.message),
+              el('span', { class: 'list-item-sub' }, `${g.count}回・最後 ${formatDateTime(g.last_at)}・${g.page || 'ページ不明'}`),
+            ]),
+            el('div', { class: 'client-error-body' }, [
+              infoLine('場所', g.source),
+              infoLine('起きた人', [...g.users].join('、')),
+              infoLine('端末', [...g.devices].join('、')),
+              infoLine('アプリの版', [...g.versions].join('、')),
+              infoLine('最初', formatDateTime(g.first_at)),
+              g.stack ? el('pre', { class: 'client-error-stack' }, g.stack) : null,
+            ]),
+          ]))),
+  ]));
+}
+
+function infoLine(label, value) {
+  if (!value) return null;
+  return el('div', { class: 'list-item-sub' }, `${label}: ${value}`);
 }
 
 // ---------------- 起動 ----------------

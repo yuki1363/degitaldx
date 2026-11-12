@@ -39,6 +39,7 @@ export const TABLES = [
   'electrical_inspection', 'electrical_config',
   'parts_equipment',
   'request_dedupe',
+  'client_error_log',
 ];
 
 // 1テーブルを一度に読む件数。小さすぎるとクエリ数が増えて遅く、大きすぎるとメモリを使う
