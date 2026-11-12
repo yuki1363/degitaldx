@@ -650,6 +650,20 @@ async function renderFeatureUsage() {
 // ---------------- バックアップ ----------------
 
 async function renderBackup() {
+  // 前回バックアップ（JSON／SQL）を取った日時。取り忘れに気づけるよう、バックアップ画面の先頭に出す
+  const statusBox = el('div', { id: 'backup-status' }, []);
+  const loadStatus = async () => {
+    try {
+      const st = await api.get('/api/admin/backup-status');
+      const text = st.last
+        ? `前回のバックアップ: ${formatDateTime(st.last.at)}（${st.days_since === 0 ? '今日' : `${st.days_since}日前`}・${st.last.by}・${st.last.format === 'sql' ? 'SQL' : 'JSON'}）`
+        : '前回のバックアップ: まだ記録がありません（JSON か SQL をダウンロードすると記録されます）';
+      render(statusBox, el('p', { class: st.overdue ? 'notice is-warning' : 'notice' },
+        st.overdue && st.last ? `${text}。${st.remind_days}日を超えています。ダウンロードして別の場所に保管してください。` : text));
+    } catch { render(statusBox, []); }
+  };
+  loadStatus();
+
   const makeDownloadBtn = (label, url, filename, resetLabel) => {
     const btn = el('button', { class: 'btn btn-primary', onclick: async () => {
       btn.disabled = true;
@@ -667,6 +681,7 @@ async function renderBackup() {
         a.download = filename.replace('DATE', date);
         a.click();
         URL.revokeObjectURL(a.href);
+        loadStatus(); // 取った日時を表示し直す
       } catch (err) {
         alert(`バックアップに失敗しました: ${err.message}`);
       } finally {
@@ -695,7 +710,8 @@ async function renderBackup() {
     csvBtn.disabled = true;
     csvBtn.textContent = '準備中…';
     try {
-      const res = await fetch('/api/admin/backup', { credentials: 'include' });
+      // purpose=csv: 復元に使えない形式なので「バックアップを取った記録」には数えない
+      const res = await fetch('/api/admin/backup?purpose=csv', { credentials: 'include' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error?.message || `エラー ${res.status}`);
@@ -735,6 +751,7 @@ async function renderBackup() {
   render(tabContent, [
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title' }, 'データバックアップ'),
+      statusBox,
       el('p', { class: 'hint' }, 'データベースの全テーブルをダウンロードします。定期的に保存しておくことで、万一に備えられます。'),
       el('ul', { class: 'hint', style: 'margin-top:4px;padding-left:18px' }, [
         el('li', {}, '含まれるデータ: 設備台帳・点検結果・トラブル記録・業務依頼・部品在庫・保全計画・日報・ユーティリティ日報・電気設備点検（記録と設定）・帳票テンプレート・ユーザー・監査ログ など全テーブル（プッシュ通知の購読情報は端末の鍵を含むため対象外）'),

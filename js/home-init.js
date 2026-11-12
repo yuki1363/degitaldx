@@ -28,6 +28,7 @@ try {
   document.getElementById('user-role').textContent = ROLE_LABELS[user.role] || user.role;
   document.getElementById('user-chip').hidden = false;
   showStorageAlertForAdmin(user);
+  showBackupReminderForAdmin(user);
   loadHomeTabs(document.getElementById('home-overview'));
   // デプロイ確認用: いま本番で動いている Functions のバージョンを表示する
   // （/api/me は SW にキャッシュされないので、UIキャッシュの新旧に関係なく最新が分かる）
@@ -81,5 +82,23 @@ async function showStorageAlertForAdmin(user) {
     alert.hidden = false;
   } catch {
     // 容量情報の取得失敗はホーム表示を妨げない
+  }
+}
+
+// 管理者向け: バックアップ（JSON／SQL）を長く取っていないときの注意。通知（ベル・プッシュ）にはしない
+//   （通知はチーム共有で、管理者以外にも届くため）。記録が無い・35日を超えたときだけ1行出す
+async function showBackupReminderForAdmin(user) {
+  if (!hasRole(user, 'admin')) return;
+  try {
+    const st = await api.get('/api/admin/backup-status');
+    if (!st.overdue) return;
+    const box = document.getElementById('backup-alert');
+    if (!box) return;
+    box.textContent = st.last
+      ? `💾 バックアップを ${st.days_since} 日取っていません。「管理」→「バックアップ」からダウンロードしてください ›`
+      : '💾 バックアップの記録がありません。「管理」→「バックアップ」から JSON か SQL をダウンロードしてください ›';
+    box.hidden = false;
+  } catch {
+    // 取得失敗はホーム表示を妨げない
   }
 }

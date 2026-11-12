@@ -120,6 +120,9 @@ body {
   background: var(--color-warning-bg);
   color: var(--color-warning);
 }
+/* ホームの「バックアップを取っていません」（管理者だけ・押すと管理画面のバックアップへ） */
+a.notice { display: block; text-decoration: none; }
+a.notice[hidden] { display: none; }
 
 /* ログイン切れの疑い時に出す「再ログイン」バナー（js/api.js の showReloginBanner） */
 .relogin-banner {

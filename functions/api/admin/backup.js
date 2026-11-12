@@ -14,6 +14,13 @@
 //   ★ 引っ張り方式（pull）で書き出すので、受け取る側が遅いときは読み込みも待つ（メモリに溜めない）。
 import { requireRole } from '../_lib/auth.js';
 import { nowIso } from '../_lib/util.js';
+import { writeAuditLog } from '../_lib/audit.js';
+
+// バックアップを取った記録（取り忘れ防止）。監査ログに table_name='backup'・action='create' で残す
+// （新しい表は作らない。「誰がいつ全データを持ち出したか」も監査ログで分かる）。
+//   記録するのは JSON／SQL を最後まで出し終えたときだけ（途中で失敗したものは数えない）。
+//   CSV(ZIP) 用の取得（?purpose=csv）は復元に使えないので数えない。
+export const BACKUP_AUDIT_TABLE = 'backup';
 
 // 対象テーブル。push_subscriptions は端末の暗号鍵（p256dh/auth）を含み、バックアップに残す価値が低い
 // （再購読すれば作り直せる）ため意図的に除外している
@@ -169,7 +176,8 @@ async function* sqlChunks(db) {
 }
 
 // 非同期ジェネレーター（文字列を順に出す）→ 引っ張り方式のストリーム。途中の失敗はストリームのエラーにする
-function streamFrom(makeGen, label) {
+//   onDone: 最後まで出し終えたときに1回だけ呼ぶ（バックアップを取った記録）。失敗してもダウンロードは成功のまま
+function streamFrom(makeGen, label, onDone = null) {
   const ENC = new TextEncoder();
   let it;
   return new ReadableStream({
@@ -177,8 +185,13 @@ function streamFrom(makeGen, label) {
       try {
         it ??= makeGen();
         const { value, done } = await it.next();
-        if (done) controller.close();
-        else controller.enqueue(ENC.encode(value));
+        if (done) {
+          if (onDone) {
+            try { await onDone(); }
+            catch (err) { console.error(`backup(${label}) record failed:`, err && err.stack ? err.stack : err); }
+          }
+          controller.close();
+        } else controller.enqueue(ENC.encode(value));
       } catch (err) {
         console.error(`backup(${label}) failed:`, err && err.stack ? err.stack : err);
         controller.error(err);
@@ -194,12 +207,19 @@ export async function onRequestGet({ request, env, data }) {
   const denied = requireRole(data.user, 'admin');
   if (denied) return denied;
 
-  const format = new URL(request.url).searchParams.get('format') || 'json';
+  const sp = new URL(request.url).searchParams;
+  const format = sp.get('format') || 'json';
   const db = env.DB;
   const date = nowIso().slice(0, 10);
+  const record = sp.get('purpose') === 'csv'
+    ? null
+    : () => writeAuditLog(db, {
+        tableName: BACKUP_AUDIT_TABLE, recordId: 0, action: 'create', changedBy: data.user.email,
+        diff: { format: format === 'sql' ? 'sql' : 'json' },
+      });
 
   if (format === 'sql') {
-    return new Response(streamFrom(() => sqlChunks(db), 'sql'), {
+    return new Response(streamFrom(() => sqlChunks(db), 'sql', record), {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Content-Disposition': `attachment; filename="backup-${date}.sql"`,
@@ -208,7 +228,7 @@ export async function onRequestGet({ request, env, data }) {
   }
 
   // デフォルト: JSON
-  return new Response(streamFrom(() => jsonChunks(db), 'json'), {
+  return new Response(streamFrom(() => jsonChunks(db), 'json', record), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': `attachment; filename="backup-${date}.json"`,
