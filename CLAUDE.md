@@ -53,7 +53,6 @@
 - 全業務テーブルに共通列を持たせる: `created_by`, `created_at`, `updated_by`, `updated_at`, `deleted_by`, `deleted_at`
 - **削除は論理削除**（`deleted_at` に日時を入れる）を基本とし、削除者・削除日時が後から確認できる。一覧表示では除外し、管理画面の「削除済み」タブから閲覧・復元可能
   - **例外: `users` テーブルは物理削除**（`DELETE FROM users`）。各テーブルは作成者等をメール文字列で保持しFK参照しないため過去レコードは壊れない。物理削除で同一メールの再登録も可能になる。誰を削除したかは `audit_log`（diff にメール・氏名・権限）に残す
-  - **例外: `chat_messages` は送信から10日で物理削除**（短期の申し送り用途のため。📌ピン留め中は対象外・添付はR2ごと削除。削除件数と対象ID一覧を `audit_log` に記録。詳細は機能10）
 - すべての追加・編集・削除操作を `audit_log` テーブルに記録: `(id, table_name, record_id, action[create/update/delete/restore], changed_by, changed_at, diff_json)`
 - 各レコードの詳細画面に「変更履歴」表示（誰がいつ何を変えたか）。**変更した項目は「状態・担当者を変更」の要約と、タップで開く「項目：前 → 後」で見られる**（`js/history-view.js`。差分の解釈は純粋関数 `js/history-diff.js`＝記録形式が機能ごとに違う3種類〔`{項目:{from,to}}`・`{項目:{before,after}}`・`{before:{…},after:{…}}`〕とユーティリティ日報の `changed_items`〔点検項目ごとの前後〕・`attached_files` をそろえる。コードは日本語に直し、日時はJST、長文は60文字で切る）。日報・ユーティリティ日報も更新時に変えた項目だけ前→後で記録する（以前は新しい値だけで出せなかった）。以前の形式の履歴・登録・削除・復元は変更内容を出さない（操作そのものが履歴）。単体テスト `tests/unit-history-diff.mjs`
 - 操作者は Cloudflare Access のメールアドレスから自動取得（手入力させない）
@@ -199,22 +198,8 @@
 - **ESLint（静的検査）**: `cd tests && npm run lint`（`npm test` の先頭でも実行＝CIで毎回）。設定は `tests/eslint.config.mjs`。未定義変数・重複キー・到達しないコード等の書き間違いをエラーにする（未使用変数は警告）。ビルド工程なしの方針のため、検査の依存は `tests/node_modules` だけ
 - **帳票テンプレート管理**（管理者のみ）: 工事連絡書（01）・トラブル報告書（04）の指定用紙を作成。自社のExcel用紙の各セルに差込タグ（例 `{{予定日}}`）を入力して `.xlsx` をアップロード（R2・`/api/files`）。各詳細画面の「帳票出力」で、タグを実データに置換した `.xlsx` をダウンロードする（`js/excel-fill.js` が JSZip で内部XMLのタグ文字列だけ置換するため、書式・罫線・結合セル等のレイアウトは完全保持）。PDFが必要なら出力したExcelを開いて「PDFで保存／エクスポート」する（ブラウザ単体ではExcel→PDF自動変換ができないため）。管理は admin、出力は editor。API は `/api/print-templates`（GET=認証済み全員／POST・PUT・DELETE=admin）。`print_templates.image_file_id` にExcelの files.id を格納する（orientation は未使用）。差込タグは2種類: **自動タグ**（計画/トラブル記録から自動。トラブル報告書は発生年月日を `{{発生年}}{{発生月}}{{発生日}}` に分解可）と、**入力項目**（`fields_json`。出力時にフォームで入力）。入力項目の種類は 文字／複数行／日付／時刻／チェック(レ点=✓)／**○で1つ選択**（選んだ選択肢名のセル `{{故障休止}}` 等に○）／**ハンコ(赤丸印)**（苗字入力で `{{担当者印}}` セルに赤丸＋苗字の印影画像を埋め込み。`js/hanko.js`＝Canvas生成、`js/xlsx-image.js`＝xlsxにoneCellAnchorで画像追加）。**タグ確認機能**: テンプレ編集画面の「🔍 Excelのタグを確認」で、アップロード済みExcelの `{{タグ}}` を抽出し、差込対象と突合して「Excelにあるが対応項目が無いタグ（誤字）」「項目はあるがExcelにタグが無いもの（＝出力されない）」を表示（休止時間が出ない・○が付かない等のタグ名不一致を管理者が自力で発見できる。`js/excel-fill.js` の `extractTemplateTags`）
 **テーブル**: `users`（email, name, group_name, role, +監査列）、`master_history`、`audit_log`、`print_templates`（name, template_type[construction_notice/trouble_report], image_file_id, orientation, fields_json, +監査列）
-### 10. チャット
-- グループチャットでシフト間の引き継ぎ
-- ※ レコード別のコメントスレッドは運用簡素化のため**廃止**（UI・API とも削除済み。`comments` テーブルは過去データ保持のためスキーマに残置）
-- 画面表示中は**5秒ポーリング**でほぼ即時表示（タブが裏に回ったら停止して無駄なリクエストを出さない）。必要なら Durable Objects + WebSocket へ拡張
-- **既読数は送信者本人を数えない**（自分の投稿を自分が見ても既読は付かない。ホームの「◯人中N人既読」も送信者を除いた人数）
-- **👍確認リアクション**: 既読（=見た）とは別に「了解した」をタップで表明できる（editor以上・他人の投稿のみ。誰が確認したか名前で表示）。`chat_reactions` テーブルにトグル保存し audit_log に記録。`POST /api/chat/:id`（action=react）
-- **📌ピン留め**: 重要な申し送りをピン留めすると**10日自動削除の対象外**になり（メッセージを削除するとピン留めも外れる＝削除済みが永久に残らない）、画面上部のバーに常時表示（タップで該当メッセージへジャンプ・editor以上）。`chat_messages.pinned_at/pinned_by`。`PUT /api/chat/:id`（pinned=true/false）
-- **既読数・👍・📌はライブ更新**: `GET /api/chat` が直近20件の meta（既読数・リアクション）と pinned 一覧を返し、5秒ポーリングでリロードなしに反映される
-- **添付ファイルは本人がアップロードした未紐づけファイルのみ**（`POST /api/chat` の `file_ids`。それ以外は400）。投稿時に `attachFiles` で `related_table='chat_messages'` に紐づける。自動削除がR2から消すのも「そのメッセージに紐づくファイル」と紐づけ導入前の「投稿者本人の未紐づけファイル」だけ（他の記録のファイルIDを指定されて、そのファイルが消えるのを防ぐ）
-- **メッセージは送信から10日で自動削除**（物理削除・添付はR2ごと削除しfilesをpurged扱いに、リアクションも同時削除。**📌ピン留め中は対象外**。1件ずつ「ピン留めされていなければ本体を削除」し、消せたものだけ添付・リアクションを片付ける＝一覧を読んだ後にピン留めされても画像が消えない。チャットAPIのGET時に1時間に1回、waitUntilでバックグラウンド実行。DBとR2を軽く保つ）。**投稿時の audit_log には本文を残さない**（`channel`・`body_length`・`file_ids` のみ。`audit_log` は10日で消えず永続するため、本文を書くと「個人情報を入力しない／10日で消える」という運用前提と食い違う）
-- **投稿を記録化**: 本文のある投稿を📋ボタンから**トラブル記録／業務依頼／日報**へ昇格できる（editor以上）。10日で消える前に有益な情報を正式記録へ残す仕組み。遷移先フォームの既存URLプリフィルを流用（`/pages/trouble?new=1&phenomenon=` ／ `/pages/repair?new=1&title=&description=` ／ `/pages/report?new=1&body=`。日報は `new=1` が無いと一覧が開き本文が引き継がれない）。本文のみ引き継ぎ、写真は別途添付。**API・スキーマ変更なし**（`js/chat.js` の `buildRecordActions`）
-- **申し送りテンプレート**: 定型文（【引き継ぎ】【対応中】【要確認】【完了報告】【部品発注】）をタップで入力欄へ挿入（現場スマホの入力を軽く・書き方を統一。`js/chat.js` の `HANDOFF_TEMPLATES`）
-- **個人情報の入力防止**:
-  - 入力欄に注意書きを常設（「氏名・電話番号・住所等の個人情報は入力しないでください」）
-  - 送信時に電話番号・メールアドレス・郵便番号等のパターンを検知したら**警告ダイアログ**を表示（送信前に本人へ確認。検知はクライアント側の正規表現で実施）
-**テーブル**: `chat_messages`（+監査列、pinned_at/pinned_by）、`chat_reactions`（👍確認）
+### 10. チャット（廃止）
+- 使われていないため**画面・API・ホームのタイル／未読表示・自動削除処理は削除済み**（`pages/chat.html`・`js/chat.js`・`functions/api/chat/`）。**テーブル（`chat_messages`・`chat_reactions`・`chat_channel_reads`）と過去データは残し**、バックアップ（`TABLES`）の対象のまま。性能索引 `idx_chat_messages_pinned` と、`css/style.css` の `.chat-*` スタイルも未使用のまま残してある（無害なため）。添付ファイルがR2に残っている場合は、管理画面「ファイル容量」から管理者が必要に応じて削除する。チャットの代わりの引き継ぎは日報（07）を使う
 ### 11. 横断検索（過去データの検索・抽出）
 蓄積したトラブル記録・点検履歴・修理履歴・日報をキーワードで横断検索し、過去の事例をすぐに確認できるようにする（AIは使わない通常検索）。
 - 検索ボックスにキーワードを入力（例「コンプレッサ 異音」「3号機 漏れ」）すると、対象テーブルを横断して該当レコードを一覧表示
@@ -275,7 +260,7 @@
 ├── electrical/index.html   # 12 電気設備点検（独立ドキュメント）
 ├── pages/                  # 各機能のHTML（plan / plan-annual / inspection / inspection-batch /
 │                           #   inspection-report / repair / trouble / parts / ledger / labels / report /
-│                           #   utility / dashboard / admin / chat / search / notifications）
+│                           #   utility / dashboard / admin / search / notifications）
 ├── css/style.css
 ├── js/
 │   ├── api.js auth.js nav.js util.js home-tabs.js   # 共通（fetch・権限・ナビ・DOMヘルパ）
@@ -294,7 +279,7 @@
 │   ├── report.js           # 07 日報
 │   ├── dashboard.js        # 08 グラフ
 │   ├── admin.js            # 09 管理機能・監査ログ・復元
-│   ├── chat.js notifications.js  # 10 チャット・通知センター／Web Push購読
+│   ├── notifications.js    # 通知センター／Web Push購読
 │   ├── search.js           # 11 横断検索
 │   ├── utility.js          # 13 ユーティリティ日報
 │   └── vendor/             # 同梱ライブラリ（CSPで外部CDN禁止のため）
@@ -310,7 +295,7 @@
 │   ├── parts/              # CRUD + import.js（CSV取込）・import-from-equipment.js
 │   ├── utility-reports/    # 13（items/ = 項目マスタ）
 │   ├── electrical-inspections/ electrical-config/  # 12
-│   ├── chat/ notifications/ push/                  # 10・通知・Web Push
+│   ├── notifications/ push/                        # 通知・Web Push
 │   ├── search/index.js     # 11 横断検索
 │   ├── stats/              # 集計
 │   ├── files/              # R2アップロード/取得
@@ -331,7 +316,7 @@
 | Phase 2 | 保全計画（工事予定含む）+ トラブル記録（ジャンル抽出） | 01, 04 |
 | Phase 3 | 業務依頼 + 部品在庫（PowerAppsデータのCSV移行） | 03, 05 |
 | Phase 4 | 日報（カテゴリ絞り込み）+ ダッシュボード/抽出レポート/CSV・PDF出力 | 07, 08 |
-| Phase 5 | 管理機能（監査ログ閲覧・復元）+ チャット/コメント | 09, 10 |
+| Phase 5 | 管理機能（監査ログ閲覧・復元）+ チャット/コメント（チャットは後に廃止） | 09, 10 |
 | Phase 6 | 横断検索（キーワード検索） | 11 |
 ## 共通の技術的注意事項
 - **SQLインジェクション対策**: D1 へのクエリは必ずプリペアドステートメント。SQL文字列連結禁止

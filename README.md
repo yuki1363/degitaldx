@@ -211,7 +211,6 @@ Workers AI（今日）・Pages ビルド（今月）** も Cloudflare の集計�
 │   ├── report.html         # 07 日報（記録・閲覧）
 │   ├── dashboard.html      # 08 ダッシュボード（グラフ・抽出レポート）
 │   ├── admin.html          # 09 管理（ユーザー・マスタ管理・監査ログ・復元）
-│   ├── chat.html           # 10 チャット（グループ引き継ぎ）
 │   └── search.html         # 11 横断検索
 ├── css/style.css           # 共通スタイル（スマホ375px基準）
 ├── js/
@@ -228,7 +227,6 @@ Workers AI（今日）・Pages ビルド（今月）** も Cloudflare の集計�
 │   ├── report.js           # 07 日報（カテゴリ絞り込み・関連記録リンク）
 │   ├── dashboard.js        # 08 ダッシュボード（グラフ・抽出レポート・CSV/PDF出力）
 │   ├── admin.js            # 09 管理（ユーザー・マスタ管理・監査ログ・復元・マスタ履歴）
-│   ├── chat.js             # 10 チャット（30秒ポーリング・個人情報検知）
 │   ├── comments.js         # 10 コメント共通モジュール（各詳細画面に組み込み）
 │   ├── search.js           # 11 横断検索（キーワードAND・ハイライト）
 │   └── vendor/qrcode.mjs   # QRコード生成ライブラリ（qrcode-generator / MIT）
@@ -244,7 +242,6 @@ Workers AI（今日）・Pages ビルド（今月）** も Cloudflare の集計�
 │   ├── stats/              # 08 集計API（グラフ・サマリー用）
 │   ├── admin/              # 09 管理API（users/ audit/ restore/ masters/ 履歴復元）
 │   ├── comments/           # 10 コメントAPI
-│   ├── chat/               # 10 チャットAPI
 │   ├── search/             # 11 横断検索API
 │   └── me.js               # GET /api/me — ログインユーザー情報
 ├── scripts/make-icons.mjs  # アイコン生成（依存なし）

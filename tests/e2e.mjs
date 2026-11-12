@@ -81,13 +81,13 @@ await page.waitForFunction(async () => {
   return false;
 }, { timeout: 30000 });
 const PAGES = ['ledger', 'labels', 'inspection', 'inspection-batch', 'inspection-report', 'plan',
-  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'chat', 'search', 'notifications',
+  'plan-annual', 'trouble', 'repair', 'parts', 'report', 'utility', 'dashboard', 'admin', 'search', 'notifications',
   'report-summary', 'help', 'updates'];
 for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
 }
-check('全19ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
+check('全18ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
 
 // ---------- 2. トラブル: 登録→一覧自動表示→編集 ----------
 section('2. トラブル記録の基本フロー');
@@ -1102,7 +1102,7 @@ const homeJson = JSON.stringify(homeSecs);
 check('ホーム: タイルは「計画・点検／記録・依頼／在庫・設備／見る・探す／その他」のまとまりに分かれる',
   homeSecs.map((x) => x.title).join('/') === '計画・点検/記録・依頼/在庫・設備/見る・探す/その他'
     && homeSecs[0].tiles.join(',') === '保全計画,点検実施,電気設備点検,ユーティリティ日報'
-    && homeSecs[1].tiles.join(',') === 'トラブル記録,業務依頼,日報,チャット'
+    && homeSecs[1].tiles.join(',') === 'トラブル記録,業務依頼,日報'
     && homeSecs[2].tiles.join(',') === '部品在庫,設備台帳'
     && homeSecs[3].tiles.join(',') === 'ダッシュボード・保全レポート,横断検索'
     && homeSecs[4].tiles.join(',') === '使い方,管理,更新履歴', homeJson);
@@ -1143,135 +1143,6 @@ const dashCsv = dashDl ? (await (await dashDl.createReadStream()).toArray()).map
 check('ダッシュボード: トラブルCSVを出力（04と同じ列）',
   /^\uFEFF?発生日時,設備番号,設備,ジャンル,現象/.test(dashCsv) && dashCsv.split('\n').length >= 2,
   `file=${dashDl?.suggestedFilename()} head=${dashCsv.slice(0, 60)}`);
-
-// ---------- 9. チャット: 投稿→取得→既読 ----------
-section('9. チャット（投稿・取得・既読）');
-const chatPost = await api('/api/chat', { method: 'POST', body: { body: 'E2Eチャットテスト', channel: 'general' } });
-check('チャット投稿（201）', chatPost.status === 201, `status=${chatPost.status}`);
-const chatList = await api('/api/chat?channel=general&limit=10');
-check('投稿が一覧に反映', (chatList.json?.messages || []).some((m) => m.body === 'E2Eチャットテスト'));
-const chatRead = await api('/api/chat?channel=general', { method: 'PUT' });
-check('既読の更新（200）', chatRead.status === 200, `status=${chatRead.status}`);
-const chatUnread = await api('/api/chat?count_unread=1&channel=general');
-check('既読後の未読数が0', chatUnread.json?.unread_count === 0, JSON.stringify(chatUnread.json));
-// 送信者本人は既読に数えない（自分の投稿を自分が読んでも既読0のまま）
-const chatAfterRead = await api('/api/chat?channel=general&limit=10');
-const ownMsg = (chatAfterRead.json?.messages || []).find((m) => m.body === 'E2Eチャットテスト');
-check('自分の投稿の既読数は0（送信者除外）', ownMsg?.read_count === 0, `read_count=${ownMsg?.read_count}`);
-
-// 記録化リンク・申し送りテンプレート（チャットを業務の入り口にする2機能）
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForFunction(() => document.body.innerText.includes('E2Eチャットテスト'), { timeout: 8000 }).catch(() => {});
-const recordHref = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-record-actions a')]
-    .map((x) => x.getAttribute('href'))
-    .find((h) => h && h.includes('/pages/trouble?new=1')) || null
-);
-check('チャット: 記録化リンクが本文を引き継ぐ', !!recordHref && decodeURIComponent(recordHref).includes('E2Eチャットテスト'), `href=${recordHref}`);
-await page.waitForFunction(() => !!document.querySelector('.chat-tpl-chip'), { timeout: 10000 }).catch(() => {});
-const tplValue = await page.evaluate(() => {
-  const chip = document.querySelector('.chat-tpl-chip');
-  if (!chip) return null;
-  chip.click();
-  return document.querySelector('#chat-form textarea')?.value ?? null;
-});
-check('チャット: 申し送りテンプレートが入力欄に挿入される', !!tplValue && tplValue.includes('【'), `value=${tplValue}`);
-// 日報への記録化: new=1 が無いと日報ページは一覧を開き、本文が引き継がれない（回帰防止）
-const reportHref = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-record-actions a')]
-    .map((x) => x.getAttribute('href')).find((h) => h && h.startsWith('/pages/report?')) || null);
-check('チャット: 日報への記録化リンクに new=1 が付く', !!reportHref && new URLSearchParams(reportHref.split('?')[1]).get('new') === '1', `href=${reportHref}`);
-if (reportHref) {
-  await page.goto(`${BASE}${reportHref}`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some((t) => t.value.includes('E2Eチャットテスト')), { timeout: 8000 }).catch(() => {});
-  check('チャット: 日報の作成画面に本文が引き継がれる',
-    await page.evaluate(() => [...document.querySelectorAll('textarea')].some((t) => t.value.includes('E2Eチャットテスト'))));
-}
-
-// 👍確認リアクション（トグル）と meta 反映
-const chatMsgId = chatPost.json?.id;
-const react1 = await api(`/api/chat/${chatMsgId}`, { method: 'POST', body: { action: 'react' } });
-check('リアクション付与（reacted=true）', react1.status === 200 && react1.json?.reacted === true, `status=${react1.status}`);
-const listR = await api('/api/chat?channel=general&limit=10');
-const metaR = listR.json?.meta?.[chatMsgId];
-check('リアクションが meta に反映（名前・my_react）', (metaR?.reactions || []).length === 1 && metaR?.my_react === true, JSON.stringify(metaR));
-const react2 = await api(`/api/chat/${chatMsgId}`, { method: 'POST', body: { action: 'react' } });
-check('リアクション取り消し（reacted=false）', react2.status === 200 && react2.json?.reacted === false, `status=${react2.status}`);
-
-// 📌ピン留め → ピン一覧・上部バー表示 → 解除
-const pin1 = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: true } });
-check('ピン留め（pinned=true）', pin1.status === 200 && pin1.json?.pinned === true, `status=${pin1.status}`);
-const listP = await api('/api/chat?channel=general&limit=10');
-check('ピン一覧に反映', (listP.json?.pinned || []).some((p) => p.id === chatMsgId));
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForFunction(
-  () => (document.getElementById('chat-pinned')?.innerText || '').includes('E2Eチャットテスト'),
-  { timeout: 10000 }
-).catch(() => {});
-const pinBarText = await page.evaluate(() => document.getElementById('chat-pinned')?.innerText || '');
-check('ピン留めバーに表示される', pinBarText.includes('E2Eチャットテスト'), `bar="${pinBarText.slice(0, 60)}"`);
-const unpin = await api(`/api/chat/${chatMsgId}`, { method: 'PUT', body: { pinned: false } });
-check('ピン解除（pinned=false）', unpin.status === 200 && unpin.json?.pinned === false, `status=${unpin.status}`);
-
-// 画像添付のサムネイル表示（ファイルメタAPI ?meta=1 のバグ修正回帰）
-const up = await page.evaluate(async () => {
-  const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
-  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#e11'; ctx.fillRect(0, 0, 8, 8);
-  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-  const res = await fetch('/api/files?filename=e2e-chat.png', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: blob });
-  return { status: res.status, json: await res.json().catch(() => null) };
-});
-check('画像アップロード（201）', up.status === 201, `status=${up.status}`);
-const upId = up.json?.file?.id;
-const fileMeta = await api(`/api/files/${upId}?meta=1`);
-check('ファイルメタAPI（?meta=1）', fileMeta.status === 200 && fileMeta.json?.content_type === 'image/png', JSON.stringify(fileMeta.json));
-await api('/api/chat', { method: 'POST', body: { body: 'E2E画像添付', channel: 'general', file_ids: [upId] } });
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-// 添付メタの取得（?meta=1）→サムネイル描画は非同期のため条件待ち
-await page.waitForFunction(() => !!document.querySelector('.chat-msg img.chat-thumb'), { timeout: 10000 }).catch(() => {});
-const hasThumb = await page.evaluate(() => !!document.querySelector('.chat-msg img.chat-thumb'));
-check('画像添付がサムネイル表示される（バグ修正）', hasThumb);
-
-// ポーリング: 開いたままの画面に新着が1回だけ表示される（二重描画バグの回帰）。
-// POLL_MS=5秒。since は >= 比較のため境界の投稿が毎周期返るので、2周期以上またいで
-// 待つ（el の dataset 未対応で data-id が付かず重複ガードが外れると、周期ごとに増える）。
-await api('/api/chat', { method: 'POST', body: { body: 'E2Eポーリング新着', channel: 'general' } });
-await page.waitForTimeout(11500);
-const pollCount = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2Eポーリング新着').length);
-check('ポーリングで新着が1回だけ表示される（2周期後も重複しない）', pollCount === 1, `count=${pollCount}`);
-// メッセージ行に data-id 属性が付いている（重複ガード・削除・ピンジャンプの前提）
-const hasDataId = await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg')].every((r) => !!r.getAttribute('data-id')));
-check('チャット行に data-id が付与される（el の dataset 対応）', hasDataId);
-
-// 削除: ✕ をタップするとリロードせずに消える（row.remove()）
-await api('/api/chat', { method: 'POST', body: { body: 'E2E削除テスト', channel: 'general' } });
-await page.waitForFunction(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
-  { timeout: 8000 }).catch(() => {});
-check('削除テスト用メッセージが表示される', await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 1));
-await page.evaluate(() => {
-  const row = [...document.querySelectorAll('.chat-msg')].find((r) => r.querySelector('.chat-body')?.textContent === 'E2E削除テスト');
-  row?.querySelector('button[title="削除"]')?.click(); // confirm は自動承諾
-});
-await page.waitForFunction(() =>
-  ![...document.querySelectorAll('.chat-msg .chat-body')].some((b) => b.textContent === 'E2E削除テスト'),
-  { timeout: 8000 }).catch(() => {});
-check('削除すると画面更新なしで消える', await page.evaluate(() =>
-  [...document.querySelectorAll('.chat-msg .chat-body')].filter((b) => b.textContent === 'E2E削除テスト').length === 0));
-
-// UI送信: 実際のボタンで1回送信 → DBに1件だけ（二重POSTの回帰）
-await page.goto(`${BASE}/pages/chat`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(400);
-const uiBody = 'E2EUI二重送信-' + Date.now();
-await page.fill('textarea', uiBody);
-await page.click('button:has-text("送信")');
-await page.waitForTimeout(1500);
-const uiRows = await api(`/api/chat?channel=general&limit=50`);
-const uiDbCount = (uiRows.json?.messages || []).filter((m) => m.body === uiBody).length;
-check('UI送信: 1回の送信でDBに1件だけ（二重POSTなし）', uiDbCount === 1, `count=${uiDbCount}`);
 
 // ---------- 9.5 機能強化: 点検の前回値表示・部品の棚卸モード ----------
 section('9.5 機能強化（前回値表示・棚卸モード）');
@@ -1317,18 +1188,6 @@ const uploadTestImage = (filename) => page.evaluate(async (name) => {
   });
   return { status: res.status, json: await res.json().catch(() => null) };
 }, filename);
-
-// チャット添付: 本人がアップロードした未紐づけファイルだけを受け付け、メッセージに紐づける
-// （他の記録のファイルIDを指定すると、10日後の自動削除でそのファイルが R2 から消えるため）
-const chatUp = await uploadTestImage('e2e-chat.png');
-const chatFileId = chatUp.json?.file?.id;
-const chatWithFile = await api('/api/chat', { method: 'POST', body: { body: 'E2E添付チャット', channel: 'general', file_ids: [chatFileId] } });
-check('チャット添付: 自分の未紐づけファイルは添付できる（201）', chatWithFile.status === 201, `status=${chatWithFile.status}`);
-const chatFiles = await api('/api/files');
-check('チャット添付: ファイルがメッセージに紐づく（related_table=chat_messages）',
-  (chatFiles.json?.files ?? []).some((f) => f.id === chatFileId && f.related_table === 'chat_messages' && f.related_id === chatWithFile.json?.id));
-const chatReuse = await api('/api/chat', { method: 'POST', body: { body: 'E2E添付の使い回し', channel: 'general', file_ids: [chatFileId] } });
-check('チャット添付: 紐づけ済み（他の記録）のファイルIDは400', chatReuse.status === 400, `status=${chatReuse.status}`);
 
 // 部品CSVの差分マージ: CSVで対応付けていない列（在庫数・場所など）は既存値を保つ
 const mergePart = await api('/api/parts', { method: 'POST', body: { name: 'E2Eマージ部品', model_no: 'E2E-MERGE-001', quantity: 7, location: 'E2E棚A', supplier: 'E2E商事' } });
