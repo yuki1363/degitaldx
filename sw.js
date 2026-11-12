@@ -54,6 +54,7 @@ const PRECACHE_URLS = [
   '/js/xlsx-image.js',
   '/js/trouble.js',
   '/js/trouble-csv.js',
+  '/js/downtime.js',
   '/js/repair.js',
   '/js/parts.js',
   '/js/report.js',
