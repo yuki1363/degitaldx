@@ -53,7 +53,8 @@ const check = async () => (await import(`${MODULE}?run=${++run}`)).checkOverdueA
 const count = (type, id) => sqlite.prepare(
   'SELECT COUNT(*) AS n FROM notifications WHERE type = ? AND related_id = ? AND deleted_at IS NULL'
 ).get(type, id).n;
-const ackAll = () => sqlite.exec(`UPDATE notifications SET acknowledged_at = '2026-01-01T00:00:00Z', acknowledged_by = 'x'`);
+// 確認日時は「いま」（時計を差し替えても、確認済みの通知は確認から30日後まで残る＝自動削除の対象外）
+const ackAll = () => sqlite.prepare(`UPDATE notifications SET acknowledged_at = ?, acknowledged_by = 'x'`).run(new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/, 'Z'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
