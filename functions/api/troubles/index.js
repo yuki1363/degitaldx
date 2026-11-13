@@ -2,7 +2,7 @@ import { requireRole } from '../_lib/auth.js';
 import { auditStatement, LAST_INSERT_ID } from '../_lib/audit.js';
 import { notifyTeam } from '../_lib/notify.js';
 import { json, jsonError, readJson } from '../_lib/http.js';
-import { nowIso, jstDayStartUtc, jstNextDayStartUtc, normalizeUtcIso } from '../_lib/util.js';
+import { nowIso, jstDayStartUtc, jstNextDayStartUtc, normalizeUtcIso, likeContains, LIKE_ESCAPE } from '../_lib/util.js';
 import { attachFiles } from '../_lib/storage.js';
 import { ensureColumns } from '../_lib/db-compat.js';
 import { beginIdempotent, dedupeBeforeStatement, dedupeFixStatement, isDedupeConflict, resolveRaceDuplicate, DEDUPE_CONFLICT_MESSAGE } from '../_lib/request-dedupe.js';
@@ -47,6 +47,7 @@ export async function onRequestGet({ request, env }) {
   const sp = new URL(request.url).searchParams;
   const categoryId = sp.get('category_id');
   const equipmentId = sp.get('equipment_id');
+  const reporter = (sp.get('reporter') || '').trim().slice(0, 100);
   const from = sp.get('from');   // YYYY-MM-DD
   const to = sp.get('to');       // YYYY-MM-DD
   // 件数の上限（既定500・最大5000）。期間を指定しない呼び出し（設備の「すべて見る」等）でも
@@ -76,6 +77,11 @@ export async function onRequestGet({ request, env }) {
   if (equipmentId) {
     sql += ` AND t.equipment_id = ?`;
     binds.push(equipmentId);
+  }
+  // 担当者（記録者）での絞り込み: 画面に出る記録者名（reporter_name があればそれ、無ければ登録ユーザーの氏名）の部分一致
+  if (reporter) {
+    sql += ` AND COALESCE(NULLIF(t.reporter_name, ''), u.name, '') LIKE ?${LIKE_ESCAPE}`;
+    binds.push(likeContains(reporter));
   }
   // 期間は JST の日付。occurred_at は UTC 保存なので JST の日付境界へ変換して比べる（_lib/util.js）
   if (from) {
