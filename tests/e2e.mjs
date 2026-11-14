@@ -180,6 +180,32 @@ await page.goto(`${BASE}/pages/search?q=${encodeURIComponent(manyKw)}`, { waitUn
 await page.waitForFunction(() => !!document.querySelector('.search-notice'), { timeout: 10000 }).catch(() => {});
 check('横断検索: 外した語の注意書きが画面に出る',
   await page.evaluate((kw) => !!kw && (document.querySelector('.search-notice')?.textContent || '').includes(kw), manyIgnored[0]));
+// D1 の LIKE パターンの上限（50バイト）対策: 長い型番（全角英数への言い換えは1文字3バイト）・濁点の多い
+// カタカナ語（半角カタカナは濁点が別の文字）・空白のない長い文でも、検索がサーバーエラーにならない。
+// ローカルの D1 も本番と同じく上限を超えるとクエリごと失敗するので、ここで再現できる
+// （以前は部品検索・類似トラブルが500、横断検索は0件、設備一覧は絞り込まれず全件が出た）
+const longModel = 'E2E-TC-K-316L-3.2x150-EXT';
+const longPart = await api('/api/parts', { method: 'POST', body: { name: 'E2E長い型番の部品', model_no: longModel, quantity: 1, safety_stock: 0 } });
+const pLong = await api(`/api/parts?include_similar=1&q=${encodeURIComponent(longModel)}`);
+check('部品検索: 長い型番（英数17文字以上）でも200でヒット',
+  pLong.status === 200 && (pLong.json?.parts || []).some((p) => p.id === longPart.json?.id), `status=${pLong.status}`);
+const pKana = await api(`/api/parts?q=${encodeURIComponent('コンプレッサーベルトガード')}`);
+check('部品検索: 濁点の多い長いカタカナ語でも200', pKana.status === 200, `status=${pKana.status}`);
+const longPhen = 'E2E長文シュリンクトンネル出口でフィルムが破れる午前の立ち上げ直後から断続的に発生';
+const tLong = await api('/api/troubles', { method: 'POST', body: { occurred_at: new Date().toISOString(), phenomenon: longPhen } });
+const simLong = await api(`/api/troubles/similar?phenomenon=${encodeURIComponent(longPhen)}`);
+check('類似トラブル: 空白のない長い現象文でも200（先頭部分で一致）',
+  simLong.status === 200 && (simLong.json?.similar || []).some((r) => r.id === tLong.json?.id), `status=${simLong.status}`);
+const sLong = await api(`/api/search?q=${encodeURIComponent(longModel)}`);
+check('横断検索: 長い型番でも失敗せず部品がヒット',
+  sLong.status === 200 && sLong.json?.partial_failure === false && (sLong.json?.results || []).some((r) => r.type === 'parts'),
+  JSON.stringify({ status: sLong.status, partial: sLong.json?.partial_failure }));
+const longWord = 'コンプレッサーベルトガードカバー取付金具';
+const eqLong = await api(`/api/equipment?q=${encodeURIComponent(longWord)}`);
+check('設備一覧: 長い検索語で全件表示にならない（一致0件）',
+  eqLong.status === 200 && (eqLong.json?.equipment || []).length === 0, `status=${eqLong.status} n=${eqLong.json?.equipment?.length}`);
+const repLong = await api(`/api/troubles?reporter=${encodeURIComponent(longWord)}`);
+check('トラブル一覧: 長い担当者名の絞り込みでも200', repLong.status === 200, `status=${repLong.status}`);
 // JST の日付境界: 日時列は UTC 保存。JST 2031/10/01 08:00（= 2031-09-30T23:00Z）の記録は、
 // 期間「2031/10/01」に入り「2031/09/30」には入らない（UTC の日付境界だと逆になっていた）
 const jstEarly = await api('/api/troubles', { method: 'POST', body: { occurred_at: '2031-09-30T23:00:00Z', phenomenon: 'E2E早朝JSTトラブル' } });
