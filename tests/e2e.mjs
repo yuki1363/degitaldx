@@ -87,7 +87,7 @@ for (const p of PAGES) {
   await page.goto(`${BASE}/pages/${p}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(250);
 }
-check('全18ページ表示・pageerrorなし', pageErrors.length === 0, pageErrors.join(' / '));
+check(`全${PAGES.length + 1}ページ（ホーム＋各機能）表示・pageerrorなし`, pageErrors.length === 0, pageErrors.join(' / '));
 
 // ---------- 2. トラブル: 登録→一覧自動表示→編集 ----------
 section('2. トラブル記録の基本フロー');
@@ -1808,11 +1808,10 @@ const utRestore = await api('/api/admin/restore', { method: 'POST', body: { tabl
 check('復元: 同じ日のユーティリティ日報があるときは409', utRestore.status === 409, `status=${utRestore.status}`);
 await api(`/api/utility-reports/${utR2.json?.id}`, { method: 'DELETE' });
 
-// チャット: ピン留めしたまま削除すると、ピン留めも外れる（10日自動削除の対象に戻る）
-const pinDel = await api('/api/chat', { method: 'POST', body: { body: 'E2Eピン留め削除', channel: 'general' } });
-await api(`/api/chat/${pinDel.json?.id}`, { method: 'PUT', body: { pinned: true } });
-await api(`/api/chat/${pinDel.json?.id}`, { method: 'DELETE' });
-check('チャット: 削除するとピン一覧から消える', !((await api('/api/chat?channel=general&limit=10')).json?.pinned || []).some((p) => p.id === pinDel.json?.id));
+// チャットは廃止済み（v1.67.0）。画面・API が無いこと（以前ここにあったチャットAPIのテストは、
+// APIが404でも成功扱いになり何も確かめていなかったため、廃止の確認に置き換えた）
+const chatGone = await api('/api/chat?channel=general&limit=10');
+check('チャット: 廃止済みの API は404', chatGone.status === 404, `status=${chatGone.status}`);
 
 // 監査列: 設備の新規登録で更新者・更新日時も入る
 const eqAudit = await api('/api/equipment', { method: 'POST', body: { code: 'E2E-AUD', name: 'E2E監査列設備' } });
@@ -2983,7 +2982,7 @@ section('9.34 電気設備点検の異常（通知・横断検索・記録を開
 }
 
 // ---------- 9.26 休止時間・部品の使用実績・バックアップ取り忘れ・画面エラーの記録 ----------
-section('9.26 休止時間の見える化・部品の使用実績・バックアップの記録・画面エラーの自動記録');
+section('9.35 休止時間の見える化・部品の使用実績・バックアップの記録・画面エラーの自動記録');
 {
   const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
 
