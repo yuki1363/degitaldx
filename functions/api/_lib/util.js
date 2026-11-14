@@ -59,9 +59,35 @@ export const LIKE_ESCAPE = " ESCAPE '\\'";
 export function escapeLike(value) {
   return String(value ?? '').replace(/[\\%_]/g, '\\$&');
 }
-/** 部分一致用のパターン（%…%）。値のワイルドカードは退避済み */
+// D1 は LIKE のパターンを 50 バイトまでしか受け付けない（超えると「LIKE or GLOB pattern too complex」で
+//   クエリごと失敗する）。日本語は1文字3バイトなので、%…% の中身は16文字まで。型番の全角英数への
+//   言い換え（1文字3バイト）や、濁点が別の文字になる半角カタカナへの言い換えは元の語より長くなるため、
+//   英数17文字以上の型番・濁点の多い12文字前後のカタカナ語でも超えていた（部品検索・類似トラブルが500）。
+export const LIKE_MAX_PATTERN_BYTES = 50;
+const utf8Bytes = (ch) => {
+  const cp = ch.codePointAt(0);
+  return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+};
+/**
+ * 部分一致（%…%）のパターンが上限に収まるよう、語を先頭から切り詰める（収まる語はそのまま）。
+ *   切り詰めた語は「元の語の先頭部分」なので、元の語を含む記録は必ず一致する（取りこぼさない）。
+ *   退避（\% \_ \\）で増える1バイトも数える。文字の途中（サロゲートペア）では切らない。
+ */
+export function fitLikeValue(value) {
+  const budget = LIKE_MAX_PATTERN_BYTES - 2; // 前後の % の分
+  let out = '';
+  let used = 0;
+  for (const ch of String(value ?? '')) {
+    const n = utf8Bytes(ch) + (/[\\%_]/.test(ch) ? 1 : 0);
+    if (used + n > budget) break;
+    out += ch;
+    used += n;
+  }
+  return out;
+}
+/** 部分一致用のパターン（%…%）。値のワイルドカードは退避済み・D1 の長さの上限に収める */
 export function likeContains(value) {
-  return `%${escapeLike(value)}%`;
+  return `%${escapeLike(fitLikeValue(value))}%`;
 }
 
 /** UTC の ISO 日時 → JST の日付 'YYYY-MM-DD'（日付だけの値・解釈できない値はそのまま） */

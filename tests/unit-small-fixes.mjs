@@ -84,6 +84,35 @@ ok('「100%」は「進捗1000」に一致しない', JSON.stringify(searchLk('1
 ok('「A_1」の _ は任意の1文字ではなく文字そのもの（「AB1号機」に一致しない）', JSON.stringify(searchLk('A_1')) === JSON.stringify(['A_1号機']), JSON.stringify(searchLk('A_1')));
 ok('ふつうの語は従来どおり部分一致', JSON.stringify(searchLk('部品')) === JSON.stringify(['通常の部品']));
 
+console.log('\n=== 単体: LIKE のパターンは D1 の上限（50バイト）に収める ===');
+// D1 は 50 バイトを超える LIKE パターンをクエリごと失敗させる（node:sqlite には同じ上限が無いため、長さで確かめる）
+const bytes = (s) => new TextEncoder().encode(s).length;
+const LONG_WORDS = [
+  'TC-K-316L-3.2x150-EXT',                                   // 型番（全角英数への言い換えが 1文字3バイトになる）
+  'ABCDEFGH123456789',                                       // 英数17文字
+  'コンプレッサーベルトガード',                               // 濁点の多いカタカナ（半角カタカナは濁点が別の文字）
+  'ダイヤフラムポンプバルブ',
+  'シュリンクトンネル出口でフィルムが破れる午前の立ち上げ直後から', // 空白のない文
+  '100%_'.repeat(20),                                        // 退避で増える分
+  '😀'.repeat(20),                                           // サロゲートペア（4バイト）
+];
+const tooLong = [];
+for (const w of LONG_WORDS) {
+  for (const v of fuzzy.keywordVariants(w)) {
+    const p = util.likeContains(v);
+    if (bytes(p) > 50) tooLong.push(`${v}=${bytes(p)}`);
+  }
+}
+ok('長い型番・カタカナ語・文のどの言い換えも 50 バイト以内', util.LIKE_MAX_PATTERN_BYTES === 50 && tooLong.length === 0, tooLong.join(' / '));
+ok('収まる語は切り詰めない', util.likeContains('コンプレッサー') === '%コンプレッサー%' && util.fitLikeValue('あ'.repeat(16)) === 'あ'.repeat(16));
+ok('日本語は16文字まで（17文字目から切る）', util.fitLikeValue('あ'.repeat(17)) === 'あ'.repeat(16) && bytes(util.likeContains('あ'.repeat(17))) === 50);
+ok('切り詰めた語は元の語の先頭部分', LONG_WORDS.every((w) => w.startsWith(util.fitLikeValue(w)) && util.fitLikeValue(w).length > 0));
+ok('退避の \\ と記号の間・絵文字の途中では切らない', !/\\$/.test(util.likeContains('100%_'.repeat(20)).slice(0, -1).replace(/\\\\/g, '')) && !/[\uD800-\uDBFF]$/.test(util.fitLikeValue('😀'.repeat(20))));
+sqlite.exec(`INSERT INTO lk (name) VALUES ('温度センサー TC-K-316L-3.2x150-EXT'), ('コンプレッサーベルトガード取付金具'), ('ＡＢＣＤＥＦＧＨ１２３４５６７８９ 全角の型番')`);
+ok('長い型番でも一致する', JSON.stringify(searchLk('TC-K-316L-3.2x150-EXT')) === JSON.stringify(['温度センサー TC-K-316L-3.2x150-EXT']), JSON.stringify(searchLk('TC-K-316L-3.2x150-EXT')));
+ok('長いカタカナ語でも一致する', JSON.stringify(searchLk('コンプレッサーベルトガード')) === JSON.stringify(['コンプレッサーベルトガード取付金具']));
+ok('全角で登録した長い型番も、半角の検索で一致する', JSON.stringify(searchLk('ABCDEFGH123456789')) === JSON.stringify(['ＡＢＣＤＥＦＧＨ１２３４５６７８９ 全角の型番']), JSON.stringify(searchLk('ABCDEFGH123456789')));
+
 // 設備一覧の検索・日報の記録者検索・監査ログのユーザー検索でも同じ
 sqlite.exec(`INSERT INTO equipment_ledger (code, name, created_by) VALUES ('EQ-1', 'ポンプ100%', 't'), ('EQ-2', 'ポンプ1000', 't')`);
 const eqList = await call(equip.onRequestGet, '/api/equipment?q=' + encodeURIComponent('100%'));
