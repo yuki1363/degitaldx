@@ -1652,6 +1652,13 @@ body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 
 .dash-tabs .tab-btn { border: 0; border-radius: 999px; padding: 9px 8px; font-weight: 600; color: var(--d-muted); transition: background 0.15s, color 0.15s; }
 .dash-tabs .tab-btn.is-active { background: linear-gradient(135deg, #1e40af, #3b63d8); color: #fff; box-shadow: 0 2px 6px rgba(30, 64, 175, 0.35); }
 
+/* サマリーの小タブ（推移／設備／内訳）。縦に長くなりすぎないよう、カードを3つに分ける */
+.dash-subtabs { display: flex; gap: 6px; margin: 4px 0 12px; padding: 4px; background: var(--d-card); border: 1px solid var(--d-border); border-radius: 999px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+.dash-subtab { flex: 1 1 0; min-height: 38px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--d-muted); font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.dash-subtab:hover:not(.is-active) { background: var(--d-chip); color: var(--d-link); }
+.dash-subtab.is-active { color: #fff; background: linear-gradient(135deg, #1e40af, #3b63d8); box-shadow: 0 3px 10px rgba(30, 64, 175, 0.35); }
+.dash-panel { animation: dash-rise 0.3s ease backwards; }
+
 /* 年度の切り替え（ヒーロー帯） */
 .dash-hero { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; padding: 14px 12px; border-radius: 16px; color: #fff;
   background: radial-gradient(circle at 85% -20%, rgba(255, 255, 255, 0.22), transparent 55%), linear-gradient(135deg, #1e3a8a 0%, #2d54c8 55%, #3b82f6 100%); background-size: 100% 100%, 220% 220%;
@@ -1710,8 +1717,8 @@ body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 
 .dash-mini span.is-on { background: var(--accent); opacity: 0.7; }
 
 /* ひとこと（最も多いジャンル・設備） */
-.dash-insights { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 16px; }
-@media (min-width: 560px) { .dash-insights { grid-template-columns: 1fr 1fr; } }
+.dash-insights { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+@media (max-width: 559px) { .dash-insight { padding: 8px 10px; gap: 8px; } .dash-insight-value { font-size: 13px; } .dash-toolbar-hint { display: none; } }
 .dash-insight { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 14px; border-radius: 14px; background: var(--d-card); border: 1px solid var(--d-border); }
 .dash-insight > div { min-width: 0; }
 .dash-insight-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.18); }
@@ -1760,6 +1767,8 @@ a.dash-bar-name:hover { text-decoration: underline; }
   .dash-hero .fy-label strong { font-size: 22px; }
   .dash-kpis, .dash-insights { gap: 8px; margin-bottom: 8px; }
   .chart-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .dash-panel + .dash-panel { margin-top: 8px; }
+  .dash-panel { animation: none; }
   .chart-wrap, .dash-kpi, .dash-insight { break-inside: avoid; box-shadow: none; animation: none; }
   .chart-wrap { padding: 10px; }
   .chart-title { margin-bottom: 8px; font-size: 13px; }

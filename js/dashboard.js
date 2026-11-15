@@ -29,17 +29,22 @@ const app = document.getElementById('app');
 // 印刷に持ち込まない・印刷レイアウトの幅でも崩れない）。描き直せるよう、グラフごとの描画関数を覚えておく。
 let chartRegistry = [];
 let printUser = '';
+let summarySub = 'trend'; // 表示中の小タブ（年度を切り替えても保つ）
+const syncPanels = () => document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = p.id !== `dash-panel-${summarySub}`; });
 const registerChart = (id, draw) => { chartRegistry.push({ id, draw }); draw(id, {}); };
 
 function injectPrintImages() {
+  // 印刷は小タブに関係なく全部まとめて出す（隠れているパネルも出してから、グラフを画像にする）
+  document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = false; });
   for (const { id, draw } of chartRegistry) {
     const canvas = document.getElementById(id);
     const box = canvas && canvas.parentElement;
     // 大きさは描いてあるグラフ自身から取る（ブラウザによっては印刷用の表示に切り替わった後に呼ばれ、枠が 0 になるため）
     const live = canvas && Chart.getChart(canvas);
-    const w = (live && live.width) || (box && box.clientWidth);
-    const h = (live && live.height) || (box && box.clientHeight);
-    if (!box || !w || !h) continue;
+    if (!box) continue;
+    // 表示してある枠の大きさを使う。印刷用の表示に切り替わった後で枠が 0 になるときは、グラフ自身の大きさ→標準の大きさ
+    const w = box.clientWidth || (live && live.width) || 440;
+    const h = box.clientHeight || (live && live.height) || 240;
     const off = document.createElement('canvas');
     off.width = w;
     off.height = h;
@@ -56,7 +61,7 @@ function injectPrintImages() {
     }
   }
 }
-const removePrintImages = () => document.querySelectorAll('.dash-print-img').forEach((n) => n.remove());
+const removePrintImages = () => { document.querySelectorAll('.dash-print-img').forEach((n) => n.remove()); syncPanels(); };
 window.addEventListener('beforeprint', injectPrintImages);
 window.addEventListener('afterprint', removePrintImages);
 
@@ -176,6 +181,52 @@ async function renderSummary(fy, currentFy, onChangeFy) {
 
   const byCategory = stats.trouble_by_category || [];
 
+  // グラフ・一覧のカードは、縦に長くなりすぎないよう「推移」「設備」「内訳」の小タブに分ける（印刷は全部まとめて出す）
+  const cards = [
+      card('トラブル月別推移', hasData || prevCounts ? makeCanvas('chart-trend') : empty(),
+        prevCounts ? `点線は${prevLabel}` : null, '📈'),
+      card('休止時間の月推移（休止区分別）', hasDowntime ? makeCanvas('chart-downtime') : empty('休止時間の入力がありません'), null, '⏱'),
+      card('ジャンル別の月推移', hasData ? makeCanvas('chart-category-trend') : empty(), null, '🗂'),
+      card('ジャンル別トラブル（年度合計）', byCategory.length > 0
+        ? barList('chart-category', byCategory.map((c) => ({
+            label: c.category_name, value: c.count, color: catVar(slots, c.category_id),
+            text: `${c.count}件（${total > 0 ? Math.round((c.count / total) * 100) : 0}%）`,
+          })))
+        : empty(), null, '🍰'),
+      card('トラブルの多い設備（上位5）', worstCount.length > 0
+        ? barList('dash-worst-count', worstCount.map((r) => ({ label: equipLabel(r), value: r.trouble_count, text: `${r.trouble_count}件`, href: equipHref(r) })), { rank: true })
+        : empty('設備を指定したトラブルがありません'),
+        unassigned > 0 ? `設備を指定していないトラブル ${unassigned} 件は含みません` : null, '🏭'),
+      card('休止時間の長い設備（上位5）', worstTime.length > 0
+        ? barList('dash-worst-time', worstTime.map((r) => ({ label: equipLabel(r), value: r.downtime_minutes, text: formatDowntime(r.downtime_minutes), href: equipHref(r), color: slotVar(1) })), { rank: true })
+        : empty('休止時間の入力がありません'), null, '🛑'),
+      card('繰り返しトラブルの設備', repeats.length > 0
+        ? el('ul', { class: 'dash-repeat', id: 'dash-repeat' }, repeats.map((r) => el('li', {}, [
+            el('a', { href: equipHref(r) }, equipLabel(r)),
+            el('span', { class: 'dash-repeat-meta' }, [
+              el('strong', { class: 'dash-times' }, `${r.trouble_count}回`),
+              r.downtime_minutes > 0 ? ` ・休止 ${formatDowntime(r.downtime_minutes)}` : '',
+            ]),
+          ])))
+        : el('p', { class: 'empty', id: 'dash-repeat' }, '年度内に3回以上トラブルが起きた設備はありません'),
+        '年度内に3回以上トラブルが起きた設備（根本的な対策の候補）', '🔁'),
+      card('曜日・時間帯別のトラブル', hasData ? heatmap(stats.trouble_by_weekday_hour || []) : empty(),
+        '発生日時の曜日と時間帯ごとの件数（色が濃いほど多い）', '🗓'),
+  ];
+  const SUBS = [['trend', '📈 推移', [0, 1, 2]], ['equip', '🏭 設備', [4, 5, 6]], ['mix', '🗂 内訳', [3, 7]]];
+  const panelEls = SUBS.map(([id, , idx]) =>
+    el('div', { class: 'dash-panel', id: `dash-panel-${id}`, hidden: id !== summarySub }, el('div', { class: 'chart-grid' }, idx.map((i) => cards[i]))));
+  const subBtns = SUBS.map(([id, label]) =>
+    el('button', { class: `dash-subtab${id === summarySub ? ' is-active' : ''}`, type: 'button', 'data-sub': id, id: `dash-sub-${id}`, role: 'tab', onclick: () => switchSub(id) }, label));
+  const subBar = el('div', { class: 'dash-subtabs rpt-controls', role: 'tablist' }, subBtns);
+  const switchSub = (id) => {
+    summarySub = id;
+    subBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.sub === id));
+    syncPanels();
+    // 隠れている間に描いたグラフは大きさが 0 のことがあるので、表示した小タブのグラフを描き直す
+    document.querySelectorAll(`#dash-panel-${id} canvas`).forEach((c) => { const ch = Chart.getChart(c); if (ch) ch.resize(); });
+  };
+
   render(box, [
     el('div', { class: 'dash-print-meta' }, `設備保全ダッシュボード　出力: ${ymd(jstTodayStr())}${printUser ? `　出力者: ${printUser}` : ''}`),
     fyBar,
@@ -214,37 +265,8 @@ async function renderSummary(fy, currentFy, onChangeFy) {
       ? el('p', { class: 'hint downtime-warn', id: 'downtime-unreadable' },
           `⚠ 休止時間を数字で読み取れない記録が ${downtime.unreadable} 件あり、合計に入っていません（トラブル記録の休止時間を、数字（分）に直すと入ります）。`)
       : null,
-    el('div', { class: 'chart-grid' }, [
-      card('トラブル月別推移', hasData || prevCounts ? makeCanvas('chart-trend') : empty(),
-        prevCounts ? `点線は${prevLabel}` : null, '📈'),
-      card('休止時間の月推移（休止区分別）', hasDowntime ? makeCanvas('chart-downtime') : empty('休止時間の入力がありません'), null, '⏱'),
-      card('ジャンル別の月推移', hasData ? makeCanvas('chart-category-trend') : empty(), null, '🗂'),
-      card('ジャンル別トラブル（年度合計）', byCategory.length > 0
-        ? barList('chart-category', byCategory.map((c) => ({
-            label: c.category_name, value: c.count, color: catVar(slots, c.category_id),
-            text: `${c.count}件（${total > 0 ? Math.round((c.count / total) * 100) : 0}%）`,
-          })))
-        : empty(), null, '🍰'),
-      card('トラブルの多い設備（上位5）', worstCount.length > 0
-        ? barList('dash-worst-count', worstCount.map((r) => ({ label: equipLabel(r), value: r.trouble_count, text: `${r.trouble_count}件`, href: equipHref(r) })), { rank: true })
-        : empty('設備を指定したトラブルがありません'),
-        unassigned > 0 ? `設備を指定していないトラブル ${unassigned} 件は含みません` : null, '🏭'),
-      card('休止時間の長い設備（上位5）', worstTime.length > 0
-        ? barList('dash-worst-time', worstTime.map((r) => ({ label: equipLabel(r), value: r.downtime_minutes, text: formatDowntime(r.downtime_minutes), href: equipHref(r), color: slotVar(1) })), { rank: true })
-        : empty('休止時間の入力がありません'), null, '🛑'),
-      card('繰り返しトラブルの設備', repeats.length > 0
-        ? el('ul', { class: 'dash-repeat', id: 'dash-repeat' }, repeats.map((r) => el('li', {}, [
-            el('a', { href: equipHref(r) }, equipLabel(r)),
-            el('span', { class: 'dash-repeat-meta' }, [
-              el('strong', { class: 'dash-times' }, `${r.trouble_count}回`),
-              r.downtime_minutes > 0 ? ` ・休止 ${formatDowntime(r.downtime_minutes)}` : '',
-            ]),
-          ])))
-        : el('p', { class: 'empty', id: 'dash-repeat' }, '年度内に3回以上トラブルが起きた設備はありません'),
-        '年度内に3回以上トラブルが起きた設備（根本的な対策の候補）', '🔁'),
-      card('曜日・時間帯別のトラブル', hasData ? heatmap(stats.trouble_by_weekday_hour || []) : empty(),
-        '発生日時の曜日と時間帯ごとの件数（色が濃いほど多い）', '🗓'),
-    ]),
+    subBar,
+    ...panelEls,
   ]);
 
   // グラフ描画（DOMに追加後）。印刷の直前に白地で描き直せるよう、描画関数を登録しておく
