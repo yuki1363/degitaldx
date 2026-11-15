@@ -5,47 +5,35 @@
 import { formatDowntime } from '/js/downtime.js';
 import { categorySlots, kindSlots } from '/js/dashboard-calc.js';
 
-// 色のテーマ。画面のダッシュボードはダーク、印刷・PDF・レポートは白地（印刷でインクを使い切らない）。
-//   どちらも色覚の違いがあっても隣どうしを見分けられる検証済みの順番（並べ替えない）。
+// 色。どちらも色覚の違いがあっても隣どうしを見分けられる検証済みの順番（並べ替えない）。
 //   色は「何番目に多いか」ではなく「どのジャンル／休止区分か」で決める（年度・期間を変えても同じ色）。
-const THEMES = {
-  light: {
-    series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
-    neutral: '#94a3b8', surface: '#ffffff', ink: '#64748b', grid: '#eef2f7', axis: '#cbd5e1', tooltip: '#1e293b',
-  },
-  dark: {
-    series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767'],
-    neutral: '#64748b', surface: '#131c31', ink: '#9fb0cc', grid: 'rgba(148, 163, 184, 0.14)', axis: 'rgba(148, 163, 184, 0.35)', tooltip: '#0b1220',
-  },
+const COLORS = {
+  series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
+  neutral: '#94a3b8', surface: '#ffffff', ink: '#64748b', grid: '#eef2f7', axis: '#cbd5e1', tooltip: '#1e293b',
 };
-let theme = 'light';
-const T = () => THEMES[theme];
-export const getChartTheme = () => theme;
+const T = () => COLORS;
 // 系列の色の数（CSS 側の --s0〜--s7 と対応）
 export const SERIES_COUNT = 8;
-export const seriesColor = (i) => T().series[i];
-export const slotColor = (slot) => (slot >= 0 && slot < SERIES_COUNT ? T().series[slot] : T().neutral);
-// 画面の HTML（棒グラフ・点など）用。テーマの切り替えは CSS 変数に任せる
+export const seriesColor = (i) => COLORS.series[i];
+export const slotColor = (slot) => (slot >= 0 && slot < SERIES_COUNT ? COLORS.series[slot] : COLORS.neutral);
+// 画面の HTML（棒グラフ・点など）用。CSS 変数（--s0〜）を使う
 export const slotVar = (slot) => (slot >= 0 && slot < SERIES_COUNT ? `var(--s${slot})` : 'var(--s-neutral)');
-
 export const catVar = (slots, id) => slotVar(id == null ? -1 : (slots.get(Number(id)) ?? -1));
 
-export function setChartTheme(name) {
-  theme = THEMES[name] ? name : 'light';
-  if (typeof Chart === 'undefined') return;
-  Chart.defaults.color = T().ink;
-  Chart.defaults.plugins.tooltip.backgroundColor = T().tooltip;
-}
+// 画面の単色の棒は光るグラデーション。印刷用に描くときは flat にしてベタ塗りにする（インクを使いすぎない）
+let flat = false;
+export function setChartFlat(on) { flat = !!on; }
 
 export function setChartDefaults() {
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   Chart.defaults.font.size = 11;
+  Chart.defaults.color = COLORS.ink;
   Chart.defaults.plugins.legend.labels.boxWidth = 10;
   Chart.defaults.plugins.legend.labels.boxHeight = 10;
   Chart.defaults.plugins.legend.labels.padding = 12;
+  Chart.defaults.plugins.tooltip.backgroundColor = COLORS.tooltip;
   Chart.defaults.plugins.tooltip.padding = 10;
   Chart.defaults.plugins.tooltip.cornerRadius = 8;
-  setChartTheme(theme);
 }
 
 const nodeOf = (c) => (typeof c === 'string' ? document.getElementById(c) : c);
@@ -61,10 +49,11 @@ const xScale = () => ({ grid: { display: false }, border: { color: T().axis }, t
 const yScale = (extra = {}) => ({ beginAtZero: true, grid: { color: T().grid }, border: { display: false }, ...extra });
 const bar = () => ({ borderRadius: 6, maxBarThickness: 24, borderColor: T().surface });
 
-// ダークの棒は、グラフの下に向かって少し透けるグラデーションにする（光って見える）。白地・印刷はベタ塗り。
-//   色が '#rrggbb' のときだけ。グラフ全体の高さ（横棒は幅）に対するグラデーション（Chart.js の標準的な方法）
+// 単色の棒は、グラフの下に向かって少し透けるグラデーションにする（光って見える）。印刷（flat）・積み上げはベタ塗り。
+//   色が '#rrggbb' のときだけ。グラフ全体の高さ（横棒は幅）に対するグラデーション（Chart.js の標準的な方法）。
+//   ※ 棒ごとの位置（element の y〜base）に合わせたグラデーションは、棒が描かれなくなるので使わない
 const glow = (hex) => {
-  if (theme !== 'dark' || typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  if (flat || typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
   return (ctx) => {
     const { chart } = ctx;
     const area = chart && chart.chartArea;

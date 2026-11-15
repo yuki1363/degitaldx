@@ -1068,9 +1068,9 @@ section('8. ダッシュボード・保全レポート');
   check('ダッシュボード: サマリーに依頼・点検達成率・日報・業務依頼内訳は出さない',
     !sum.text.includes('依頼（未完了）') && !sum.text.includes('点検達成率') && !sum.text.includes('日報') && !sum.text.includes('ステータス内訳') && sum.text.includes('ジャンル別の月推移'), sum.text.slice(0, 200));
   check('ダッシュボード: 次の年度ボタンは今年度のとき押せない', sum.nextDisabled === true);
-  // ダーク表示と印刷: 画面はダーク、印刷（beforeprint）は白地のグラフ画像に差し替わり、canvas・操作欄は隠れる
-  const darkInfo = await page.evaluate(() => ({ dark: document.body.classList.contains('dash-dark'), btn: !!document.getElementById('dash-print') }));
-  check('ダッシュボード: サマリーはダーク表示で、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.dark && darkInfo.btn, JSON.stringify(darkInfo));
+  // 印刷: 画面にはグラフを印刷するボタンがあり、印刷（beforeprint）ではグラフが画像に差し替わり、canvas・操作欄は隠れる
+  const darkInfo = await page.evaluate(() => ({ btn: !!document.getElementById('dash-print'), dark: document.body.classList.contains('dash-dark') }));
+  check('ダッシュボード: 元の明るい配色のまま、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.btn && !darkInfo.dark, JSON.stringify(darkInfo));
   await page.emulateMedia({ media: 'print' });
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   const pr = await page.evaluate(() => {
@@ -1088,7 +1088,7 @@ section('8. ダッシュボード・保全レポート');
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
   await page.emulateMedia({ media: 'screen' });
   const afterN = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
-  check('ダッシュボード: 印刷ではグラフが白地の画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
+  check('ダッシュボード: 印刷ではグラフが画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
     pr.n >= 1 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0, JSON.stringify(pr) + afterN);
   await page.click('#fy-prev');
   await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1, { timeout: 8000 });

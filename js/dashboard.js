@@ -16,7 +16,7 @@ import {
   heatmapGrid, heatStep, HEAT_WEEKDAYS, HEAT_BANDS,
 } from '/js/dashboard-calc.js';
 import {
-  setChartDefaults, setChartTheme, getChartTheme, drawTroubleTrend, drawStacked, hoursTooltip,
+  setChartDefaults, setChartFlat, drawTroubleTrend, drawStacked, hoursTooltip,
   categorySlots, slotVar, catVar, fillMonths, seriesByCategory, downtimeSeries,
 } from '/js/dash-charts.js';
 
@@ -25,9 +25,8 @@ const app = document.getElementById('app');
 // ---------------- グラフ描画 ----------------
 //   グラフの描画・色・データの整形は js/dash-charts.js（印刷用レポートと共有）。
 
-// 画面はダーク、印刷・PDFは白地。DOM の色は CSS 変数（--s0〜 / --h0〜）で切り替わる。
-// 画面に描いたグラフ（canvas）は、印刷の直前だけ白地で描き直した画像に差し替える（印刷はインクを使い切らない・
-// ダークの文字色が白紙に消えない）。描き直せるよう、グラフごとの描画関数を覚えておく。
+// 画面に描いたグラフ（canvas）は、印刷の直前だけベタ塗りで描き直した画像に差し替える（画面の光るグラデーションを
+// 印刷に持ち込まない・印刷レイアウトの幅でも崩れない）。描き直せるよう、グラフごとの描画関数を覚えておく。
 let chartRegistry = [];
 let printUser = '';
 const registerChart = (id, draw) => { chartRegistry.push({ id, draw }); draw(id, {}); };
@@ -44,8 +43,7 @@ function injectPrintImages() {
     const off = document.createElement('canvas');
     off.width = w;
     off.height = h;
-    const prevTheme = getChartTheme();
-    setChartTheme('light');
+    setChartFlat(true); // 印刷はベタ塗り
     try {
       const chart = draw(off, { animation: false, responsive: false, devicePixelRatio: 2 });
       const url = off.toDataURL('image/png');
@@ -54,7 +52,7 @@ function injectPrintImages() {
     } catch (err) {
       console.error('print chart failed:', err && err.stack ? err.stack : err);
     } finally {
-      setChartTheme(prevTheme);
+      setChartFlat(false);
     }
   }
 }
@@ -357,11 +355,8 @@ async function renderDashboard() {
 
   const loadTab = async () => {
     reportBars.hidden = activeTab !== 'report';
-    // 印刷用CSS（body.rpt-page）はどちらのタブでも効かせる（ヘッダー・操作欄を隠して白地で印刷する）。
-    // ダークの見た目はサマリーのときだけ（レポートは書類なので白地）
+    // 印刷用CSS（body.rpt-page）はどちらのタブでも効かせる（ヘッダー・操作欄を隠して印刷する）
     document.body.classList.add('rpt-page');
-    document.body.classList.toggle('dash-dark', activeTab === 'summary');
-    setChartTheme(activeTab === 'summary' ? 'dark' : 'light');
     if (activeTab === 'report') {
       syncChips();
       await renderReportTab(fromInput.value || defaultFrom, toInput.value || defaultTo);
@@ -408,8 +403,7 @@ async function renderDashboard() {
       render(app, el('p', { class: 'notice is-error' }, 'グラフライブラリの読み込みに失敗しました。インターネット接続を確認してください。'));
       return;
     }
-    document.body.classList.add('dash-page', 'dash-dark');
-    setChartTheme('dark');
+    document.body.classList.add('dash-page');
     setChartDefaults();
     await renderDashboard();
   } catch (err) {

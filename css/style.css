@@ -1585,9 +1585,8 @@ input.is-abnormal {
 }
 
 /* ダッシュボード（サマリー）
-   色は CSS 変数で持つ。基本は白地（＝印刷・PDF・レポート）、画面のサマリーは @media screen の中で
-   body.dash-dark のときだけダークにする（印刷では @media screen が効かないので自動的に白地に戻る）。
-   --s0〜--s7 は js/dash-charts.js のグラフの色（ジャンル・休止区分ごとの固定色）と同じ順番。 */
+   色は CSS 変数で持つ。--s0〜--s7 は js/dash-charts.js のグラフの色（ジャンル・休止区分ごとの固定色）と同じ順番。
+   画面だけの演出（光・動き）は @media screen の中に置く（印刷には効かない）。 */
 body.dash-page {
   --d-card: #fff; --d-card2: #fff; --d-border: #e6ebf4; --d-text: #1e293b; --d-muted: #64748b; --d-link: #1e40af;
   --d-track: #eef2f7; --d-chip: #eef3ff; --d-shadow: 0 2px 10px rgba(15, 23, 42, 0.05); --d-num: #1e293b;
@@ -1599,84 +1598,64 @@ body.dash-page {
 }
 body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 360px); }
 .dash-page .container { padding-top: 12px; }
-@media screen {
-  body.dash-page.dash-dark {
-    --d-card: #16213a; --d-card2: #0f1a30; --d-border: rgba(130, 160, 230, 0.18); --d-text: #e8eefb; --d-muted: #9fb0cc; --d-link: #8db8ff;
-    --d-track: rgba(148, 163, 184, 0.16); --d-chip: rgba(99, 140, 255, 0.16); --d-shadow: 0 10px 28px rgba(0, 0, 0, 0.38); --d-num: #fff;
-    --d-good-fg: #5eead4; --d-good-bg: rgba(20, 184, 166, 0.18); --d-bad-fg: #ff9a9a; --d-bad-bg: rgba(239, 68, 68, 0.2); --d-same-bg: rgba(148, 163, 184, 0.16);
-    --d-row-bg: rgba(239, 68, 68, 0.09); --d-row-border: rgba(239, 68, 68, 0.28); --d-warn: #fbbf24; --d-mini: rgba(148, 163, 184, 0.22); --d-icon-bg: rgba(255, 255, 255, 0.08);
-    --d-tint-blue: rgba(59, 130, 246, 0.2); --d-tint-orange: rgba(235, 104, 52, 0.2); --d-heat-hi: #0b1220;
-    --s0: #3987e5; --s1: #d95926; --s2: #199e70; --s3: #c98500; --s4: #d55181; --s5: #0ca30c; --s6: #9085e9; --s7: #e66767; --s-neutral: #64748b;
-    --h0: rgba(148, 163, 184, 0.09); --h1: #1b3a6e; --h2: #24559f; --h3: #2f78e0; --h4: #62a3ff; --h5: #b6d4ff;
-    color: var(--d-text);
-    background:
-      radial-gradient(900px 420px at 88% -8%, rgba(59, 130, 246, 0.24), transparent 62%),
-      radial-gradient(700px 380px at -8% 6%, rgba(139, 92, 246, 0.18), transparent 60%),
-      #0a1020;
-  }
-  body.dash-dark .app-header { background: #0d1530; border-bottom: 1px solid rgba(130, 160, 230, 0.22); box-shadow: none; }
-  body.dash-dark .loading, body.dash-dark .empty, body.dash-dark .hint { color: var(--d-muted); }
-  body.dash-dark .downtime-warn { color: var(--d-warn); }
-}
 
-/* かっこよさの上積み（画面のダークだけ。印刷・白地には効かない） */
+/* かっこよさの上積み（画面だけ。印刷には効かない） */
 @media screen {
   /* 背景: うっすら格子（計器盤のような質感） */
-  body.dash-dark::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background-image: linear-gradient(rgba(130, 160, 230, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(130, 160, 230, 0.045) 1px, transparent 1px);
-    background-size: 44px 44px; -webkit-mask-image: linear-gradient(180deg, #000 0, transparent 75%); mask-image: linear-gradient(180deg, #000 0, transparent 75%); }
-  body.dash-dark .container { position: relative; z-index: 1; }
+  body.dash-page::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: linear-gradient(rgba(59, 99, 216, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 99, 216, 0.06) 1px, transparent 1px);
+    background-size: 44px 44px; -webkit-mask-image: linear-gradient(180deg, #000 0, transparent 70%); mask-image: linear-gradient(180deg, #000 0, transparent 70%); }
+  body.dash-page .container { position: relative; z-index: 1; }
 
-  /* カード: ガラスのような質感と、触れたときの光 */
-  body.dash-dark .chart-wrap, body.dash-dark .dash-kpi, body.dash-dark .dash-insight {
-    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-    box-shadow: var(--d-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* カード: 触れたときに浮いて、青く光る */
+  .chart-wrap, .dash-kpi, .dash-insight {
+    box-shadow: var(--d-shadow), inset 0 1px 0 #fff;
     transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
   }
-  body.dash-dark .chart-wrap:hover, body.dash-dark .dash-kpi:hover, body.dash-dark .dash-insight:hover {
-    transform: translateY(-2px); border-color: rgba(141, 184, 255, 0.45);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 22px rgba(99, 140, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  .chart-wrap:hover, .dash-kpi:hover, .dash-insight:hover {
+    transform: translateY(-2px); border-color: rgba(59, 99, 216, 0.4);
+    box-shadow: 0 14px 30px rgba(30, 64, 175, 0.16), 0 0 0 1px rgba(59, 99, 216, 0.18), inset 0 1px 0 #fff;
   }
 
   /* 年度の帯: ゆっくり流れる光と、脈打つ点 */
-  body.dash-dark .dash-hero { animation: dash-flow 14s ease-in-out infinite; position: relative; overflow: hidden; }
-  body.dash-dark .dash-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.13) 50%, transparent 65%); transform: translateX(-120%); animation: dash-sheen 7s ease-in-out infinite; }
-  body.dash-dark .dash-hero > * { position: relative; z-index: 1; }
-  body.dash-dark .dash-hero-kicker::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #5eead4; box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.7); animation: dash-pulse 2s ease-out infinite; vertical-align: 1px; }
-  body.dash-dark .dash-hero .fy-label strong { text-shadow: 0 0 22px rgba(165, 190, 255, 0.65); }
+  .dash-hero { animation: dash-flow 14s ease-in-out infinite; position: relative; overflow: hidden; box-shadow: 0 10px 26px rgba(30, 64, 175, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+  .dash-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.2) 50%, transparent 65%); transform: translateX(-120%); animation: dash-sheen 7s ease-in-out infinite; }
+  .dash-hero > * { position: relative; z-index: 1; }
+  .dash-hero-kicker::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #7dffcf; box-shadow: 0 0 0 0 rgba(125, 255, 207, 0.75); animation: dash-pulse 2s ease-out infinite; vertical-align: 1px; }
+  .dash-hero .fy-label strong { text-shadow: 0 0 18px rgba(255, 255, 255, 0.5); }
+  .dash-tabs .tab-btn.is-active { box-shadow: 0 4px 14px rgba(30, 64, 175, 0.45); }
 
-  /* 数字・順位・濃いマスを光らせる */
-  body.dash-dark .dash-kpi-value { filter: drop-shadow(0 0 14px rgba(120, 160, 255, 0.5)); }
-  body.dash-dark .dash-kpi.is-orange .dash-kpi-value { filter: drop-shadow(0 0 14px rgba(255, 140, 90, 0.5)); }
-  body.dash-dark .dash-rank.r1 { box-shadow: 0 0 12px rgba(245, 179, 1, 0.7); }
-  body.dash-dark .dash-rank.r2 { box-shadow: 0 0 10px rgba(163, 174, 191, 0.5); }
-  body.dash-dark .dash-rank.r3 { box-shadow: 0 0 10px rgba(217, 145, 91, 0.55); }
-  body.dash-dark .dash-heat-cell.h4 { box-shadow: 0 0 10px rgba(98, 163, 255, 0.45); }
-  body.dash-dark .dash-heat-cell.h5 { box-shadow: 0 0 14px rgba(182, 212, 255, 0.7); }
-  body.dash-dark .dash-times { box-shadow: 0 0 12px rgba(239, 68, 68, 0.6); }
-  body.dash-dark .chart-icon { box-shadow: inset 0 0 0 1px rgba(141, 184, 255, 0.28), 0 0 12px rgba(99, 140, 255, 0.25); }
-  body.dash-dark .dash-print-btn { box-shadow: 0 0 0 1px rgba(141, 184, 255, 0.25); }
+  /* 数字・順位・濃いマス・バーを光らせる */
+  .dash-kpi::before { height: 4px; box-shadow: 0 0 14px 1px var(--accent); }
+  .dash-kpi-value { background: linear-gradient(180deg, #0f172a 25%, #1e40af 150%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 10px rgba(30, 64, 175, 0.2)); }
+  .dash-kpi.is-orange .dash-kpi-value { background: linear-gradient(180deg, #0f172a 25%, #c2410c 150%); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 4px 10px rgba(194, 65, 12, 0.2)); }
+  .dash-rank.r1 { box-shadow: 0 0 12px rgba(245, 179, 1, 0.65); }
+  .dash-rank.r2 { box-shadow: 0 0 10px rgba(123, 135, 153, 0.45); }
+  .dash-rank.r3 { box-shadow: 0 0 10px rgba(185, 105, 47, 0.5); }
+  .dash-heat-cell.h4 { box-shadow: 0 2px 8px rgba(37, 106, 191, 0.4); }
+  .dash-heat-cell.h5 { box-shadow: 0 3px 12px rgba(13, 54, 107, 0.5); }
+  .dash-times { box-shadow: 0 2px 10px rgba(220, 38, 38, 0.45); }
+  .dash-bar-track span { box-shadow: 0 0 8px rgba(30, 64, 175, 0.25); }
+  .chart-icon { box-shadow: inset 0 0 0 1px rgba(59, 99, 216, 0.2), 0 2px 8px rgba(59, 99, 216, 0.18); }
 }
 @keyframes dash-flow { 0%, 100% { background-position: 0 0, 0% 50%; } 50% { background-position: 0 0, 100% 50%; } }
 @keyframes dash-sheen { 0%, 55% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
-@keyframes dash-pulse { 0% { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.7); } 100% { box-shadow: 0 0 0 9px rgba(94, 234, 212, 0); } }
+@keyframes dash-pulse { 0% { box-shadow: 0 0 0 0 rgba(125, 255, 207, 0.75); } 100% { box-shadow: 0 0 0 9px rgba(125, 255, 207, 0); } }
 @media (prefers-reduced-motion: reduce) {
-  body.dash-dark .dash-hero, body.dash-dark .dash-hero::after, body.dash-dark .dash-hero-kicker::before { animation: none !important; }
-  body.dash-dark .chart-wrap, body.dash-dark .dash-kpi, body.dash-dark .dash-insight { transition: none; }
+  .dash-hero, .dash-hero::after, .dash-hero-kicker::before { animation: none !important; }
+  .chart-wrap, .dash-kpi, .dash-insight { transition: none; }
 }
 
 /* タブ: ピル型の切り替え */
 .dash-tabs { background: var(--d-card); border: 1px solid var(--d-border); border-radius: 999px; padding: 4px; gap: 4px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
 .dash-tabs .tab-btn { border: 0; border-radius: 999px; padding: 9px 8px; font-weight: 600; color: var(--d-muted); transition: background 0.15s, color 0.15s; }
 .dash-tabs .tab-btn.is-active { background: linear-gradient(135deg, #1e40af, #3b63d8); color: #fff; box-shadow: 0 2px 6px rgba(30, 64, 175, 0.35); }
-@media screen { body.dash-dark .dash-tabs .tab-btn.is-active { background: linear-gradient(135deg, #2f5be0, #7c3aed); box-shadow: 0 0 18px rgba(99, 102, 241, 0.55); } }
 
 /* 年度の切り替え（ヒーロー帯） */
 .dash-hero { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; padding: 14px 12px; border-radius: 16px; color: #fff;
-  background: radial-gradient(circle at 85% -20%, rgba(255, 255, 255, 0.22), transparent 55%), linear-gradient(135deg, #1e3a8a 0%, #2d54c8 55%, #3b82f6 100%);
+  background: radial-gradient(circle at 85% -20%, rgba(255, 255, 255, 0.22), transparent 55%), linear-gradient(135deg, #1e3a8a 0%, #2d54c8 55%, #3b82f6 100%); background-size: 100% 100%, 220% 220%;
   box-shadow: 0 6px 18px rgba(30, 64, 175, 0.28); }
-@media screen { body.dash-dark .dash-hero { background: radial-gradient(circle at 88% -30%, rgba(34, 211, 238, 0.45), transparent 55%), linear-gradient(120deg, #1b2f8f 0%, #5b3fd6 55%, #7c3aed 100%); background-size: 100% 100%, 220% 220%; box-shadow: 0 10px 30px rgba(91, 63, 214, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.14); } }
 .dash-hero .fy-label { color: #fff; }
 .dash-hero .fy-label strong { display: block; font-size: 28px; font-weight: 800; letter-spacing: 0.04em; line-height: 1.2; }
 .dash-hero .fy-label .hint { color: rgba(255, 255, 255, 0.85) !important; }
@@ -1696,7 +1675,7 @@ body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 
 @media (min-width: 760px) {
   .chart-grid { grid-template-columns: 1fr 1fr; }
 }
-.chart-wrap { min-width: 0; color: var(--d-text); background: linear-gradient(160deg, var(--d-card) 0%, var(--d-card2) 100%); border: 1px solid var(--d-border); border-radius: 16px; box-shadow: var(--d-shadow); padding: 18px 16px; animation: dash-rise 0.45s ease both; }
+.chart-wrap { min-width: 0; color: var(--d-text); background: linear-gradient(160deg, var(--d-card) 0%, var(--d-card2) 100%); border: 1px solid var(--d-border); border-radius: 16px; box-shadow: var(--d-shadow); padding: 18px 16px; animation: dash-rise 0.45s ease backwards; }
 .chart-grid .chart-wrap:nth-child(2n) { animation-delay: 0.05s; }
 .chart-grid .chart-wrap:nth-child(3n) { animation-delay: 0.1s; }
 @keyframes dash-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -1709,17 +1688,15 @@ body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 
 
 /* 数字カード */
 .dash-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
-.dash-kpi { --accent: var(--s0); --tint: var(--d-tint-blue); position: relative; overflow: hidden; display: flex; flex-direction: column; min-width: 0; padding: 14px 14px 12px; border-radius: 16px; border: 1px solid var(--d-border); background: linear-gradient(160deg, var(--tint) 0%, var(--d-card) 60%); box-shadow: var(--d-shadow); color: var(--d-text); animation: dash-rise 0.45s ease both; }
+.dash-kpi { --accent: var(--s0); --tint: var(--d-tint-blue); position: relative; overflow: hidden; display: flex; flex-direction: column; min-width: 0; padding: 14px 14px 12px; border-radius: 16px; border: 1px solid var(--d-border); background: linear-gradient(160deg, var(--tint) 0%, var(--d-card) 60%); box-shadow: var(--d-shadow); color: var(--d-text); animation: dash-rise 0.45s ease backwards; }
 .dash-kpi::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--accent); }
 .dash-kpi.is-orange { --accent: var(--s1); --tint: var(--d-tint-orange); }
-@media screen { body.dash-dark .dash-kpi::before { height: 3px; box-shadow: 0 0 16px 1px var(--accent); } }
 .dash-kpi-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--d-muted); letter-spacing: 0.04em; }
 .dash-kpi-icon { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--d-icon-bg); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); font-size: 13px; }
 .dash-kpi-value { font-size: 40px; font-weight: 800; line-height: 1.15; color: var(--d-num); margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .dash-kpi-value small { font-size: 13px; font-weight: 600; color: var(--d-muted); margin-left: 3px; }
 /* 「12時間30分」のような文字の値ははみ出さないよう小さく */
 .dash-kpi-value.is-text { font-size: 24px; line-height: 1.9; }
-@media screen { body.dash-dark .dash-kpi-value { background: linear-gradient(180deg, #fff 30%, #a9c6ff 130%); -webkit-background-clip: text; background-clip: text; color: transparent; } }
 .dash-delta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; }
 .dash-badge { max-width: 100%; font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; line-height: 1.4; }
 @media (max-width: 420px) { .dash-badge { font-size: 11px; padding: 2px 7px; } .dash-kpi { padding: 14px 12px 12px; } }
@@ -1751,7 +1728,6 @@ a.dash-bar-name:hover { text-decoration: underline; }
 .dash-bar-value { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--d-text); }
 .dash-bar-track { height: 10px; background: var(--d-track); border-radius: 999px; margin-top: 5px; overflow: hidden; }
 .dash-bar-track span { display: block; height: 100%; border-radius: 999px; }
-@media screen { body.dash-dark .dash-bar-track span { box-shadow: 0 0 10px rgba(255, 255, 255, 0.18); } }
 .dash-rank { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; font-weight: 800; color: #475569; background: #e2e8f0; }
 .dash-rank.r1 { color: #fff; background: linear-gradient(135deg, #f5b301, #e08a00); }
 .dash-rank.r2 { color: #fff; background: linear-gradient(135deg, #a3aebf, #7b8799); }
