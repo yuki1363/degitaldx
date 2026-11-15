@@ -5,24 +5,47 @@
 import { formatDowntime } from '/js/downtime.js';
 import { categorySlots, kindSlots } from '/js/dashboard-calc.js';
 
-// 系列の色（色覚の違いがあっても隣どうしを見分けられる順に並べた8色。順番は変えない）
-export const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
-export const NEUTRAL = '#94a3b8';   // 未分類・区分なし・前年度
-const SURFACE = '#ffffff';
-const INK_MUTED = '#64748b';
-const GRID = '#eef2f7';
-export const slotColor = (slot) => (slot >= 0 && slot < SERIES.length ? SERIES[slot] : NEUTRAL);
+// 色のテーマ。画面のダッシュボードはダーク、印刷・PDF・レポートは白地（印刷でインクを使い切らない）。
+//   どちらも色覚の違いがあっても隣どうしを見分けられる検証済みの順番（並べ替えない）。
+//   色は「何番目に多いか」ではなく「どのジャンル／休止区分か」で決める（年度・期間を変えても同じ色）。
+const THEMES = {
+  light: {
+    series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
+    neutral: '#94a3b8', surface: '#ffffff', ink: '#64748b', grid: '#eef2f7', axis: '#cbd5e1', tooltip: '#1e293b',
+  },
+  dark: {
+    series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767'],
+    neutral: '#64748b', surface: '#131c31', ink: '#9fb0cc', grid: 'rgba(148, 163, 184, 0.14)', axis: 'rgba(148, 163, 184, 0.35)', tooltip: '#0b1220',
+  },
+};
+let theme = 'light';
+const T = () => THEMES[theme];
+export const getChartTheme = () => theme;
+// 系列の色の数（CSS 側の --s0〜--s7 と対応）
+export const SERIES_COUNT = 8;
+export const seriesColor = (i) => T().series[i];
+export const slotColor = (slot) => (slot >= 0 && slot < SERIES_COUNT ? T().series[slot] : T().neutral);
+// 画面の HTML（棒グラフ・点など）用。テーマの切り替えは CSS 変数に任せる
+export const slotVar = (slot) => (slot >= 0 && slot < SERIES_COUNT ? `var(--s${slot})` : 'var(--s-neutral)');
+
+export const catVar = (slots, id) => slotVar(id == null ? -1 : (slots.get(Number(id)) ?? -1));
+
+export function setChartTheme(name) {
+  theme = THEMES[name] ? name : 'light';
+  if (typeof Chart === 'undefined') return;
+  Chart.defaults.color = T().ink;
+  Chart.defaults.plugins.tooltip.backgroundColor = T().tooltip;
+}
 
 export function setChartDefaults() {
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   Chart.defaults.font.size = 11;
-  Chart.defaults.color = INK_MUTED;
   Chart.defaults.plugins.legend.labels.boxWidth = 10;
   Chart.defaults.plugins.legend.labels.boxHeight = 10;
   Chart.defaults.plugins.legend.labels.padding = 12;
-  Chart.defaults.plugins.tooltip.backgroundColor = '#1e293b';
   Chart.defaults.plugins.tooltip.padding = 10;
   Chart.defaults.plugins.tooltip.cornerRadius = 8;
+  setChartTheme(theme);
 }
 
 const nodeOf = (c) => (typeof c === 'string' ? document.getElementById(c) : c);
@@ -33,19 +56,20 @@ function fresh(c) {
   return node;
 }
 
-const X_SCALE = { grid: { display: false }, border: { color: '#cbd5e1' }, ticks: { maxRotation: 0, autoSkip: true } }; // 重なるときだけ間引く
-const yScale = (extra = {}) => ({ beginAtZero: true, grid: { color: GRID }, border: { display: false }, ...extra });
-const BAR = { borderRadius: 6, maxBarThickness: 24, borderColor: SURFACE };
+// 重なるときだけ月ラベルを間引く。色はテーマで変わるので、描くたびに作る
+const xScale = () => ({ grid: { display: false }, border: { color: T().axis }, ticks: { maxRotation: 0, autoSkip: true } });
+const yScale = (extra = {}) => ({ beginAtZero: true, grid: { color: T().grid }, border: { display: false }, ...extra });
+const bar = () => ({ borderRadius: 6, maxBarThickness: 24, borderColor: T().surface });
 
 // トラブル月別推移（棒）。prevCounts があれば前年度を点線で重ねる
 export function drawTroubleTrend(canvas, labels, counts, fy, prevCounts, extra = {}) {
   const node = fresh(canvas);
-  const datasets = [{ type: 'bar', label: fy ? `FY${fy}` : 'トラブル件数', data: counts, backgroundColor: SERIES[0], ...BAR, order: 2, pointStyle: 'rect' }];
+  const datasets = [{ type: 'bar', label: fy ? `FY${fy}` : 'トラブル件数', data: counts, backgroundColor: seriesColor(0), ...bar(), order: 2, pointStyle: 'rect' }];
   if (prevCounts) {
     datasets.push({
       type: 'line', label: `前年度（FY${fy - 1}）`, data: prevCounts, order: 1,
-      borderColor: NEUTRAL, backgroundColor: SURFACE, borderWidth: 2, borderDash: [5, 4],
-      pointRadius: 3, pointHoverRadius: 5, pointBorderWidth: 2, pointBackgroundColor: SURFACE, tension: 0.25, spanGaps: false,
+      borderColor: T().neutral, backgroundColor: T().surface, borderWidth: 2, borderDash: [5, 4],
+      pointRadius: 3, pointHoverRadius: 5, pointBorderWidth: 2, pointBackgroundColor: T().surface, tension: 0.25, spanGaps: false,
       pointStyle: 'line',
     });
   }
@@ -58,7 +82,7 @@ export function drawTroubleTrend(canvas, labels, counts, fy, prevCounts, extra =
         legend: { display: !!prevCounts, position: 'bottom', reverse: true, labels: { usePointStyle: true, pointStyleWidth: 22 } },
         tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y ?? 0}件` } },
       },
-      scales: { x: X_SCALE, y: yScale({ ticks: { precision: 0 } }) },
+      scales: { x: xScale(), y: yScale({ ticks: { precision: 0 } }) },
       ...extra,
     },
   });
@@ -69,7 +93,7 @@ export function drawStacked(canvas, labels, datasets, { yTitle, tooltipLabel, ex
   const node = fresh(canvas);
   return new Chart(node, {
     type: 'bar',
-    data: { labels, datasets: datasets.map((d) => ({ ...BAR, borderRadius: 3, borderWidth: { top: 1, right: 0, bottom: 0, left: 0 }, ...d })) },
+    data: { labels, datasets: datasets.map((d) => ({ ...bar(), borderRadius: 3, borderWidth: { top: 1, right: 0, bottom: 0, left: 0 }, ...d })) },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
@@ -78,7 +102,7 @@ export function drawStacked(canvas, labels, datasets, { yTitle, tooltipLabel, ex
         tooltip: { filter: (c) => (c.parsed.y ?? 0) > 0, callbacks: tooltipLabel ? { label: tooltipLabel } : {} },
       },
       scales: {
-        x: { ...X_SCALE, stacked: true },
+        x: { ...xScale(), stacked: true },
         y: yScale({ stacked: true, ticks: { precision: yTitle ? undefined : 0 }, title: yTitle ? { display: true, text: yTitle } : undefined }),
       },
       ...extra,
@@ -91,11 +115,11 @@ export function drawHBar(canvas, labels, values, colors, { valueText = (v) => `$
   const node = fresh(canvas);
   return new Chart(node, {
     type: 'bar',
-    data: { labels, datasets: [{ data: values, backgroundColor: colors, ...BAR, borderRadius: 4, maxBarThickness: 18 }] },
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, ...bar(), borderRadius: 4, maxBarThickness: 18 }] },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => valueText(c.parsed.x) } } },
-      scales: { x: yScale({ ticks: { precision: 0 } }), y: { grid: { display: false }, border: { color: '#cbd5e1' } } },
+      scales: { x: yScale({ ticks: { precision: 0 } }), y: { grid: { display: false }, border: { color: T().axis } } },
       ...extra,
     },
   });

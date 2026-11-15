@@ -7,7 +7,7 @@ import { el, render, formatDate, jstTodayStr, toJstDateStr } from '/js/util.js';
 import { isValidPeriod, shiftDate, monthsBetween } from '/js/report-period.js';
 import { formatDowntime, downtimeOf } from '/js/downtime.js';
 import {
-  setChartDefaults, drawTroubleTrend, drawStacked, drawHBar, hoursTooltip,
+  setChartDefaults, setChartTheme, getChartTheme, drawTroubleTrend, drawStacked, drawHBar, hoursTooltip,
   categorySlots, catColor, fillMonths, seriesByCategory, downtimeSeries,
 } from '/js/dash-charts.js';
 
@@ -37,6 +37,8 @@ function chartImage(title, draw) {
   canvas.width = CHART_W;
   canvas.height = CHART_H;
   const prevSize = Chart.defaults.font.size;
+  const prevTheme = getChartTheme();
+  setChartTheme('light'); // レポートは白地（ダッシュボードがダークでも）
   Chart.defaults.font.size = 13; // 印刷では縮むので、画面用より大きめの文字で描く
   try {
     const chart = draw(canvas, { animation: false, responsive: false, devicePixelRatio: 2 });
@@ -51,6 +53,7 @@ function chartImage(title, draw) {
     return null;
   } finally {
     Chart.defaults.font.size = prevSize;
+    setChartTheme(prevTheme);
   }
 }
 const section = (title, body) => el('section', { class: 'rpt-section' }, [el('h3', { class: 'rpt-h3' }, title), body]);
@@ -94,7 +97,6 @@ export async function renderReport(docBox, from, to, user) {
   const monthLabels = months.map((m, i) => `${months[0].slice(0, 4) !== months.at(-1).slice(0, 4) && (i === 0 || m.endsWith('-01')) ? `${m.slice(2, 4)}/` : ''}${Number(m.slice(5))}月`);
   const slots = categorySlots(stats.categories || []);
   const byCategory = stats.trouble_by_category || [];
-  const dtSeries = downtimeSeries(months, downtime.by_month || []);
   const charts = (act.troubles ?? 0) > 0 || downtime.counted > 0 ? [
     (act.troubles ?? 0) > 0 && chartImage('トラブル月別推移（件数）', (c, extra) =>
       drawTroubleTrend(c, monthLabels, fillMonths(months, stats.trouble_trend || []), null, null, extra)),
@@ -105,7 +107,7 @@ export async function renderReport(docBox, from, to, user) {
         seriesByCategory(months, stats.trouble_trend_by_category || [], slots).map((s) => ({ label: s.category_name, data: s.counts, backgroundColor: s.color })),
         { extra })),
     downtime.counted > 0 && chartImage('休止時間の月推移（休止区分別・時間）', (c, extra) =>
-      drawStacked(c, monthLabels, dtSeries.map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })), { tooltipLabel: hoursTooltip, extra })),
+      drawStacked(c, monthLabels, downtimeSeries(months, downtime.by_month || []).map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })), { tooltipLabel: hoursTooltip, extra })),
   ].filter(Boolean) : [];
 
   render(docBox, [
