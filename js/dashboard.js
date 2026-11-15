@@ -6,203 +6,261 @@
 
 import { api } from '/js/api.js';
 import { getCurrentUser } from '/js/auth.js';
-import { el, render, toJstDateStr, jstTodayStr } from '/js/util.js';
+import { el, render, jstTodayStr } from '/js/util.js';
 import { exportTroubleCsv } from '/js/trouble-csv.js';
 import { periodFor, fiscalYearOf, fiscalYearRange, fiscalMonths } from '/js/report-period.js';
 import { renderReport } from '/js/report-summary.js';
 import { formatDowntime } from '/js/downtime.js';
+import {
+  comparePeriod, yoy, worstEquipment, unassignedCount, repeatEquipment,
+  heatmapGrid, heatStep, HEAT_WEEKDAYS, HEAT_BANDS,
+} from '/js/dashboard-calc.js';
+import {
+  setChartDefaults, setChartFlat, drawTroubleTrend, drawStacked, hoursTooltip,
+  categorySlots, slotVar, catVar, fillMonths, seriesByCategory, downtimeSeries,
+} from '/js/dash-charts.js';
 
 const app = document.getElementById('app');
 
 // ---------------- グラフ描画 ----------------
+//   グラフの描画・色・データの整形は js/dash-charts.js（印刷用レポートと共有）。
 
-const CHART_COLORS = {
-  blue:   'rgba(30,64,175,0.85)',
-  orange: 'rgba(234,88,12,0.85)',
-  green:  'rgba(21,128,61,0.85)',
-  purple: 'rgba(107,33,168,0.85)',
-  red:    'rgba(220,38,38,0.85)',
-  teal:   'rgba(17,94,89,0.85)',
-  indigo: 'rgba(67,56,202,0.85)',
-  yellow: 'rgba(161,98,7,0.85)',
-};
-const PALETTE = Object.values(CHART_COLORS);
+// 画面に描いたグラフ（canvas）は、印刷の直前だけベタ塗りで描き直した画像に差し替える（画面の光るグラデーションを
+// 印刷に持ち込まない・印刷レイアウトの幅でも崩れない）。描き直せるよう、グラフごとの描画関数を覚えておく。
+let chartRegistry = [];
+let printUser = '';
+const registerChart = (id, draw) => { chartRegistry.push({ id, draw }); draw(id, {}); };
 
-function makeCanvas(id) {
-  return el('canvas', { id, style: 'max-height:240px' });
-}
-
-function destroyChart(id) {
-  const existing = Chart.getChart(id);
-  if (existing) existing.destroy();
-}
-
-function drawTroubleTrend(canvasId, labels, counts) {
-  destroyChart(canvasId);
-  new Chart(document.getElementById(canvasId), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{ label: 'トラブル件数', data: counts, backgroundColor: CHART_COLORS.blue }],
-    },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } },
-  });
-}
-
-function drawTroubleByCategory(canvasId, data) {
-  destroyChart(canvasId);
-  new Chart(document.getElementById(canvasId), {
-    type: 'doughnut',
-    data: {
-      labels:   data.map((d) => d.category_name),
-      datasets: [{ data: data.map((d) => d.count), backgroundColor: PALETTE.slice(0, data.length) }],
-    },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } },
-  });
-}
-
-// ジャンル別の月推移（積み上げ棒グラフ）。縦＝件数、横＝年度の12か月、色＝ジャンル
-function drawTroubleTrendByCategory(canvasId, labels, series) {
-  destroyChart(canvasId);
-  new Chart(document.getElementById(canvasId), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: series.map((s, i) => ({ label: s.category_name, data: s.counts, backgroundColor: PALETTE[i % PALETTE.length] })),
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'bottom' } },
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } },
-    },
-  });
-}
-
-// 休止時間の月推移（積み上げ棒グラフ）。縦＝時間、横＝年度の12か月、色＝休止区分
-function drawDowntimeTrend(canvasId, labels, series) {
-  destroyChart(canvasId);
-  new Chart(document.getElementById(canvasId), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: series.map((s, i) => ({ label: s.kind, data: s.hours, backgroundColor: PALETTE[i % PALETTE.length] })),
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: 'bottom' },
-        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${formatDowntime(Math.round(c.parsed.y * 60))}` } },
-      },
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: '時間' } } },
-    },
-  });
-}
-
-// 月×休止区分の行（分）→ 休止区分ごとの12か月ぶんの時間（合計の多い区分順）
-function downtimeSeries(months, rows) {
-  const map = new Map();
-  for (const r of rows) {
-    if (!map.has(r.kind)) map.set(r.kind, new Map());
-    map.get(r.kind).set(r.month, r.minutes);
+function injectPrintImages() {
+  for (const { id, draw } of chartRegistry) {
+    const canvas = document.getElementById(id);
+    const box = canvas && canvas.parentElement;
+    // 大きさは描いてあるグラフ自身から取る（ブラウザによっては印刷用の表示に切り替わった後に呼ばれ、枠が 0 になるため）
+    const live = canvas && Chart.getChart(canvas);
+    const w = (live && live.width) || (box && box.clientWidth);
+    const h = (live && live.height) || (box && box.clientHeight);
+    if (!box || !w || !h) continue;
+    const off = document.createElement('canvas');
+    off.width = w;
+    off.height = h;
+    setChartFlat(true); // 印刷はベタ塗り
+    try {
+      const chart = draw(off, { animation: false, responsive: false, devicePixelRatio: 2 });
+      const url = off.toDataURL('image/png');
+      chart.destroy();
+      box.appendChild(el('img', { class: 'dash-print-img', src: url, alt: '' }));
+    } catch (err) {
+      console.error('print chart failed:', err && err.stack ? err.stack : err);
+    } finally {
+      setChartFlat(false);
+    }
   }
-  const sum = (a) => a.reduce((x, y) => x + y, 0);
-  return [...map.entries()]
-    .map(([kind, byMonth]) => ({ kind, hours: months.map((m) => Math.round(((byMonth.get(m) ?? 0) / 60) * 100) / 100) }))
-    .sort((a, b) => sum(b.hours) - sum(a.hours));
+}
+const removePrintImages = () => document.querySelectorAll('.dash-print-img').forEach((n) => n.remove());
+window.addEventListener('beforeprint', injectPrintImages);
+window.addEventListener('afterprint', removePrintImages);
+
+// 高さを決めた枠の中に描く（縦長・横長どちらの画面でも同じ高さ）
+function makeCanvas(id) {
+  return el('div', { class: 'dash-canvas' }, el('canvas', { id }));
 }
 
 // ---------------- サマリータブ（年度ごと） ----------------
 
-// 年度の12か月（10月〜翌9月）に合わせて、データの無い月は0件で埋める
-function fillMonths(months, rows) {
-  const by = new Map(rows.map((r) => [r.month, r.count]));
-  return months.map((m) => by.get(m) ?? 0);
+const ymd = (s) => s.replace(/-/g, '/');
+const md = (s) => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
+
+// 前年度比の1行（▲増・▼減・＝同じ。トラブルも休止時間も「減ったら良い」）。色だけに頼らず記号と言葉で示す
+function deltaLine(id, cur, prev, fmt, prevLabel, prevEmpty) {
+  if (prev == null) return el('div', { class: 'dash-delta', id }, el('span', { class: 'dash-delta-note' }, '前年度比は取得できませんでした'));
+  // 前年度に記録が無いときは「◯件増」と出さない（比べる相手が無いだけで、悪くなったわけではない）
+  if (prevEmpty) return el('div', { class: 'dash-delta', id }, el('span', { class: 'dash-delta-note' }, `${prevLabel}の記録はありません`));
+  const d = yoy(cur, prev);
+  const badge = d.dir === 'same'
+    ? el('span', { class: 'dash-badge is-same' }, '＝ 前年度と同じ')
+    : el('span', { class: `dash-badge ${d.dir === 'up' ? 'is-bad' : 'is-good'}` },
+        `${d.dir === 'up' ? '▲' : '▼'} ${fmt(Math.abs(d.diff))}${d.dir === 'up' ? '増' : '減'}${d.pct == null ? '' : `（${d.pct > 0 ? '+' : ''}${d.pct}%）`}`);
+  return el('div', { class: 'dash-delta', id }, [badge, el('span', { class: 'dash-delta-note' }, `${prevLabel} ${fmt(prev)}`)]);
 }
 
-// 月×ジャンルの行 → ジャンルごとの12か月ぶんの件数（合計の多いジャンル順）
-function seriesByCategory(months, rows) {
-  const map = new Map();
-  for (const r of rows) {
-    if (!map.has(r.category_name)) map.set(r.category_name, new Map());
-    map.get(r.category_name).set(r.month, r.count);
-  }
-  return [...map.entries()]
-    .map(([category_name, byMonth]) => ({ category_name, counts: months.map((m) => byMonth.get(m) ?? 0) }))
-    .sort((a, b) => b.counts.reduce((x, y) => x + y, 0) - a.counts.reduce((x, y) => x + y, 0));
+// 数字カードの下の小さな棒（12か月の形だけを見せる飾り。数字は下のグラフで読む）
+function miniBars(values) {
+  const max = Math.max(...values, 0);
+  return el('div', { class: 'dash-mini', 'aria-hidden': 'true' }, values.map((v) =>
+    el('span', { class: v > 0 ? 'is-on' : '', style: `height:${max > 0 && v > 0 ? Math.max(12, Math.round((v / max) * 100)) : 6}%` })));
 }
+
+// 横棒の一覧（名前・棒・値）。rows: [{ label, value, text, color, href }]
+function barList(id, rows, { rank = false } = {}) {
+  const max = Math.max(...rows.map((r) => r.value), 0);
+  return el('div', { class: 'dash-bars', id }, rows.map((r, i) => el('div', { class: 'dash-bar-row' }, [
+    el('div', { class: 'dash-bar-head' }, [
+      rank ? el('span', { class: `dash-rank r${i + 1}` }, String(i + 1)) : null,
+      r.href ? el('a', { class: 'dash-bar-name', href: r.href }, r.label) : el('span', { class: 'dash-bar-name' }, r.label),
+      el('span', { class: 'dash-bar-value' }, r.text),
+    ]),
+    el('div', { class: 'dash-bar-track' }, el('span', { style: `width:${max > 0 ? Math.max(2, (r.value / max) * 100) : 0}%;background:${r.color || slotVar(0)}` })),
+  ])));
+}
+
+const equipLabel = (r) => (r.equipment_code ? `${r.equipment_code} ${r.equipment_name}` : r.equipment_name);
+const equipHref = (r) => `/pages/ledger?id=${encodeURIComponent(r.equipment_id)}`;
+
+// 曜日×時間帯の表（色の濃さ＝件数。件数はマスにも数字で出す）
+function heatmap(rows) {
+  const g = heatmapGrid(rows);
+  const cell = (v) => el('td', { class: `dash-heat-cell h${heatStep(v, g.max, 5)}` }, v > 0 ? String(v) : '');
+  return el('div', { id: 'dash-heatmap' }, [
+    el('table', { class: 'dash-heat' }, [
+      el('thead', {}, el('tr', {}, [el('th', {}, ''), ...HEAT_WEEKDAYS.map((w) => el('th', { scope: 'col' }, w))])),
+      el('tbody', {}, HEAT_BANDS.map((band, i) => el('tr', {}, [el('th', { scope: 'row' }, band), ...g.cells[i].map(cell)]))),
+    ]),
+    el('div', { class: 'dash-heat-legend' }, ['少', ...[1, 2, 3, 4, 5].map((i) => el('span', { class: `h${i}` })), '多']),
+  ]);
+}
+
+const card = (title, body, sub, icon) => el('section', { class: 'chart-wrap' }, [
+  el('h3', { class: 'chart-title' }, [icon ? el('span', { class: 'chart-icon', 'aria-hidden': 'true' }, icon) : null, title]),
+  sub ? el('p', { class: 'dash-sub' }, sub) : null,
+  body,
+]);
+const empty = (text = 'データがありません') => el('p', { class: 'empty' }, text);
 
 async function renderSummary(fy, currentFy, onChangeFy) {
   const box = app.querySelector('#tab-content');
+  chartRegistry = [];
   const { from, to } = fiscalYearRange(fy);
   const months = fiscalMonths(fy);
   const monthLabels = months.map((m) => `${Number(m.slice(5))}月`);
+  // 前年度比の比べる相手（今年度は「前年度の同じ時期まで」、過去の年度は前の年度まるごと）
+  const cmp = comparePeriod(fy, currentFy, jstTodayStr());
 
   // 年度の切り替え（未来の年度は見られない＝今年度より先へは進めない）
-  const fyBar = el('div', { class: 'fy-bar' }, [
-    el('button', { class: 'btn btn-sm', type: 'button', id: 'fy-prev', onclick: () => onChangeFy(fy - 1) }, '◀ 前の年度'),
+  const fyBar = el('div', { class: 'dash-hero fy-bar' }, [
+    el('button', { class: 'dash-nav', type: 'button', id: 'fy-prev', onclick: () => onChangeFy(fy - 1) }, '◀ 前の年度'),
     el('div', { class: 'fy-label', id: 'fy-label' }, [
+      el('span', { class: 'dash-hero-kicker' }, fy === currentFy ? '今年度' : '過去の年度'),
       el('strong', {}, `FY${fy}`),
-      el('span', { class: 'hint' }, ` ${from.replace(/-/g, '/')} 〜 ${to.replace(/-/g, '/')}`),
+      el('span', { class: 'hint' }, ` ${ymd(from)} 〜 ${ymd(to)}`),
     ]),
-    el('button', { class: 'btn btn-sm', type: 'button', id: 'fy-next', disabled: fy >= currentFy, onclick: () => onChangeFy(fy + 1) }, '次の年度 ▶'),
+    el('button', { class: 'dash-nav', type: 'button', id: 'fy-next', disabled: fy >= currentFy, onclick: () => onChangeFy(fy + 1) }, '次の年度 ▶'),
   ]);
 
   render(box, [fyBar, el('p', { class: 'loading' }, '集計中…')]);
-  const stats = await api.get(`/api/stats?from=${from}&to=${to}`);
+  const q = new URLSearchParams({ from, to });
+  if (cmp) { q.set('prev_from', cmp.from); q.set('prev_to', cmp.to); }
+  const stats = await api.get(`/api/stats?${q}`);
 
-  const series = seriesByCategory(months, stats.trouble_trend_by_category || []);
+  const slots = categorySlots(stats.categories || []);
   const counts = fillMonths(months, stats.trouble_trend || []);
-  const hasData = stats.activity.troubles > 0;
+  const total = stats.activity.troubles;
+  const hasData = total > 0;
   // 休止時間（トラブル入力の「休止時間」の合計）。古いAPIの応答（downtime なし）でも落ちないようにする
   const downtime = stats.downtime || { total_minutes: 0, counted: 0, unreadable: 0, by_month: [] };
-  const dtSeries = downtimeSeries(months, downtime.by_month || []);
   const hasDowntime = downtime.counted > 0;
+  const dtByMonth = months.map((_, i) => downtimeSeries(months, downtime.by_month || []).reduce((a, s) => a + s.hours[i], 0));
+
+  // 前年度（比べる相手）。古いAPIの応答（previous なし）では前年度比を出さない
+  const prev = stats.previous || null;
+  const prevMonths = fiscalMonths(fy - 1);
+  const prevBy = new Map(((prev && prev.trouble_trend) || []).map((r) => [r.month, r.count]));
+  // 比べる期間より後の月は線を引かない（null）
+  const prevCounts = prev && prev.troubles > 0 ? prevMonths.map((m) => (m <= cmp.to.slice(0, 7) ? (prevBy.get(m) ?? 0) : null)) : null;
+  const prevLabel = cmp && cmp.partial ? `前年度の同じ時期（〜${md(cmp.to)}）` : `前年度（FY${fy - 1}）`;
+
+  const equip = stats.equipment_trouble_counts || [];
+  const worstCount = worstEquipment(equip, 'trouble_count', 5);
+  const worstTime = worstEquipment(equip, 'downtime_minutes', 5);
+  const repeats = repeatEquipment(equip, 3);
+  const unassigned = unassignedCount(equip);
+
+  const byCategory = stats.trouble_by_category || [];
 
   render(box, [
+    el('div', { class: 'dash-print-meta' }, `設備保全ダッシュボード　出力: ${ymd(jstTodayStr())}${printUser ? `　出力者: ${printUser}` : ''}`),
     fyBar,
-    el('div', { class: 'summary-grid', style: 'grid-template-columns:1fr 1fr' }, [
-      el('div', { class: 'summary-card' }, [
-        el('div', { class: 'summary-label' }, 'トラブル'),
-        el('div', { class: 'summary-value' }, String(stats.activity.troubles)),
-        el('div', { class: 'summary-period' }, `FY${fy}（年度内）`),
+    el('div', { class: 'dash-toolbar rpt-controls' }, [
+      el('button', { class: 'dash-print-btn', type: 'button', id: 'dash-print', onclick: () => window.print() }, '🖨 グラフを印刷 / PDF保存'),
+      el('span', { class: 'dash-toolbar-hint' }, '表示中の年度のグラフ・カードを、A4で印刷できます（印刷は白地になります）'),
+    ]),
+    el('div', { class: 'dash-kpis' }, [
+      el('div', { class: 'dash-kpi is-blue', id: 'trouble-card' }, [
+        el('div', { class: 'dash-kpi-label' }, [el('span', { class: 'dash-kpi-icon', 'aria-hidden': 'true' }, '⚠️'), 'トラブル']),
+        el('div', { class: 'dash-kpi-value' }, [String(total), el('small', {}, '件')]),
+        deltaLine('trouble-delta', total, prev ? prev.troubles : null, (n) => `${n}件`, prevLabel, !!prev && prev.troubles === 0),
+        miniBars(counts),
       ]),
-      el('div', { class: 'summary-card', id: 'downtime-card' }, [
-        el('div', { class: 'summary-label' }, '休止時間'),
-        el('div', { class: 'summary-value summary-value-text' }, formatDowntime(downtime.total_minutes)),
-        el('div', { class: 'summary-period' }, `入力のあった ${downtime.counted} 件の合計`),
+      el('div', { class: 'dash-kpi is-orange', id: 'downtime-card' }, [
+        el('div', { class: 'dash-kpi-label' }, [el('span', { class: 'dash-kpi-icon', 'aria-hidden': 'true' }, '⏱'), '休止時間']),
+        el('div', { class: 'dash-kpi-value is-text' }, formatDowntime(downtime.total_minutes)),
+        deltaLine('downtime-delta', downtime.total_minutes, prev ? prev.downtime.total_minutes : null, formatDowntime, prevLabel, !!prev && prev.downtime.counted === 0),
+        el('div', { class: 'dash-kpi-foot' }, `入力のあった ${downtime.counted} 件の合計`),
+        miniBars(dtByMonth),
       ]),
     ]),
+    total > 0 ? el('div', { class: 'dash-insights', id: 'dash-insights' }, [
+      byCategory[0] ? el('div', { class: 'dash-insight' }, [
+        el('span', { class: 'dash-insight-dot', style: `background:${catVar(slots, byCategory[0].category_id)}` }),
+        el('div', {}, [el('div', { class: 'dash-insight-label' }, '最も多いジャンル'),
+          el('div', { class: 'dash-insight-value' }, `${byCategory[0].category_name}（${byCategory[0].count}件）`)]),
+      ]) : null,
+      worstCount[0] ? el('div', { class: 'dash-insight' }, [
+        el('span', { class: 'dash-insight-dot', style: `background:${slotVar(0)}` }),
+        el('div', {}, [el('div', { class: 'dash-insight-label' }, '最も多い設備'),
+          el('a', { class: 'dash-insight-value', href: equipHref(worstCount[0]) }, `${equipLabel(worstCount[0])}（${worstCount[0].trouble_count}件）`)]),
+      ]) : null,
+    ]) : null,
     downtime.unreadable > 0
       ? el('p', { class: 'hint downtime-warn', id: 'downtime-unreadable' },
           `⚠ 休止時間を数字で読み取れない記録が ${downtime.unreadable} 件あり、合計に入っていません（トラブル記録の休止時間を、数字（分）に直すと入ります）。`)
       : null,
     el('div', { class: 'chart-grid' }, [
-      el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, 'トラブル月別推移'),
-        hasData ? makeCanvas('chart-trend') : el('p', { class: 'empty' }, 'データがありません'),
-      ]),
-      el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, '休止時間の月推移（休止区分別）'),
-        hasDowntime ? makeCanvas('chart-downtime') : el('p', { class: 'empty' }, '休止時間の入力がありません'),
-      ]),
-      el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, 'ジャンル別の月推移'),
-        hasData ? makeCanvas('chart-category-trend') : el('p', { class: 'empty' }, 'データがありません'),
-      ]),
-      el('div', { class: 'chart-wrap' }, [
-        el('h3', { class: 'chart-title' }, 'ジャンル別トラブル（年度合計）'),
-        stats.trouble_by_category.length > 0 ? makeCanvas('chart-category') : el('p', { class: 'empty' }, 'データがありません'),
-      ]),
+      card('トラブル月別推移', hasData || prevCounts ? makeCanvas('chart-trend') : empty(),
+        prevCounts ? `点線は${prevLabel}` : null, '📈'),
+      card('休止時間の月推移（休止区分別）', hasDowntime ? makeCanvas('chart-downtime') : empty('休止時間の入力がありません'), null, '⏱'),
+      card('ジャンル別の月推移', hasData ? makeCanvas('chart-category-trend') : empty(), null, '🗂'),
+      card('ジャンル別トラブル（年度合計）', byCategory.length > 0
+        ? barList('chart-category', byCategory.map((c) => ({
+            label: c.category_name, value: c.count, color: catVar(slots, c.category_id),
+            text: `${c.count}件（${total > 0 ? Math.round((c.count / total) * 100) : 0}%）`,
+          })))
+        : empty(), null, '🍰'),
+      card('トラブルの多い設備（上位5）', worstCount.length > 0
+        ? barList('dash-worst-count', worstCount.map((r) => ({ label: equipLabel(r), value: r.trouble_count, text: `${r.trouble_count}件`, href: equipHref(r) })), { rank: true })
+        : empty('設備を指定したトラブルがありません'),
+        unassigned > 0 ? `設備を指定していないトラブル ${unassigned} 件は含みません` : null, '🏭'),
+      card('休止時間の長い設備（上位5）', worstTime.length > 0
+        ? barList('dash-worst-time', worstTime.map((r) => ({ label: equipLabel(r), value: r.downtime_minutes, text: formatDowntime(r.downtime_minutes), href: equipHref(r), color: slotVar(1) })), { rank: true })
+        : empty('休止時間の入力がありません'), null, '🛑'),
+      card('繰り返しトラブルの設備', repeats.length > 0
+        ? el('ul', { class: 'dash-repeat', id: 'dash-repeat' }, repeats.map((r) => el('li', {}, [
+            el('a', { href: equipHref(r) }, equipLabel(r)),
+            el('span', { class: 'dash-repeat-meta' }, [
+              el('strong', { class: 'dash-times' }, `${r.trouble_count}回`),
+              r.downtime_minutes > 0 ? ` ・休止 ${formatDowntime(r.downtime_minutes)}` : '',
+            ]),
+          ])))
+        : el('p', { class: 'empty', id: 'dash-repeat' }, '年度内に3回以上トラブルが起きた設備はありません'),
+        '年度内に3回以上トラブルが起きた設備（根本的な対策の候補）', '🔁'),
+      card('曜日・時間帯別のトラブル', hasData ? heatmap(stats.trouble_by_weekday_hour || []) : empty(),
+        '発生日時の曜日と時間帯ごとの件数（色が濃いほど多い）', '🗓'),
     ]),
   ]);
 
-  // グラフ描画（DOMに追加後）
-  if (hasData) {
-    drawTroubleTrend('chart-trend', monthLabels, counts);
-    drawTroubleTrendByCategory('chart-category-trend', monthLabels, series);
+  // グラフ描画（DOMに追加後）。印刷の直前に白地で描き直せるよう、描画関数を登録しておく
+  if (document.getElementById('chart-trend')) {
+    registerChart('chart-trend', (c, x) => drawTroubleTrend(c, monthLabels, counts, fy, prevCounts, x));
   }
-  if (hasDowntime) drawDowntimeTrend('chart-downtime', monthLabels, dtSeries);
-  if (stats.trouble_by_category.length > 0) drawTroubleByCategory('chart-category', stats.trouble_by_category);
+  if (hasData) {
+    registerChart('chart-category-trend', (c, x) => drawStacked(c, monthLabels,
+      seriesByCategory(months, stats.trouble_trend_by_category || [], slots).map((s) => ({ label: s.category_name, data: s.counts, backgroundColor: s.color })),
+      { tooltipLabel: (t) => `${t.dataset.label}: ${t.parsed.y}件`, extra: x }));
+  }
+  if (hasDowntime) {
+    registerChart('chart-downtime', (c, x) => drawStacked(c, monthLabels,
+      downtimeSeries(months, downtime.by_month || []).map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })),
+      { yTitle: '時間', tooltipLabel: hoursTooltip, extra: x }));
+  }
 }
 
 // ---------------- タブ付きレイアウト ----------------
@@ -297,8 +355,8 @@ async function renderDashboard() {
 
   const loadTab = async () => {
     reportBars.hidden = activeTab !== 'report';
-    // 印刷用CSS（body.rpt-page）はレポートタブのときだけ効かせる
-    document.body.classList.toggle('rpt-page', activeTab === 'report');
+    // 印刷用CSS（body.rpt-page）はどちらのタブでも効かせる（ヘッダー・操作欄を隠して印刷する）
+    document.body.classList.add('rpt-page');
     if (activeTab === 'report') {
       syncChips();
       await renderReportTab(fromInput.value || defaultFrom, toInput.value || defaultTo);
@@ -310,6 +368,7 @@ async function renderDashboard() {
   // レポートタブ: 印刷ボタン＋レポート本体。ユーザー名は出力者として載せる
   let me = null;
   try { me = await getCurrentUser(); } catch { me = null; }
+  printUser = me?.name || '';
   const renderReportTab = async (from, to) => {
     const docBox = el('div', { id: 'report-doc', class: 'rpt-doc' });
     render(tabContent, [
@@ -327,7 +386,7 @@ async function renderDashboard() {
   };
 
   render(app, [
-    el('div', { class: 'tab-bar tab-bar-fit rpt-controls' }, tabBtns),
+    el('div', { class: 'tab-bar tab-bar-fit dash-tabs rpt-controls' }, tabBtns),
     reportBars,
     tabContent,
   ]);
@@ -344,6 +403,8 @@ async function renderDashboard() {
       render(app, el('p', { class: 'notice is-error' }, 'グラフライブラリの読み込みに失敗しました。インターネット接続を確認してください。'));
       return;
     }
+    document.body.classList.add('dash-page');
+    setChartDefaults();
     await renderDashboard();
   } catch (err) {
     render(app, el('p', { class: 'notice is-error' }, err.message || String(err)));

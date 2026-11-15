@@ -1052,14 +1052,44 @@ section('8. ダッシュボード・保全レポート');
     bars: document.getElementById('report-bars').hidden,
     tabs: [...document.querySelectorAll('.tab-btn')].map((b) => b.textContent.trim()),
     nextDisabled: document.getElementById('fy-next').disabled,
-    charts: ['chart-trend', 'chart-category-trend', 'chart-category'].map((id) => !!(window.Chart && Chart.getChart(id))),
+    charts: ['chart-trend', 'chart-category-trend'].map((id) => !!(window.Chart && Chart.getChart(id))),
+    catBars: document.querySelectorAll('#chart-category .dash-bar-row').length,
+    delta: document.getElementById('trouble-delta')?.innerText || '',
+    heat: document.querySelectorAll('#dash-heatmap .dash-heat-cell').length,
+    worst: !!document.getElementById('dash-worst-count') || document.getElementById('tab-content').innerText.includes('設備を指定したトラブルがありません'),
+    repeat: !!document.getElementById('dash-repeat'),
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
   }));
   check('ダッシュボード: 今年度（10月〜翌9月）で開く', sum.fy.includes(`FY${curFy}`) && sum.fy.includes(`${curFy}/10/01`) && sum.fy.includes(`${curFy + 1}/09/30`), sum.fy);
-  check('ダッシュボード: 年度のグラフ（月別推移・ジャンル別の月推移・ジャンル別）が描かれる', sum.charts.every(Boolean), JSON.stringify(sum.charts));
+  check('ダッシュボード: 年度のグラフ（月別推移・ジャンル別の月推移・ジャンル別）が描かれる', sum.charts.every(Boolean) && sum.catBars >= 1, JSON.stringify(sum.charts) + sum.catBars);
+  check('ダッシュボード: 前年度比・設備別の上位・繰り返しトラブル・曜日×時間帯（8時間帯×7曜日）が出る',
+    sum.delta.length > 0 && sum.worst && sum.repeat && sum.heat === 56 && sum.overflow <= 0, JSON.stringify({ delta: sum.delta, worst: sum.worst, repeat: sum.repeat, heat: sum.heat, overflow: sum.overflow }));
   check('ダッシュボード: カスタムグラフのタブはない・期間の操作欄はサマリーに出ない', sum.tabs.length === 2 && !sum.tabs.some((t) => t.includes('カスタム')) && sum.bars === true, JSON.stringify({ tabs: sum.tabs, bars: sum.bars }));
-  check('ダッシュボード: サマリーに設備別・依頼・点検達成率・日報・業務依頼内訳は出さない',
-    !sum.text.includes('設備別') && !sum.text.includes('依頼（未完了）') && !sum.text.includes('点検達成率') && !sum.text.includes('日報') && !sum.text.includes('ステータス内訳') && sum.text.includes('ジャンル別の月推移'), sum.text.slice(0, 200));
+  check('ダッシュボード: サマリーに依頼・点検達成率・日報・業務依頼内訳は出さない',
+    !sum.text.includes('依頼（未完了）') && !sum.text.includes('点検達成率') && !sum.text.includes('日報') && !sum.text.includes('ステータス内訳') && sum.text.includes('ジャンル別の月推移'), sum.text.slice(0, 200));
   check('ダッシュボード: 次の年度ボタンは今年度のとき押せない', sum.nextDisabled === true);
+  // 印刷: 画面にはグラフを印刷するボタンがあり、印刷（beforeprint）ではグラフが画像に差し替わり、canvas・操作欄は隠れる
+  const darkInfo = await page.evaluate(() => ({ btn: !!document.getElementById('dash-print'), dark: document.body.classList.contains('dash-dark') }));
+  check('ダッシュボード: 元の明るい配色のまま、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.btn && !darkInfo.dark, JSON.stringify(darkInfo));
+  await page.emulateMedia({ media: 'print' });
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  const pr = await page.evaluate(() => {
+    const imgs = [...document.querySelectorAll('.dash-print-img')];
+    return {
+      n: imgs.length,
+      ok: imgs.every((i) => i.src.startsWith('data:image/png') && i.src.length > 2000 && i.getBoundingClientRect().width > 50),
+      canvasHidden: [...document.querySelectorAll('.dash-canvas canvas')].every((c) => getComputedStyle(c).display === 'none'),
+      toolbarHidden: getComputedStyle(document.getElementById('dash-print').parentElement).display === 'none',
+      headerHidden: getComputedStyle(document.querySelector('.app-header')).display === 'none',
+      bg: getComputedStyle(document.body).backgroundColor,
+      meta: document.querySelector('.dash-print-meta')?.innerText || '',
+    };
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  await page.emulateMedia({ media: 'screen' });
+  const afterN = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
+  check('ダッシュボード: 印刷ではグラフが画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
+    pr.n >= 1 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0, JSON.stringify(pr) + afterN);
   await page.click('#fy-prev');
   await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1, { timeout: 8000 });
   check('ダッシュボード: 「前の年度」で1年前の年度に切り替わり、次の年度に戻れる',
