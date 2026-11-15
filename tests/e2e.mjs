@@ -1071,8 +1071,25 @@ section('8. ダッシュボード・保全レポート');
   // 印刷: 画面にはグラフを印刷するボタンがあり、印刷（beforeprint）ではグラフが画像に差し替わり、canvas・操作欄は隠れる
   const darkInfo = await page.evaluate(() => ({ btn: !!document.getElementById('dash-print'), dark: document.body.classList.contains('dash-dark') }));
   check('ダッシュボード: 元の明るい配色のまま、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.btn && !darkInfo.dark, JSON.stringify(darkInfo));
-  await page.emulateMedia({ media: 'print' });
+  // 小タブ（推移／設備／内訳）: 初期は推移だけが見え、押すと切り替わる
+  const subState = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.dash-panel')].map((p) => [p.id.replace('dash-panel-', ''), !p.hidden])));
+  const sub0 = await subState();
+  await page.click('#dash-sub-equip');
+  const sub1 = await subState();
+  const equipVisible = await page.evaluate(() => { const r = document.getElementById('dash-worst-count')?.getBoundingClientRect(); return !!r && r.width > 50 && r.height > 20; });
+  await page.click('#dash-sub-mix');
+  const sub2 = await subState();
+  const chartSizes = await page.evaluate(() => ['chart-trend', 'chart-category-trend'].map((id) => { const c = window.Chart?.getChart(id); return c ? c.width : -1; }));
+  await page.click('#dash-sub-trend');
+  const sub3 = await subState();
+  const trendSized = await page.evaluate(() => ['chart-trend', 'chart-category-trend'].every((id) => { const c = window.Chart?.getChart(id); return c && c.width > 100 && c.height > 100; }));
+  check('ダッシュボード: 小タブ（推移・設備・内訳）で1つずつ表示が切り替わり、戻した推移のグラフも崩れない',
+    sub0.trend && !sub0.equip && !sub0.mix && !sub1.trend && sub1.equip && !sub1.mix && equipVisible && !sub2.trend && !sub2.equip && sub2.mix && sub3.trend && !sub3.equip && !sub3.mix && trendSized,
+    JSON.stringify({ sub0, sub1, sub2, sub3, equipVisible, chartSizes, trendSized }));
+  // 印刷: 小タブで隠れていたパネルも全部出て、グラフが画像になる（印刷の直前に beforeprint → 印刷用の表示）
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  const printPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].every((p) => !p.hidden));
+  await page.emulateMedia({ media: 'print' });
   const pr = await page.evaluate(() => {
     const imgs = [...document.querySelectorAll('.dash-print-img')];
     return {
@@ -1088,8 +1105,9 @@ section('8. ダッシュボード・保全レポート');
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
   await page.emulateMedia({ media: 'screen' });
   const afterN = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
+  const afterPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].filter((p) => !p.hidden).map((p) => p.id));
   check('ダッシュボード: 印刷ではグラフが画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
-    pr.n >= 1 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0, JSON.stringify(pr) + afterN);
+    printPanels && pr.n >= 2 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0 && afterPanels.length === 1 && afterPanels[0] === 'dash-panel-trend', JSON.stringify(pr) + afterN + JSON.stringify(afterPanels));
   await page.click('#fy-prev');
   await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1, { timeout: 8000 });
   check('ダッシュボード: 「前の年度」で1年前の年度に切り替わり、次の年度に戻れる',
