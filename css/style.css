@@ -1678,9 +1678,10 @@ body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 
 .dash-toolbar-hint { font-size: 11px; color: var(--d-muted); }
 .dash-print-meta { display: none; }
 
-/* カード（グラフ・一覧）: PC・iPad は2列 */
+/* カード（グラフ・一覧）: PC・iPad は2列。小タブでカードが奇数枚のときは、最後の1枚を横幅いっぱいにして右下を空けない */
 @media (min-width: 760px) {
   .chart-grid { grid-template-columns: 1fr 1fr; }
+  .dash-panel .chart-grid > .chart-wrap:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 .chart-wrap { min-width: 0; color: var(--d-text); background: linear-gradient(160deg, var(--d-card) 0%, var(--d-card2) 100%); border: 1px solid var(--d-border); border-radius: 16px; box-shadow: var(--d-shadow); padding: 18px 16px; animation: dash-rise 0.45s ease backwards; }
 .chart-grid .chart-wrap:nth-child(2n) { animation-delay: 0.05s; }
