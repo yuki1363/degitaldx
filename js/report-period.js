@@ -69,13 +69,3 @@ export function fiscalMonths(fy) {
     return m <= 12 ? `${fy}-${pad(m)}` : `${fy + 1}-${pad(m - 12)}`;
   });
 }
-
-/** from〜to（JSTの日付・両端を含む）にかかる月 'YYYY-MM' のリスト。不正な期間は []。長すぎる期間は新しい方の max か月（既定36）だけ */
-export function monthsBetween(from, to, max = 36) {
-  if (!isValidPeriod(from, to)) return [];
-  const [fy, fm] = from.split('-').map(Number);
-  const [ty, tm] = to.split('-').map(Number);
-  const out = [];
-  for (let i = fy * 12 + (fm - 1); i <= ty * 12 + (tm - 1); i++) out.push(`${Math.floor(i / 12)}-${pad(i % 12 + 1)}`);
-  return out.slice(-max);
-}

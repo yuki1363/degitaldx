@@ -61,10 +61,26 @@ const xScale = () => ({ grid: { display: false }, border: { color: T().axis }, t
 const yScale = (extra = {}) => ({ beginAtZero: true, grid: { color: T().grid }, border: { display: false }, ...extra });
 const bar = () => ({ borderRadius: 6, maxBarThickness: 24, borderColor: T().surface });
 
+// ダークの棒は、グラフの下に向かって少し透けるグラデーションにする（光って見える）。白地・印刷はベタ塗り。
+//   色が '#rrggbb' のときだけ。グラフ全体の高さ（横棒は幅）に対するグラデーション（Chart.js の標準的な方法）
+const glow = (hex) => {
+  if (theme !== 'dark' || typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  return (ctx) => {
+    const { chart } = ctx;
+    const area = chart && chart.chartArea;
+    if (!area) return hex; // 描き始め・凡例の見本はベタ塗り
+    const horizontal = chart.options.indexAxis === 'y';
+    const g = horizontal ? chart.ctx.createLinearGradient(area.left, 0, area.right, 0) : chart.ctx.createLinearGradient(0, area.bottom, 0, area.top);
+    g.addColorStop(0, `${hex}a6`);
+    g.addColorStop(1, hex);
+    return g;
+  };
+};
+
 // トラブル月別推移（棒）。prevCounts があれば前年度を点線で重ねる
 export function drawTroubleTrend(canvas, labels, counts, fy, prevCounts, extra = {}) {
   const node = fresh(canvas);
-  const datasets = [{ type: 'bar', label: fy ? `FY${fy}` : 'トラブル件数', data: counts, backgroundColor: seriesColor(0), ...bar(), order: 2, pointStyle: 'rect' }];
+  const datasets = [{ type: 'bar', label: fy ? `FY${fy}` : 'トラブル件数', data: counts, backgroundColor: glow(seriesColor(0)), ...bar(), order: 2, pointStyle: 'rect' }];
   if (prevCounts) {
     datasets.push({
       type: 'line', label: `前年度（FY${fy - 1}）`, data: prevCounts, order: 1,
@@ -115,7 +131,7 @@ export function drawHBar(canvas, labels, values, colors, { valueText = (v) => `$
   const node = fresh(canvas);
   return new Chart(node, {
     type: 'bar',
-    data: { labels, datasets: [{ data: values, backgroundColor: colors, ...bar(), borderRadius: 4, maxBarThickness: 18 }] },
+    data: { labels, datasets: [{ data: values, backgroundColor: colors.map(glow), ...bar(), borderRadius: 4, maxBarThickness: 18 }] },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => valueText(c.parsed.x) } } },

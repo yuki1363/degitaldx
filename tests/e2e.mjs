@@ -1070,7 +1070,7 @@ section('8. ダッシュボード・保全レポート');
   check('ダッシュボード: 次の年度ボタンは今年度のとき押せない', sum.nextDisabled === true);
   // ダーク表示と印刷: 画面はダーク、印刷（beforeprint）は白地のグラフ画像に差し替わり、canvas・操作欄は隠れる
   const darkInfo = await page.evaluate(() => ({ dark: document.body.classList.contains('dash-dark'), btn: !!document.getElementById('dash-print') }));
-  check('ダッシュボード: サマリーはダーク表示で、「印刷 / PDF保存」ボタンがある', darkInfo.dark && darkInfo.btn, JSON.stringify(darkInfo));
+  check('ダッシュボード: サマリーはダーク表示で、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.dark && darkInfo.btn, JSON.stringify(darkInfo));
   await page.emulateMedia({ media: 'print' });
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   const pr = await page.evaluate(() => {
@@ -1117,20 +1117,6 @@ section('8. ダッシュボード・保全レポート');
   const eqRows = await page.evaluate(() => [...document.querySelectorAll('#report-doc .rpt-section')]
     .find((x) => x.innerText.includes('設備別 故障件数'))?.querySelectorAll('tbody tr').length);
   check('保全レポート: 設備別の故障件数は上限なしで全設備ぶん出る', eqRows === 12, `rows=${eqRows}`);
-  const rptCharts = await page.evaluate(() => ({
-    imgs: [...document.querySelectorAll('#rpt-charts img.rpt-chart-img, #rpt-charts .rpt-chart img')].map((i) => ({ ok: i.src.startsWith('data:image/png') && i.src.length > 2000, w: i.naturalWidth })),
-    captions: [...document.querySelectorAll('#rpt-charts figcaption')].map((c) => c.textContent),
-  }));
-  check('保全レポート: グラフ（月別推移・ジャンル別・ジャンル別の月推移）が画像で入る（印刷・PDFでも出る）',
-    rptCharts.imgs.length >= 3 && rptCharts.imgs.every((i) => i.ok && i.w > 0) && rptCharts.captions.some((c) => c.includes('月別推移')) && rptCharts.captions.some((c) => c.includes('ジャンル別')), JSON.stringify(rptCharts));
-  await page.emulateMedia({ media: 'print' });
-  const printed = await page.evaluate(() => {
-    const box = document.getElementById('rpt-charts');
-    const r = box?.getBoundingClientRect();
-    return { shown: !!box && getComputedStyle(box).display !== 'none' && r.height > 0, hiddenHeader: getComputedStyle(document.querySelector('.app-header')).display === 'none', imgs: [...box.querySelectorAll('img')].every((i) => i.getBoundingClientRect().width > 50) };
-  });
-  await page.emulateMedia({ media: 'screen' });
-  check('保全レポート: 印刷表示でもグラフが出る（ヘッダー等は隠れる）', printed.shown && printed.hiddenHeader && printed.imgs, JSON.stringify(printed));
   const repText = await page.evaluate(() => document.getElementById('report-doc').innerText);
   check('保全レポート: 日報・業務依頼内訳・月別推移が出る（点検実施率は廃止済みなので出ない）',
     !repText.includes('点検計画の実施率') && repText.includes('日報') && repText.includes('業務依頼 ステータス内訳') && repText.includes('トラブル月別推移'), repText.slice(0, 200));

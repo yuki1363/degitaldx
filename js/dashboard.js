@@ -182,8 +182,8 @@ async function renderSummary(fy, currentFy, onChangeFy) {
     el('div', { class: 'dash-print-meta' }, `設備保全ダッシュボード　出力: ${ymd(jstTodayStr())}${printUser ? `　出力者: ${printUser}` : ''}`),
     fyBar,
     el('div', { class: 'dash-toolbar rpt-controls' }, [
-      el('button', { class: 'dash-print-btn', type: 'button', id: 'dash-print', onclick: () => window.print() }, '🖨 印刷 / PDF保存'),
-      el('span', { class: 'dash-toolbar-hint' }, '表示中の年度のグラフを、A4で印刷できます（印刷は白地になります）'),
+      el('button', { class: 'dash-print-btn', type: 'button', id: 'dash-print', onclick: () => window.print() }, '🖨 グラフを印刷 / PDF保存'),
+      el('span', { class: 'dash-toolbar-hint' }, '表示中の年度のグラフ・カードを、A4で印刷できます（印刷は白地になります）'),
     ]),
     el('div', { class: 'dash-kpis' }, [
       el('div', { class: 'dash-kpi is-blue', id: 'trouble-card' }, [
