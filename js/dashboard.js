@@ -55,7 +55,7 @@ function destroyChart(id) {
 
 const X_SCALE = { grid: { display: false }, border: { color: '#cbd5e1' }, ticks: { maxRotation: 0, autoSkip: false } };
 const yScale = (extra = {}) => ({ beginAtZero: true, grid: { color: GRID }, border: { display: false }, ...extra });
-const BAR = { borderRadius: 4, maxBarThickness: 22, borderColor: SURFACE };
+const BAR = { borderRadius: 6, maxBarThickness: 24, borderColor: SURFACE };
 
 // トラブル月別推移（棒＝この年度、線＝前年度の同じ時期まで）
 function drawTroubleTrend(canvasId, labels, counts, fy, prevCounts) {
@@ -164,10 +164,11 @@ function miniBars(values) {
 }
 
 // 横棒の一覧（名前・棒・値）。rows: [{ label, value, text, color, href }]
-function barList(id, rows) {
+function barList(id, rows, { rank = false } = {}) {
   const max = Math.max(...rows.map((r) => r.value), 0);
-  return el('div', { class: 'dash-bars', id }, rows.map((r) => el('div', { class: 'dash-bar-row' }, [
+  return el('div', { class: 'dash-bars', id }, rows.map((r, i) => el('div', { class: 'dash-bar-row' }, [
     el('div', { class: 'dash-bar-head' }, [
+      rank ? el('span', { class: `dash-rank r${i + 1}` }, String(i + 1)) : null,
       r.href ? el('a', { class: 'dash-bar-name', href: r.href }, r.label) : el('span', { class: 'dash-bar-name' }, r.label),
       el('span', { class: 'dash-bar-value' }, r.text),
     ]),
@@ -194,8 +195,8 @@ function heatmap(rows) {
   ]);
 }
 
-const card = (title, body, sub) => el('section', { class: 'chart-wrap' }, [
-  el('h3', { class: 'chart-title' }, title),
+const card = (title, body, sub, icon) => el('section', { class: 'chart-wrap' }, [
+  el('h3', { class: 'chart-title' }, [icon ? el('span', { class: 'chart-icon', 'aria-hidden': 'true' }, icon) : null, title]),
   sub ? el('p', { class: 'dash-sub' }, sub) : null,
   body,
 ]);
@@ -210,13 +211,14 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   const cmp = comparePeriod(fy, currentFy, jstTodayStr());
 
   // 年度の切り替え（未来の年度は見られない＝今年度より先へは進めない）
-  const fyBar = el('div', { class: 'fy-bar' }, [
-    el('button', { class: 'btn btn-sm', type: 'button', id: 'fy-prev', onclick: () => onChangeFy(fy - 1) }, '◀ 前の年度'),
+  const fyBar = el('div', { class: 'dash-hero fy-bar' }, [
+    el('button', { class: 'dash-nav', type: 'button', id: 'fy-prev', onclick: () => onChangeFy(fy - 1) }, '◀ 前の年度'),
     el('div', { class: 'fy-label', id: 'fy-label' }, [
+      el('span', { class: 'dash-hero-kicker' }, fy === currentFy ? '今年度' : '過去の年度'),
       el('strong', {}, `FY${fy}`),
       el('span', { class: 'hint' }, ` ${ymd(from)} 〜 ${ymd(to)}`),
     ]),
-    el('button', { class: 'btn btn-sm', type: 'button', id: 'fy-next', disabled: fy >= currentFy, onclick: () => onChangeFy(fy + 1) }, '次の年度 ▶'),
+    el('button', { class: 'dash-nav', type: 'button', id: 'fy-next', disabled: fy >= currentFy, onclick: () => onChangeFy(fy + 1) }, '次の年度 ▶'),
   ]);
 
   render(box, [fyBar, el('p', { class: 'loading' }, '集計中…')]);
@@ -254,54 +256,66 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   render(box, [
     fyBar,
     el('div', { class: 'dash-kpis' }, [
-      el('div', { class: 'dash-kpi', id: 'trouble-card' }, [
-        el('div', { class: 'dash-kpi-label' }, 'トラブル'),
+      el('div', { class: 'dash-kpi is-blue', id: 'trouble-card' }, [
+        el('div', { class: 'dash-kpi-label' }, [el('span', { class: 'dash-kpi-icon', 'aria-hidden': 'true' }, '⚠️'), 'トラブル']),
         el('div', { class: 'dash-kpi-value' }, [String(total), el('small', {}, '件')]),
         deltaLine('trouble-delta', total, prev ? prev.troubles : null, (n) => `${n}件`, prevLabel, !!prev && prev.troubles === 0),
         miniBars(counts),
       ]),
-      el('div', { class: 'dash-kpi', id: 'downtime-card' }, [
-        el('div', { class: 'dash-kpi-label' }, '休止時間'),
+      el('div', { class: 'dash-kpi is-orange', id: 'downtime-card' }, [
+        el('div', { class: 'dash-kpi-label' }, [el('span', { class: 'dash-kpi-icon', 'aria-hidden': 'true' }, '⏱'), '休止時間']),
         el('div', { class: 'dash-kpi-value is-text' }, formatDowntime(downtime.total_minutes)),
         deltaLine('downtime-delta', downtime.total_minutes, prev ? prev.downtime.total_minutes : null, formatDowntime, prevLabel, !!prev && prev.downtime.counted === 0),
         el('div', { class: 'dash-kpi-foot' }, `入力のあった ${downtime.counted} 件の合計`),
         miniBars(dtByMonth),
       ]),
     ]),
+    total > 0 ? el('div', { class: 'dash-insights', id: 'dash-insights' }, [
+      byCategory[0] ? el('div', { class: 'dash-insight' }, [
+        el('span', { class: 'dash-insight-dot', style: `background:${catColor(slots, byCategory[0].category_id)}` }),
+        el('div', {}, [el('div', { class: 'dash-insight-label' }, '最も多いジャンル'),
+          el('div', { class: 'dash-insight-value' }, `${byCategory[0].category_name}（${byCategory[0].count}件）`)]),
+      ]) : null,
+      worstCount[0] ? el('div', { class: 'dash-insight' }, [
+        el('span', { class: 'dash-insight-dot', style: `background:${SERIES[0]}` }),
+        el('div', {}, [el('div', { class: 'dash-insight-label' }, '最も多い設備'),
+          el('a', { class: 'dash-insight-value', href: equipHref(worstCount[0]) }, `${equipLabel(worstCount[0])}（${worstCount[0].trouble_count}件）`)]),
+      ]) : null,
+    ]) : null,
     downtime.unreadable > 0
       ? el('p', { class: 'hint downtime-warn', id: 'downtime-unreadable' },
           `⚠ 休止時間を数字で読み取れない記録が ${downtime.unreadable} 件あり、合計に入っていません（トラブル記録の休止時間を、数字（分）に直すと入ります）。`)
       : null,
     el('div', { class: 'chart-grid' }, [
       card('トラブル月別推移', hasData || prevCounts ? makeCanvas('chart-trend') : empty(),
-        prevCounts ? `点線は${prevLabel}` : null),
-      card('休止時間の月推移（休止区分別）', hasDowntime ? makeCanvas('chart-downtime') : empty('休止時間の入力がありません')),
-      card('ジャンル別の月推移', hasData ? makeCanvas('chart-category-trend') : empty()),
+        prevCounts ? `点線は${prevLabel}` : null, '📈'),
+      card('休止時間の月推移（休止区分別）', hasDowntime ? makeCanvas('chart-downtime') : empty('休止時間の入力がありません'), null, '⏱'),
+      card('ジャンル別の月推移', hasData ? makeCanvas('chart-category-trend') : empty(), null, '🗂'),
       card('ジャンル別トラブル（年度合計）', byCategory.length > 0
         ? barList('chart-category', byCategory.map((c) => ({
             label: c.category_name, value: c.count, color: catColor(slots, c.category_id),
             text: `${c.count}件（${total > 0 ? Math.round((c.count / total) * 100) : 0}%）`,
           })))
-        : empty()),
+        : empty(), null, '🍰'),
       card('トラブルの多い設備（上位5）', worstCount.length > 0
-        ? barList('dash-worst-count', worstCount.map((r) => ({ label: equipLabel(r), value: r.trouble_count, text: `${r.trouble_count}件`, href: equipHref(r) })))
+        ? barList('dash-worst-count', worstCount.map((r) => ({ label: equipLabel(r), value: r.trouble_count, text: `${r.trouble_count}件`, href: equipHref(r) })), { rank: true })
         : empty('設備を指定したトラブルがありません'),
-        unassigned > 0 ? `設備を指定していないトラブル ${unassigned} 件は含みません` : null),
+        unassigned > 0 ? `設備を指定していないトラブル ${unassigned} 件は含みません` : null, '🏭'),
       card('休止時間の長い設備（上位5）', worstTime.length > 0
-        ? barList('dash-worst-time', worstTime.map((r) => ({ label: equipLabel(r), value: r.downtime_minutes, text: formatDowntime(r.downtime_minutes), href: equipHref(r), color: SERIES[1] })))
-        : empty('休止時間の入力がありません')),
+        ? barList('dash-worst-time', worstTime.map((r) => ({ label: equipLabel(r), value: r.downtime_minutes, text: formatDowntime(r.downtime_minutes), href: equipHref(r), color: SERIES[1] })), { rank: true })
+        : empty('休止時間の入力がありません'), null, '🛑'),
       card('繰り返しトラブルの設備', repeats.length > 0
         ? el('ul', { class: 'dash-repeat', id: 'dash-repeat' }, repeats.map((r) => el('li', {}, [
             el('a', { href: equipHref(r) }, equipLabel(r)),
             el('span', { class: 'dash-repeat-meta' }, [
-              el('strong', {}, `${r.trouble_count}回`),
+              el('strong', { class: 'dash-times' }, `${r.trouble_count}回`),
               r.downtime_minutes > 0 ? ` ・休止 ${formatDowntime(r.downtime_minutes)}` : '',
             ]),
           ])))
         : el('p', { class: 'empty', id: 'dash-repeat' }, '年度内に3回以上トラブルが起きた設備はありません'),
-        '年度内に3回以上トラブルが起きた設備（根本的な対策の候補）'),
+        '年度内に3回以上トラブルが起きた設備（根本的な対策の候補）', '🔁'),
       card('曜日・時間帯別のトラブル', hasData ? heatmap(stats.trouble_by_weekday_hour || []) : empty(),
-        '発生日時の曜日と時間帯ごとの件数（色が濃いほど多い）'),
+        '発生日時の曜日と時間帯ごとの件数（色が濃いほど多い）', '🗓'),
     ]),
   ]);
 
@@ -441,7 +455,7 @@ async function renderDashboard() {
   };
 
   render(app, [
-    el('div', { class: 'tab-bar tab-bar-fit rpt-controls' }, tabBtns),
+    el('div', { class: 'tab-bar tab-bar-fit dash-tabs rpt-controls' }, tabBtns),
     reportBars,
     tabContent,
   ]);
@@ -458,6 +472,7 @@ async function renderDashboard() {
       render(app, el('p', { class: 'notice is-error' }, 'グラフライブラリの読み込みに失敗しました。インターネット接続を確認してください。'));
       return;
     }
+    document.body.classList.add('dash-page');
     setChartDefaults();
     await renderDashboard();
   } catch (err) {
