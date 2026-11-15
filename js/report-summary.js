@@ -4,8 +4,12 @@
 //   既存の API（/api/stats・/api/troubles・/api/repairs・/api/plans）の読み取りだけを使う。
 import { api } from '/js/api.js';
 import { el, render, formatDate, jstTodayStr, toJstDateStr } from '/js/util.js';
-import { isValidPeriod, shiftDate } from '/js/report-period.js';
+import { isValidPeriod, shiftDate, monthsBetween } from '/js/report-period.js';
 import { formatDowntime, downtimeOf } from '/js/downtime.js';
+import {
+  setChartDefaults, drawTroubleTrend, drawStacked, drawHBar, hoursTooltip,
+  categorySlots, catColor, fillMonths, seriesByCategory, downtimeSeries,
+} from '/js/dash-charts.js';
 
 const REPAIR_STATUS = { open: '受付', in_progress: '対応中', waiting_parts: '部品待ち', done: '完了' };
 const PLAN_TYPE = { inspection: '点検', parts: '部品交換', construction: '工事', other: 'その他' };
@@ -23,11 +27,38 @@ function table(headers, rows, emptyText) {
     el('tbody', {}, rows),
   ]);
 }
+// グラフを画像にして埋め込む（印刷・PDFで切れたり消えたりしないよう、画面に出さずに描いて画像にする）。
+//   Chart.js が無い・描けないときは null（グラフだけ出さず、表はそのまま出す）
+const CHART_W = 480;
+const CHART_H = 250;
+function chartImage(title, draw) {
+  if (typeof Chart === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = CHART_W;
+  canvas.height = CHART_H;
+  const prevSize = Chart.defaults.font.size;
+  Chart.defaults.font.size = 13; // 印刷では縮むので、画面用より大きめの文字で描く
+  try {
+    const chart = draw(canvas, { animation: false, responsive: false, devicePixelRatio: 2 });
+    const url = canvas.toDataURL('image/png');
+    chart.destroy();
+    return el('figure', { class: 'rpt-chart' }, [
+      el('figcaption', {}, title),
+      el('img', { src: url, alt: title, width: CHART_W, height: CHART_H }),
+    ]);
+  } catch (err) {
+    console.error('report chart failed:', err && err.stack ? err.stack : err);
+    return null;
+  } finally {
+    Chart.defaults.font.size = prevSize;
+  }
+}
 const section = (title, body) => el('section', { class: 'rpt-section' }, [el('h3', { class: 'rpt-h3' }, title), body]);
 
 /** docBox に from〜to（JSTの日付・両端を含む）のレポートを描く。user は出力者名の表示用（無くてもよい） */
 export async function renderReport(docBox, from, to, user) {
   render(docBox, el('p', { class: 'loading' }, '読み込み中…'));
+  if (typeof Chart !== 'undefined') setChartDefaults();
   if (!isValidPeriod(from, to)) { render(docBox, el('p', { class: 'empty' }, '期間を正しく指定してください（開始日 ≦ 終了日）。')); return; }
   // /api/plans の to は「含まない」ため、終了日の翌日を渡す
   const planTo = shiftDate(to, 1);
@@ -57,6 +88,26 @@ export async function renderReport(docBox, from, to, user) {
     sub ? el('div', { class: 'rpt-tile-sub' }, sub) : null,
   ]);
 
+  // グラフ（期間内の月ごと。期間が1か月に収まるときは棒が1本になる）
+  const months = monthsBetween(from, to);
+  // 年をまたぐ期間は、最初の月と1月にだけ年（下2桁）を付ける（全部に付けると詰まって読めない）
+  const monthLabels = months.map((m, i) => `${months[0].slice(0, 4) !== months.at(-1).slice(0, 4) && (i === 0 || m.endsWith('-01')) ? `${m.slice(2, 4)}/` : ''}${Number(m.slice(5))}月`);
+  const slots = categorySlots(stats.categories || []);
+  const byCategory = stats.trouble_by_category || [];
+  const dtSeries = downtimeSeries(months, downtime.by_month || []);
+  const charts = (act.troubles ?? 0) > 0 || downtime.counted > 0 ? [
+    (act.troubles ?? 0) > 0 && chartImage('トラブル月別推移（件数）', (c, extra) =>
+      drawTroubleTrend(c, monthLabels, fillMonths(months, stats.trouble_trend || []), null, null, extra)),
+    byCategory.length > 0 && chartImage('ジャンル別トラブル（件数）', (c, extra) =>
+      drawHBar(c, byCategory.map((x) => x.category_name), byCategory.map((x) => x.count), byCategory.map((x) => catColor(slots, x.category_id)), { extra })),
+    (act.troubles ?? 0) > 0 && chartImage('ジャンル別の月推移（件数）', (c, extra) =>
+      drawStacked(c, monthLabels,
+        seriesByCategory(months, stats.trouble_trend_by_category || [], slots).map((s) => ({ label: s.category_name, data: s.counts, backgroundColor: s.color })),
+        { extra })),
+    downtime.counted > 0 && chartImage('休止時間の月推移（休止区分別・時間）', (c, extra) =>
+      drawStacked(c, monthLabels, dtSeries.map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })), { tooltipLabel: hoursTooltip, extra })),
+  ].filter(Boolean) : [];
+
   render(docBox, [
     el('div', { class: 'rpt-head' }, [
       el('h2', { class: 'rpt-title' }, '保全レポート'),
@@ -71,6 +122,10 @@ export async function renderReport(docBox, from, to, user) {
       tile('日報', act.reports ?? 0, '件'),
       tile('未完了の依頼', openRepairs.length, '件（現時点）'),
     ]),
+    charts.length > 0 ? el('section', { class: 'rpt-section rpt-charts-section', id: 'rpt-charts' }, [
+      el('h3', { class: 'rpt-h3' }, 'グラフ'),
+      el('div', { class: 'rpt-charts' }, charts),
+    ]) : null,
     section('ジャンル別トラブル', table(['ジャンル', '件数', ''],
       (stats.trouble_by_category || []).map((c) => el('tr', {}, [
         cell(c.category_name), cell(c.count, 'rpt-num'),

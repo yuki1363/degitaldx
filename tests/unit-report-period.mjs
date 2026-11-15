@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = fs.readFileSync(path.join(ROOT, 'js/report-period.js'), 'utf8');
-const { periodFor, isValidPeriod, shiftDate, fiscalYearOf, fiscalYearRange, fiscalMonths } = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
+const { periodFor, isValidPeriod, shiftDate, fiscalYearOf, fiscalYearRange, fiscalMonths, monthsBetween } = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -13,6 +13,8 @@ const ok = (name, cond, detail = '') => {
 };
 const is = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 console.log('\n=== 単体: 保全レポートの期間 ===');
+ok('monthsBetween: 期間にかかる月（年をまたぐ・同じ月）', is(monthsBetween('2026-10-29', '2027-01-02'), ['2026-10', '2026-11', '2026-12', '2027-01']) && is(monthsBetween('2026-11-10', '2026-11-12'), ['2026-11']));
+ok('monthsBetween: 不正な期間は空・長すぎる期間は新しい方の36か月', is(monthsBetween('x', 'y'), []) && is(monthsBetween('2026-12-01', '2026-11-01'), []) && monthsBetween('2000-01-01', '2026-12-31').length === 36 && monthsBetween('2000-01-01', '2026-12-31').at(-1) === '2026-12');
 
 // 2026-10-29 は木曜日
 ok('今週は月曜〜日曜（木曜に実行）', is(periodFor('week', '2026-10-29'), { from: '2026-10-26', to: '2026-11-01' }), JSON.stringify(periodFor('week', '2026-10-29')));

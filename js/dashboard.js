@@ -13,132 +13,27 @@ import { renderReport } from '/js/report-summary.js';
 import { formatDowntime } from '/js/downtime.js';
 import {
   comparePeriod, yoy, worstEquipment, unassignedCount, repeatEquipment,
-  heatmapGrid, heatStep, HEAT_WEEKDAYS, HEAT_BANDS, categorySlots, kindSlots,
+  heatmapGrid, heatStep, HEAT_WEEKDAYS, HEAT_BANDS,
 } from '/js/dashboard-calc.js';
+import {
+  SERIES, setChartDefaults, drawTroubleTrend, drawStacked, hoursTooltip,
+  categorySlots, catColor, fillMonths, seriesByCategory, downtimeSeries,
+} from '/js/dash-charts.js';
 
 const app = document.getElementById('app');
 
 // ---------------- グラフ描画 ----------------
+//   グラフの描画・色・データの整形は js/dash-charts.js（印刷用レポートと共有）。
 
-// 系列の色（色覚の違いがあっても隣どうしを見分けられる順に並べた8色。順番は変えない）。
-// 色は「何番目に多いか」ではなく「どのジャンル／休止区分か」で決める（年度を変えても同じ色）
-const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
-const NEUTRAL = '#94a3b8';   // 未分類・区分なし・前年度
-const SURFACE = '#ffffff';
-const INK_MUTED = '#64748b';
-const GRID = '#eef2f7';
 // 曜日×時間帯の濃淡（1色の薄い→濃い。0件は地の色）
 const HEAT = ['#f1f5f9', '#cde2fb', '#9ec5f4', '#5598e7', '#256abf', '#0d366b'];
-const slotColor = (slot) => (slot >= 0 && slot < SERIES.length ? SERIES[slot] : NEUTRAL);
-
-function setChartDefaults() {
-  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
-  Chart.defaults.font.size = 11;
-  Chart.defaults.color = INK_MUTED;
-  Chart.defaults.plugins.legend.labels.boxWidth = 10;
-  Chart.defaults.plugins.legend.labels.boxHeight = 10;
-  Chart.defaults.plugins.legend.labels.padding = 12;
-  Chart.defaults.plugins.tooltip.backgroundColor = '#1e293b';
-  Chart.defaults.plugins.tooltip.padding = 10;
-  Chart.defaults.plugins.tooltip.cornerRadius = 8;
-}
 
 // 高さを決めた枠の中に描く（縦長・横長どちらの画面でも同じ高さ）
 function makeCanvas(id) {
   return el('div', { class: 'dash-canvas' }, el('canvas', { id }));
 }
 
-function destroyChart(id) {
-  const existing = Chart.getChart(id);
-  if (existing) existing.destroy();
-}
-
-const X_SCALE = { grid: { display: false }, border: { color: '#cbd5e1' }, ticks: { maxRotation: 0, autoSkip: false } };
-const yScale = (extra = {}) => ({ beginAtZero: true, grid: { color: GRID }, border: { display: false }, ...extra });
-const BAR = { borderRadius: 6, maxBarThickness: 24, borderColor: SURFACE };
-
-// トラブル月別推移（棒＝この年度、線＝前年度の同じ時期まで）
-function drawTroubleTrend(canvasId, labels, counts, fy, prevCounts) {
-  destroyChart(canvasId);
-  const datasets = [{ type: 'bar', label: `FY${fy}`, data: counts, backgroundColor: SERIES[0], ...BAR, order: 2, pointStyle: 'rect' }];
-  if (prevCounts) {
-    datasets.push({
-      type: 'line', label: `前年度（FY${fy - 1}）`, data: prevCounts, order: 1,
-      borderColor: NEUTRAL, backgroundColor: SURFACE, borderWidth: 2, borderDash: [5, 4],
-      pointRadius: 3, pointHoverRadius: 5, pointBorderWidth: 2, pointBackgroundColor: SURFACE, tension: 0.25, spanGaps: false,
-      pointStyle: 'line',
-    });
-  }
-  new Chart(document.getElementById(canvasId), {
-    data: { labels, datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: !!prevCounts, position: 'bottom', reverse: true, labels: { usePointStyle: true, pointStyleWidth: 22 } },
-        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y ?? 0}件` } },
-      },
-      scales: { x: X_SCALE, y: yScale({ ticks: { precision: 0 } }) },
-    },
-  });
-}
-
-// 積み上げ棒グラフ（区切りは地の色の細い線）
-function drawStacked(canvasId, labels, datasets, { yTitle, tooltipLabel } = {}) {
-  destroyChart(canvasId);
-  new Chart(document.getElementById(canvasId), {
-    type: 'bar',
-    data: { labels, datasets: datasets.map((d) => ({ ...BAR, borderRadius: 3, borderWidth: { top: 1, right: 0, bottom: 0, left: 0 }, ...d })) },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { position: 'bottom' },
-        tooltip: { filter: (c) => (c.parsed.y ?? 0) > 0, callbacks: tooltipLabel ? { label: tooltipLabel } : {} },
-      },
-      scales: {
-        x: { ...X_SCALE, stacked: true },
-        y: yScale({ stacked: true, ticks: { precision: yTitle ? undefined : 0 }, title: yTitle ? { display: true, text: yTitle } : undefined }),
-      },
-    },
-  });
-}
-
-// 月×休止区分の行（分）→ 休止区分ごとの12か月ぶんの時間（色の枠の順）
-function downtimeSeries(months, rows) {
-  const map = new Map();
-  for (const r of rows) {
-    if (!map.has(r.kind)) map.set(r.kind, new Map());
-    map.get(r.kind).set(r.month, r.minutes);
-  }
-  const slots = kindSlots([...map.keys()]);
-  const order = (k) => { const s = slots.get(k); return s == null || s < 0 ? 99 : s; };
-  return [...map.entries()]
-    .map(([kind, byMonth]) => ({ kind, color: slotColor(slots.get(kind) ?? -1), hours: months.map((m) => Math.round(((byMonth.get(m) ?? 0) / 60) * 100) / 100) }))
-    .sort((a, b) => order(a.kind) - order(b.kind));
-}
-
 // ---------------- サマリータブ（年度ごと） ----------------
-
-// 年度の12か月（10月〜翌9月）に合わせて、データの無い月は0件で埋める
-function fillMonths(months, rows) {
-  const by = new Map(rows.map((r) => [r.month, r.count]));
-  return months.map((m) => by.get(m) ?? 0);
-}
-
-// 月×ジャンルの行 → ジャンルごとの12か月ぶんの件数（色の枠の順＝ジャンルのID順。未分類は最後）
-function seriesByCategory(months, rows, slots) {
-  const map = new Map();
-  for (const r of rows) {
-    const key = r.category_id ?? null;
-    if (!map.has(key)) map.set(key, { category_name: r.category_name, color: catColor(slots, key), byMonth: new Map() });
-    map.get(key).byMonth.set(r.month, r.count);
-  }
-  return [...map.entries()]
-    .sort(([a], [b]) => (a == null) - (b == null) || a - b)
-    .map(([, v]) => ({ category_name: v.category_name, color: v.color, counts: months.map((m) => v.byMonth.get(m) ?? 0) }));
-}
-const catColor = (slots, id) => slotColor(id == null ? -1 : (slots.get(Number(id)) ?? -1));
 
 const ymd = (s) => s.replace(/-/g, '/');
 const md = (s) => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
@@ -329,7 +224,7 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   if (hasDowntime) {
     drawStacked('chart-downtime', monthLabels,
       dtSeries.map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })),
-      { yTitle: '時間', tooltipLabel: (c) => `${c.dataset.label}: ${formatDowntime(Math.round(c.parsed.y * 60))}` });
+      { yTitle: '時間', tooltipLabel: hoursTooltip });
   }
 }
 
