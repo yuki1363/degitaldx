@@ -20,6 +20,41 @@ async function loadDowntime(db, fromTs, toTsExcl) {
   }
 }
 
+// ジャンルマスタ（削除済みも含む）。取得できなくても集計は止めない
+async function loadCategories(db) {
+  try {
+    const { results } = await db.prepare(`SELECT id, name FROM trouble_category ORDER BY id`).all();
+    return results ?? [];
+  } catch (err) {
+    console.error('stats: categories failed:', err && err.stack ? err.stack : err);
+    return [];
+  }
+}
+
+// 前年度比の比べる相手の期間（JST の日付）の件数・月別推移・休止時間。期間の指定が無い・不正なら null
+async function loadPrevious(db, fromStr, toStr) {
+  const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+  if (!DATE_ONLY.test(fromStr || '') || !DATE_ONLY.test(toStr || '') || fromStr > toStr) return null;
+  const fromTs = jstDayStartUtc(fromStr);
+  const toTsExcl = jstNextDayStartUtc(toStr);
+  const [{ results: trend }, downtime] = await Promise.all([
+    db.prepare(`
+      SELECT strftime('%Y-%m', occurred_at, '+9 hours') AS month, COUNT(*) AS count
+      FROM trouble_record
+      WHERE deleted_at IS NULL AND occurred_at >= ? AND occurred_at < ?
+      GROUP BY month ORDER BY month
+    `).bind(fromTs, toTsExcl).all(),
+    loadDowntime(db, fromTs, toTsExcl),
+  ]);
+  const rows = trend ?? [];
+  return {
+    period: { from: fromStr, to: toStr },
+    troubles: rows.reduce((a, r) => a + r.count, 0),
+    trouble_trend: rows,
+    downtime: { total_minutes: downtime.total_minutes, counted: downtime.counted, unreadable: downtime.unreadable },
+  };
+}
+
 export async function onRequestGet({ request, env }) {
   const db = env.DB;
   const sp = new URL(request.url).searchParams;
@@ -50,6 +85,9 @@ export async function onRequestGet({ request, env }) {
     inspectionTotal,
     reportTotal,
     downtime,
+    { results: weekdayHour },
+    categories,
+    previous,
   ] = await Promise.all([
     // トラブル月別推移
     db.prepare(`
@@ -61,7 +99,7 @@ export async function onRequestGet({ request, env }) {
 
     // ジャンル別トラブル
     db.prepare(`
-      SELECT COALESCE(tc.name, '未分類') AS category_name, COUNT(*) AS count
+      SELECT tr.category_id AS category_id, COALESCE(tc.name, '未分類') AS category_name, COUNT(*) AS count
       FROM trouble_record tr
       LEFT JOIN trouble_category tc ON tr.category_id = tc.id
       WHERE tr.deleted_at IS NULL AND tr.occurred_at >= ? AND tr.occurred_at < ?
@@ -71,7 +109,7 @@ export async function onRequestGet({ request, env }) {
     // ジャンル別の月推移（月×ジャンル。ダッシュボードの積み上げ棒グラフ用）
     db.prepare(`
       SELECT strftime('%Y-%m', tr.occurred_at, '+9 hours') AS month,
-             COALESCE(tc.name, '未分類') AS category_name, COUNT(*) AS count
+             tr.category_id AS category_id, COALESCE(tc.name, '未分類') AS category_name, COUNT(*) AS count
       FROM trouble_record tr
       LEFT JOIN trouble_category tc ON tr.category_id = tc.id
       WHERE tr.deleted_at IS NULL AND tr.occurred_at >= ? AND tr.occurred_at < ?
@@ -107,6 +145,17 @@ export async function onRequestGet({ request, env }) {
     db.prepare(`SELECT COUNT(*) AS n FROM inspection_result WHERE deleted_at IS NULL AND inspected_at >= ? AND inspected_at < ?`).bind(fromTs, toTsExcl).first(),
     db.prepare(`SELECT COUNT(*) AS n FROM daily_report WHERE deleted_at IS NULL AND report_date >= ? AND report_date <= ?`).bind(fromStr, toStr).first(),
     loadDowntime(db, fromTs, toTsExcl),
+
+    // 曜日×時刻（JST）ごとのトラブル件数。weekday は 0=日〜6=土、hour は 0〜23
+    db.prepare(`
+      SELECT CAST(strftime('%w', occurred_at, '+9 hours') AS INTEGER) AS weekday,
+             CAST(strftime('%H', occurred_at, '+9 hours') AS INTEGER) AS hour, COUNT(*) AS count
+      FROM trouble_record
+      WHERE deleted_at IS NULL AND occurred_at >= ? AND occurred_at < ?
+      GROUP BY weekday, hour ORDER BY weekday, hour
+    `).bind(fromTs, toTsExcl).all(),
+    loadCategories(db),
+    loadPrevious(db, sp.get('prev_from'), sp.get('prev_to')),
   ]);
 
   const repairSummary = Object.fromEntries((repairStatusRows ?? []).map((r) => [r.status, r.count]));
@@ -133,6 +182,11 @@ export async function onRequestGet({ request, env }) {
       by_month: downtime.by_month,
       by_kind: downtime.by_kind,
     },
+    trouble_by_weekday_hour: weekdayHour ?? [],
+    // ジャンルマスタ（削除済みも含む・ID順）。グラフの色をジャンルごとに固定するために使う
+    categories,
+    // 前年度比の比べる相手（prev_from・prev_to を指定したときだけ。無ければ null）
+    previous,
     activity: {
       troubles:    troubleTotal?.n    ?? 0,
       repairs:     repairTotal?.n     ?? 0,

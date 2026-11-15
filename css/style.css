@@ -1584,6 +1584,68 @@ input.is-abnormal {
   color: var(--color-text);
 }
 
+/* ダッシュボード（サマリー）: PC・iPad は2列 */
+@media (min-width: 760px) {
+  .chart-grid { grid-template-columns: 1fr 1fr; }
+}
+.chart-wrap { min-width: 0; border: 1px solid var(--color-border); box-shadow: none; }
+.dash-canvas { position: relative; height: 240px; }
+.dash-sub { font-size: 12px; color: var(--color-text-muted); margin: -8px 0 12px; }
+
+/* 数字カード */
+.dash-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+.dash-kpi {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px 14px 12px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dash-kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.04em; }
+.dash-kpi-value { font-size: 34px; font-weight: 700; line-height: 1.15; color: var(--color-text); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.dash-kpi-value small { font-size: 13px; font-weight: 600; color: var(--color-text-muted); margin-left: 2px; }
+/* 「12時間30分」のような文字の値ははみ出さないよう小さく */
+.dash-kpi-value.is-text { font-size: 22px; line-height: 1.75; }
+.dash-delta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; }
+.dash-badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.dash-badge.is-good { color: var(--color-success); background: #f0fdf4; }
+.dash-badge.is-bad { color: var(--color-danger); background: var(--color-danger-bg); }
+.dash-badge.is-same { color: var(--color-text-muted); background: var(--color-bg); }
+.dash-delta-note, .dash-kpi-foot { font-size: 11px; color: var(--color-text-muted); }
+.dash-kpi-foot { margin-top: 4px; }
+.dash-mini { display: flex; align-items: flex-end; gap: 3px; height: 28px; margin-top: auto; padding-top: 10px; box-sizing: content-box; }
+.dash-mini span { flex: 1; min-width: 0; border-radius: 2px 2px 0 0; background: var(--color-border); }
+.dash-mini span.is-on { background: #9ec5f4; }
+
+/* 横棒の一覧（ジャンル別・設備別） */
+.dash-bars { display: grid; gap: 12px; }
+.dash-bar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
+.dash-bar-name { min-width: 0; overflow-wrap: anywhere; color: var(--color-text); }
+a.dash-bar-name { color: var(--color-primary); text-decoration: none; }
+a.dash-bar-name:hover { text-decoration: underline; }
+.dash-bar-value { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dash-bar-track { height: 8px; background: var(--color-bg); border-radius: 4px; margin-top: 4px; overflow: hidden; }
+.dash-bar-track span { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+
+/* 繰り返しトラブルの設備 */
+.dash-repeat { list-style: none; margin: 0; padding: 0; }
+.dash-repeat li { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 0; border-top: 1px solid var(--color-border); font-size: 13px; }
+.dash-repeat li:first-child { border-top: 0; padding-top: 0; }
+.dash-repeat a { min-width: 0; overflow-wrap: anywhere; color: var(--color-primary); text-decoration: none; }
+.dash-repeat-meta { flex: none; color: var(--color-text-muted); font-size: 12px; }
+.dash-repeat-meta strong { color: var(--color-danger); font-size: 14px; }
+
+/* 曜日×時間帯 */
+.dash-heat { width: 100%; border-collapse: separate; border-spacing: 2px; table-layout: fixed; }
+.dash-heat th { font-size: 11px; font-weight: 500; color: var(--color-text-muted); }
+.dash-heat tbody th { text-align: right; padding-right: 4px; width: 58px; white-space: nowrap; }
+.dash-heat-cell { height: 26px; border-radius: 4px; text-align: center; font-size: 11px; font-weight: 600; color: var(--color-text); font-variant-numeric: tabular-nums; }
+.dash-heat-cell.is-dark { color: #fff; }
+.dash-heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 8px; font-size: 11px; color: var(--color-text-muted); }
+.dash-heat-legend span { width: 16px; height: 10px; border-radius: 2px; }
+
 /* ダッシュボード: 年度の切り替え */
 .fy-bar {
   display: flex;
