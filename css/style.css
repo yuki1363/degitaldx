@@ -1681,6 +1681,8 @@ body.dash-page { background: linear-gradient(180deg, #e8eefc 0, var(--color-bg) 
 /* カード（グラフ・一覧）: PC・iPad は2列。小タブでカードが奇数枚のときは、最後の1枚を横幅いっぱいにして右下を空けない */
 @media (min-width: 760px) {
   .chart-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 760px) and (max-width: 959px) {
   .dash-panel .chart-grid > .chart-wrap:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 .chart-wrap { min-width: 0; color: var(--d-text); background: linear-gradient(160deg, var(--d-card) 0%, var(--d-card2) 100%); border: 1px solid var(--d-border); border-radius: 16px; box-shadow: var(--d-shadow); padding: 18px 16px; animation: dash-rise 0.45s ease backwards; }
@@ -1758,6 +1760,46 @@ a.dash-bar-name:hover { text-decoration: underline; }
 .h0 { background: var(--h0); } .h1 { background: var(--h1); } .h2 { background: var(--h2); } .h3 { background: var(--h3); } .h4 { background: var(--h4); } .h5 { background: var(--h5); }
 .dash-heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 10px; font-size: 11px; color: var(--d-muted); }
 .dash-heat-legend span { width: 18px; height: 10px; border-radius: 3px; }
+
+/* タイルの右上の小さな種類表示 */
+.chart-tag { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: var(--d-chip); color: var(--d-link); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
+
+/* PC・iPad（幅960px以上）: 小タブをやめて、全部を1画面に敷き詰める（大きさ違いのタイル・細い枠・詰めた隙間）。
+   スマホ・狭い幅は今までどおり小タブ（縦1列だと長くなるため）。印刷は幅が狭い扱いなので影響しない */
+@media (min-width: 960px) {
+  .dash-summary .container { max-width: 1440px; }
+  .dash-subtabs { display: none; }
+  .dash-top { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .dash-top .dash-kpis { display: contents; }
+  .dash-top .dash-kpi { grid-column: span 4; padding: 12px 14px 10px; }
+  /* 「最も多いジャンル／設備」は、数字カード2枚ぶんの高さに2枚を重ねて収める */
+  .dash-top .dash-insights { grid-column: span 4; grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; gap: 10px; margin: 0; }
+  .dash-top .dash-insight { padding: 8px 14px; }
+  /* 年度の帯は低く */
+  .dash-summary .dash-hero { padding: 8px 14px; margin-bottom: 8px; }
+  .dash-summary .dash-hero .fy-label strong { font-size: 22px; display: inline; margin: 0 8px; }
+  .dash-summary .dash-hero .fy-label .hint { display: inline; }
+  .dash-summary .dash-toolbar { margin-bottom: 8px; }
+  .dash-mosaic { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+  .dash-mosaic .dash-panel, .dash-mosaic .dash-panel[hidden] { display: contents !important; }
+  .dash-mosaic .chart-grid { display: contents; }
+  .dash-mosaic .tile-trend { grid-column: span 7; order: 1; }
+  .dash-mosaic .tile-downtime { grid-column: span 5; order: 2; }
+  .dash-mosaic .tile-cattrend { grid-column: span 7; order: 3; }
+  .dash-mosaic .tile-heat { grid-column: span 5; order: 4; }
+  .dash-mosaic .tile-cattotal { grid-column: span 4; order: 5; }
+  .dash-mosaic .tile-worstcount { grid-column: span 4; order: 6; }
+  .dash-mosaic .tile-worsttime { grid-column: span 4; order: 7; }
+  .dash-mosaic .tile-repeat { grid-column: 1 / -1; order: 8; }
+  .dash-mosaic .tile-repeat .dash-repeat { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dash-mosaic .chart-wrap { padding: 12px 14px; border-radius: 12px; }
+  .dash-mosaic .chart-title { font-size: 13px; margin-bottom: 8px; }
+  .dash-mosaic .chart-icon { width: 22px; height: 22px; font-size: 12px; border-radius: 7px; }
+  .dash-mosaic .dash-canvas { height: 220px; }
+  .dash-mosaic .dash-sub { margin: -4px 0 8px; font-size: 11px; }
+  .dash-mosaic .tile-cattrend .dash-canvas { height: 250px; }
+  .dash-mosaic .tile-heat .dash-heat-cell { height: 23px; }
+}
 
 /* 印刷・PDF（サマリー）: 白地・A4縦。画面のグラフ（canvas）は印刷の直前に白地の画像へ差し替わる（js/dashboard.js） */
 @media print {

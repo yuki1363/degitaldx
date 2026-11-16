@@ -1068,6 +1068,25 @@ section('8. ダッシュボード・保全レポート');
   check('ダッシュボード: サマリーに依頼・点検達成率・日報・業務依頼内訳は出さない',
     !sum.text.includes('依頼（未完了）') && !sum.text.includes('点検達成率') && !sum.text.includes('日報') && !sum.text.includes('ステータス内訳') && sum.text.includes('ジャンル別の月推移'), sum.text.slice(0, 200));
   check('ダッシュボード: 次の年度ボタンは今年度のとき押せない', sum.nextDisabled === true);
+  // PC・iPad（幅960px以上）: 小タブをやめ、全部のタイルを1つの面に敷き詰める（数字タイルの行 → 7+5 → 7+5 → 4+4+4 → 全幅）
+  const wideInfo = await page.evaluate(() => {
+    const ks = ['trend', 'downtime', 'cattrend', 'heat', 'cattotal', 'worstcount', 'worsttime', 'repeat'];
+    const r = Object.fromEntries(ks.map((k) => { const b = document.querySelector(`.tile-${k}`)?.getBoundingClientRect(); return [k, b ? { x: b.x, y: b.y, w: b.width, h: b.height } : null]; }));
+    const kpi = document.getElementById('trouble-card')?.getBoundingClientRect();
+    const ins = document.querySelector('.dash-insight')?.getBoundingClientRect();
+    return { r, kpiY: kpi?.y, insY: ins?.y, subtabs: getComputedStyle(document.querySelector('.dash-subtabs')).display, vw: window.innerWidth };
+  });
+  const wr = wideInfo.r;
+  const same = (a, b) => a && b && Math.abs(a.y - b.y) < 3;
+  check('ダッシュボード（PC幅）: 小タブは出さず、8つのタイルが敷き詰めて並ぶ（7+5・7+5・4+4+4・全幅）',
+    wideInfo.vw >= 960 && wideInfo.subtabs === 'none' && Object.values(wr).every((b) => b && b.w > 150 && b.h > 60)
+      && same(wr.trend, wr.downtime) && wr.trend.x < wr.downtime.x && same(wr.cattrend, wr.heat) && wr.cattrend.y > wr.trend.y
+      && same(wr.cattotal, wr.worstcount) && same(wr.worstcount, wr.worsttime) && wr.cattotal.y > wr.cattrend.y
+      && wr.repeat.w > wr.cattotal.w * 2.5 && wr.repeat.y > wr.cattotal.y && Math.abs(wideInfo.kpiY - wideInfo.insY) < 3,
+    JSON.stringify(wideInfo));
+  // 狭い幅（スマホ・縦長のタブレット）では、今までどおり小タブで切り替える
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.waitForTimeout(500);
   // 印刷: 画面にはグラフを印刷するボタンがあり、印刷（beforeprint）ではグラフが画像に差し替わり、canvas・操作欄は隠れる
   const darkInfo = await page.evaluate(() => ({ btn: !!document.getElementById('dash-print'), dark: document.body.classList.contains('dash-dark') }));
   check('ダッシュボード: 元の明るい配色のまま、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.btn && !darkInfo.dark, JSON.stringify(darkInfo));
@@ -1108,6 +1127,8 @@ section('8. ダッシュボード・保全レポート');
   const afterPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].filter((p) => !p.hidden).map((p) => p.id));
   check('ダッシュボード: 印刷ではグラフが画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
     printPanels && pr.n >= 2 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0 && afterPanels.length === 1 && afterPanels[0] === 'dash-panel-trend', JSON.stringify(pr) + afterN + JSON.stringify(afterPanels));
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.waitForTimeout(400);
   await page.click('#fy-prev');
   await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1, { timeout: 8000 });
   check('ダッシュボード: 「前の年度」で1年前の年度に切り替わり、次の年度に戻れる',
