@@ -13,27 +13,41 @@ import { renderReport } from '/js/report-summary.js';
 import { formatDowntime } from '/js/downtime.js';
 import {
   comparePeriod, yoy, worstEquipment, unassignedCount, repeatEquipment,
-  heatmapGrid, heatStep, HEAT_WEEKDAYS, HEAT_BANDS,
+  heatmapGrid, heatStep, HEAT_WEEKDAYS, HEAT_BANDS, categorySlots,
 } from '/js/dashboard-calc.js';
 import {
   setChartDefaults, setChartFlat, drawTroubleTrend, drawStacked, hoursTooltip,
-  categorySlots, slotVar, catVar, fillMonths, seriesByCategory, downtimeSeries,
+  slotVar, catVar, fillMonths, seriesByCategory, downtimeSeries,
 } from '/js/dash-charts.js';
 
 const app = document.getElementById('app');
 
 // ---------------- グラフ描画 ----------------
-//   グラフの描画・色・データの整形は js/dash-charts.js（印刷用レポートと共有）。
+//   グラフの描画・色・データの整形は js/dash-charts.js。
 
 // 画面に描いたグラフ（canvas）は、印刷の直前だけベタ塗りで描き直した画像に差し替える（画面の光るグラデーションを
 // 印刷に持ち込まない・印刷レイアウトの幅でも崩れない）。描き直せるよう、グラフごとの描画関数を覚えておく。
 let chartRegistry = [];
 let printUser = '';
 let summarySub = 'trend'; // 表示中の小タブ（年度を切り替えても保つ）
+let renderToken = 0; // 年度を素早く切り替えたとき、古い取得の結果が新しい画面を上書きしないための番号
 const syncPanels = () => document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = p.id !== `dash-panel-${summarySub}`; });
 const registerChart = (id, draw) => { chartRegistry.push({ id, draw }); draw(id, {}); };
+// 登録済みのグラフを破棄して登録簿を空にする（画面を差し替える前に呼ぶ。破棄しないと Chart.js のインスタンスと
+// 描画関数が抱えた集計データが、画面を切り替えるたびに残る）
+function destroyCharts() {
+  for (const { id } of chartRegistry) {
+    const c = document.getElementById(id);
+    const ch = c && Chart.getChart(c);
+    if (ch) ch.destroy();
+  }
+  chartRegistry = [];
+}
+
+const clearPrintImages = () => document.querySelectorAll('.dash-print-img').forEach((n) => n.remove());
 
 function injectPrintImages() {
+  clearPrintImages(); // beforeprint が続けて来ても画像が二重に入らない
   // 印刷は小タブに関係なく全部まとめて出す（隠れているパネルも出してから、グラフを画像にする）
   document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = false; });
   for (const { id, draw } of chartRegistry) {
@@ -61,12 +75,14 @@ function injectPrintImages() {
     }
   }
 }
-const removePrintImages = () => { document.querySelectorAll('.dash-print-img').forEach((n) => n.remove()); syncPanels(); };
+const removePrintImages = () => { clearPrintImages(); syncPanels(); };
 // 画面の幅が広い↔狭いで小タブ／敷き詰めが切り替わるとき、隠れていたグラフの大きさを合わせ直す
-if (window.matchMedia) {
-  window.matchMedia('(min-width: 960px)').addEventListener('change', () => {
-    document.querySelectorAll('.dash-canvas canvas').forEach((c) => { const ch = Chart.getChart(c); if (ch) ch.resize(); });
-  });
+//   （古い Safari〔iOS 13 以前〕の MediaQueryList は addEventListener を持たず addListener だけ）
+const wideQuery = window.matchMedia && window.matchMedia('(min-width: 960px)');
+const resizeAllCharts = () => document.querySelectorAll('.dash-canvas canvas').forEach((c) => { const ch = Chart.getChart(c); if (ch) ch.resize(); });
+if (wideQuery) {
+  if (wideQuery.addEventListener) wideQuery.addEventListener('change', resizeAllCharts);
+  else if (wideQuery.addListener) wideQuery.addListener(resizeAllCharts);
 }
 window.addEventListener('beforeprint', injectPrintImages);
 window.addEventListener('afterprint', removePrintImages);
@@ -140,7 +156,8 @@ const empty = (text = 'データがありません') => el('p', { class: 'empty'
 
 async function renderSummary(fy, currentFy, onChangeFy) {
   const box = app.querySelector('#tab-content');
-  chartRegistry = [];
+  destroyCharts();
+  const token = ++renderToken;
   const { from, to } = fiscalYearRange(fy);
   const months = fiscalMonths(fy);
   const monthLabels = months.map((m) => `${Number(m.slice(5))}月`);
@@ -161,7 +178,19 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   render(box, [fyBar, el('p', { class: 'loading' }, '集計中…')]);
   const q = new URLSearchParams({ from, to });
   if (cmp) { q.set('prev_from', cmp.from); q.set('prev_to', cmp.to); }
-  const stats = await api.get(`/api/stats?${q}`);
+  let stats;
+  try {
+    stats = await api.get(`/api/stats?${q}`);
+  } catch (err) {
+    if (token !== renderToken) return;
+    // 取得に失敗しても年度の帯は残し、もう一度読み込めるようにする（「集計中…」のまま止まらない）
+    render(box, [fyBar, el('div', { class: 'notice is-error', id: 'dash-error' }, [
+      el('p', {}, `集計を取得できませんでした: ${err.message || err}`),
+      el('button', { class: 'btn btn-sm', type: 'button', id: 'dash-retry', onclick: () => onChangeFy(fy) }, '↻ もう一度読み込む'),
+    ])]);
+    return;
+  }
+  if (token !== renderToken) return; // 取得中に別の年度・タブへ切り替わった
 
   const slots = categorySlots(stats.categories || []);
   const counts = fillMonths(months, stats.trouble_trend || []);
@@ -170,7 +199,9 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   // 休止時間（トラブル入力の「休止時間」の合計）。古いAPIの応答（downtime なし）でも落ちないようにする
   const downtime = stats.downtime || { total_minutes: 0, counted: 0, unreadable: 0, by_month: [] };
   const hasDowntime = downtime.counted > 0;
-  const dtByMonth = months.map((_, i) => downtimeSeries(months, downtime.by_month || []).reduce((a, s) => a + s.hours[i], 0));
+  const dtSeries = downtimeSeries(months, downtime.by_month || []);
+  const dtByMonth = months.map((_, i) => dtSeries.reduce((a, s) => a + s.hours[i], 0));
+  const catSeries = seriesByCategory(months, stats.trouble_trend_by_category || [], slots);
 
   // 前年度（比べる相手）。古いAPIの応答（previous なし）では前年度比を出さない
   const prev = stats.previous || null;
@@ -278,18 +309,18 @@ async function renderSummary(fy, currentFy, onChangeFy) {
     el('div', { class: 'dash-mosaic' }, panelEls),
   ]);
 
-  // グラフ描画（DOMに追加後）。印刷の直前に白地で描き直せるよう、描画関数を登録しておく
+  // グラフ描画（DOMに追加後）。印刷の直前にベタ塗りで描き直せるよう、描画関数を登録しておく
   if (document.getElementById('chart-trend')) {
     registerChart('chart-trend', (c, x) => drawTroubleTrend(c, monthLabels, counts, fy, prevCounts, x));
   }
   if (hasData) {
     registerChart('chart-category-trend', (c, x) => drawStacked(c, monthLabels,
-      seriesByCategory(months, stats.trouble_trend_by_category || [], slots).map((s) => ({ label: s.category_name, data: s.counts, backgroundColor: s.color })),
+      catSeries.map((s) => ({ label: s.category_name, data: s.counts, backgroundColor: s.color })),
       { tooltipLabel: (t) => `${t.dataset.label}: ${t.parsed.y}件`, extra: x }));
   }
   if (hasDowntime) {
     registerChart('chart-downtime', (c, x) => drawStacked(c, monthLabels,
-      downtimeSeries(months, downtime.by_month || []).map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })),
+      dtSeries.map((s) => ({ label: s.kind, data: s.hours, backgroundColor: s.color })),
       { yTitle: '時間', tooltipLabel: hoursTooltip, extra: x }));
   }
 }
@@ -390,6 +421,8 @@ async function renderDashboard() {
     document.body.classList.add('rpt-page');
     document.body.classList.toggle('dash-summary', activeTab === 'summary'); // サマリーだけ横幅を広げる（PCの敷き詰め）
     if (activeTab === 'report') {
+      renderToken++; // 取得中のサマリーの描画を無効にする
+      destroyCharts();
       syncChips();
       await renderReportTab(fromInput.value || defaultFrom, toInput.value || defaultTo);
     } else {

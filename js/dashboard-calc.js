@@ -79,7 +79,7 @@ export function repeatEquipment(rows, min = 3) {
 
 // 曜日×時間帯: 列は月〜日、行は3時間ごとの8つの時間帯
 export const HEAT_WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
-export const HEAT_BAND_HOURS = 3;
+const HEAT_BAND_HOURS = 3;
 export const HEAT_BANDS = Array.from({ length: 24 / HEAT_BAND_HOURS }, (_, i) => `${i * HEAT_BAND_HOURS}〜${(i + 1) * HEAT_BAND_HOURS}時`);
 
 /**

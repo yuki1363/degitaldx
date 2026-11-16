@@ -111,5 +111,13 @@ ok('API: 前年度の期間が不正なら previous は null（500にしない�
 const bad = await call('from=2026-10-01&to=2027-09-30&prev_from=2025-13-45&prev_to=2025-13-46');
 ok('API: 存在しない日付でも落ちない（0件）', bad.previous && bad.previous.troubles === 0);
 
+// 前年度の集計だけが失敗しても、本体の集計は返す（500にしない）
+const flakyDb = { prepare: (sql) => { if (sql.includes('GROUP BY month ORDER BY month')) throw new Error('boom'); return wrap(sql); } };
+const resFlaky = await onRequestGet({ request: new Request('http://x/api/stats?from=2026-10-01&to=2027-09-30&prev_from=2025-10-01&prev_to=2025-11-15'), env: { DB: flakyDb } });
+const flaky = await resFlaky.json();
+ok('API: 前年度の集計だけが失敗しても、本体の集計は返り previous は null', resFlaky.status === 200 && flaky.previous === null && flaky.activity.troubles === 3 && flaky.trouble_trend.length >= 1, `${resFlaky.status} ${JSON.stringify(flaky.previous)}`);
+// 月別推移・曜日×時刻・件数は1回の読み取りから畳み込む（月の昇順・曜日→時刻の昇順）
+ok('API: 月別推移は月の昇順・件数の合計と一致', eq(st.trouble_trend.map((m) => m.month), [...st.trouble_trend.map((m) => m.month)].sort()) && st.trouble_trend.reduce((a, m) => a + m.count, 0) === st.activity.troubles && st.trouble_by_weekday_hour.reduce((a, m) => a + m.count, 0) === st.activity.troubles);
+
 console.log(`\n結果: ${pass} 件成功 / ${fail} 件失敗`);
 if (fail > 0) process.exit(1);
