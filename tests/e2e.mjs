@@ -1108,6 +1108,9 @@ section('8. ダッシュボード・保全レポート');
   // 印刷: 小タブで隠れていたパネルも全部出て、グラフが画像になる（印刷の直前に beforeprint → 印刷用の表示）
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   const printPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].every((p) => !p.hidden));
+  const imgsOnce = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint'))); // 続けてもう一度（プレビューの作り直しなど）
+  const imgsTwice = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
   await page.emulateMedia({ media: 'print' });
   const pr = await page.evaluate(() => {
     const imgs = [...document.querySelectorAll('.dash-print-img')];
@@ -1126,7 +1129,7 @@ section('8. ダッシュボード・保全レポート');
   const afterN = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
   const afterPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].filter((p) => !p.hidden).map((p) => p.id));
   check('ダッシュボード: 印刷ではグラフが画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
-    printPanels && pr.n >= 2 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0 && afterPanels.length === 1 && afterPanels[0] === 'dash-panel-trend', JSON.stringify(pr) + afterN + JSON.stringify(afterPanels));
+    printPanels && imgsOnce >= 2 && imgsTwice === imgsOnce && pr.n >= 2 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0 && afterPanels.length === 1 && afterPanels[0] === 'dash-panel-trend', JSON.stringify(pr) + afterN + JSON.stringify(afterPanels));
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForTimeout(400);
   await page.click('#fy-prev');
@@ -1135,6 +1138,24 @@ section('8. ダッシュボード・保全レポート');
     await page.evaluate(() => !document.getElementById('fy-next').disabled));
   await page.click('#fy-next');
   await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy, { timeout: 8000 });
+  // 集計の取得に失敗したら、年度の帯は残したまま失敗を知らせ、「もう一度読み込む」で復帰できる（「集計中…」のまま止まらない）。
+  //   Service Worker は通信が失敗すると以前に取得した応答（キャッシュ）に切り替えるため、まだ取得していない年度（2年前）で失敗させる
+  await page.click('#fy-prev');
+  await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1, { timeout: 8000 });
+  const failStats = (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'テスト用の失敗' }) });
+  await context.route(/\/api\/stats\?/, failStats); // Service Worker 経由の通信は、ページではなくコンテキストの route でないと横取りできない
+  await page.click('#fy-prev');
+  await page.waitForSelector('#dash-error', { timeout: 8000 });
+  const errState = await page.evaluate(() => ({ retry: !!document.getElementById('dash-retry'), fy: !!document.getElementById('fy-label'), loading: !!document.querySelector('#tab-content .loading') }));
+  await context.unroute(/\/api\/stats\?/, failStats);
+  await page.click('#dash-retry');
+  await page.waitForFunction(() => !document.getElementById('dash-error') && !!document.querySelector('.dash-mosaic .tile-trend'), { timeout: 8000 });
+  check('ダッシュボード: 集計の取得に失敗しても年度の帯は残り、「もう一度読み込む」で元に戻る（「集計中…」のまま止まらない）',
+    errState.retry && errState.fy && !errState.loading, JSON.stringify(errState));
+  for (let i = 0; i < 2; i++) {
+    await page.click('#fy-next');
+    await page.waitForFunction((fy) => document.getElementById('fy-label')?.innerText.includes(`FY${fy}`), curFy - 1 + i, { timeout: 8000 });
+  }
 
   // レポート: 期間の初期値は今月。直近6ヶ月ボタン。期間を指定すると設備別が全設備ぶん出る
   await page.goto(`${BASE}/pages/dashboard?tab=report`, { waitUntil: 'networkidle' });
