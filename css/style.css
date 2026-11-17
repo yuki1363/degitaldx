@@ -1804,6 +1804,8 @@ a.dash-bar-name:hover { text-decoration: underline; }
 /* 印刷・PDF（サマリー）: 白地・A4縦。画面のグラフ（canvas）は印刷の直前に白地の画像へ差し替わる（js/dashboard.js） */
 @media print {
   .dash-nav, .dash-toolbar { display: none !important; }
+  /* 小タブで隠れているパネルも、印刷では全部出す（印刷用の画像は画面にグラフを描いたときに作ってあるので、イベントを待たない） */
+  .dash-panel, .dash-panel[hidden] { display: block !important; }
   .dash-print-meta { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; }
   .dash-hero { margin-bottom: 8px; padding: 10px 12px; box-shadow: none; break-inside: avoid; }
   .dash-hero .fy-label { flex: 1; }
