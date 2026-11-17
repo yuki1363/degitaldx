@@ -18,9 +18,13 @@ export const slotVar = (slot) => (slot >= 0 && slot < SERIES_COUNT ? `var(--s${s
 const slotOf = (slots, id) => (id == null ? -1 : (slots.get(Number(id)) ?? -1));
 export const catVar = (slots, id) => slotVar(slotOf(slots, id));
 
-// 画面の単色の棒は光るグラデーション。印刷用に描くときは flat にしてベタ塗りにする（インクを使いすぎない）
+// 画面の単色の棒は光るグラデーション。印刷用に描くときは flat にしてベタ塗りにし（インクを使いすぎない）、
+// 文字を少し大きくする（印刷では画像が縮むので、画面と同じ大きさだと小さく読みにくい）
 let flat = false;
-export function setChartFlat(on) { flat = !!on; }
+export function setChartFlat(on) {
+  flat = !!on;
+  Chart.defaults.font.size = flat ? 13 : 11;
+}
 
 export function setChartDefaults() {
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;

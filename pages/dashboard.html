@@ -12,8 +12,9 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/css/style.css">
-  <!-- レポートタブの印刷用（A4縦・余白12mm）。css/style.css の @page はラベル台紙用の余白0の1つだけにするため、ここで指定する -->
-  <style media="print">@page { size: A4 portrait; margin: 12mm; }</style>
+  <!-- 印刷の用紙。css/style.css の @page はラベル台紙用の余白0の1つだけにするため、ここで指定する。
+       レポート（表）は A4縦・余白10mm。サマリー（グラフ）は名前つきページ dash＝A4横・余白8mm（css の `page: dash`）で、横長のタイルを大きく使う -->
+  <style media="print">@page { size: A4 portrait; margin: 10mm; } @page dash { size: A4 landscape; margin: 8mm; }</style>
 </head>
 <body>
   <header class="app-header">

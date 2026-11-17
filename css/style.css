@@ -1764,9 +1764,9 @@ a.dash-bar-name:hover { text-decoration: underline; }
 /* タイルの右上の小さな種類表示 */
 .chart-tag { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: var(--d-chip); color: var(--d-link); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
 
-/* PC・iPad（幅960px以上）: 小タブをやめて、全部を1画面に敷き詰める（大きさ違いのタイル・細い枠・詰めた隙間）。
-   スマホ・狭い幅は今までどおり小タブ（縦1列だと長くなるため）。印刷は幅が狭い扱いなので影響しない */
-@media (min-width: 960px) {
+/* PC・iPad（幅960px以上）と印刷: 小タブをやめて、全部を12列の面に敷き詰める（大きさ違いのタイル・細い枠・詰めた隙間）。
+   スマホ・狭い幅は今までどおり小タブ（縦1列だと長くなるため）。印刷も同じ敷き詰めを使い、並びだけ下の印刷用の規則で組み替える */
+@media (min-width: 960px), print {
   .dash-summary .container { max-width: 1440px; }
   .dash-subtabs { display: none; }
   .dash-top { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
@@ -1801,30 +1801,44 @@ a.dash-bar-name:hover { text-decoration: underline; }
   .dash-mosaic .tile-heat .dash-heat-cell { height: 23px; }
 }
 
-/* 印刷・PDF（サマリー）: 白地・A4縦。画面のグラフ（canvas）は印刷の直前に白地の画像へ差し替わる（js/dashboard.js） */
+/* 印刷・PDF（サマリー）: 白地・A4横（ダッシュボードのサマリーだけ。レポートの表は縦）。上の12列の敷き詰めを印刷の並びに
+   組み替えて使う＝半分空いた行や、ページ下の大きな余白を作らない。グラフ（canvas）は隠し、画面に描いたときに作った
+   印刷用の画像を出す（js/dashboard.js の attachPrintImage）。用紙の向きと余白は pages/dashboard.html の @page dash */
 @media print {
+  body.dash-summary #tab-content { page: dash; }
   .dash-nav, .dash-toolbar { display: none !important; }
-  /* 小タブで隠れているパネルも、印刷では全部出す（印刷用の画像は画面にグラフを描いたときに作ってあるので、イベントを待たない） */
-  .dash-panel, .dash-panel[hidden] { display: block !important; }
-  .dash-print-meta { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; }
-  .dash-hero { margin-bottom: 8px; padding: 10px 12px; box-shadow: none; break-inside: avoid; }
-  .dash-hero .fy-label { flex: 1; }
-  .dash-hero .fy-label strong { font-size: 22px; }
-  .dash-kpis, .dash-insights { gap: 8px; margin-bottom: 8px; }
-  .chart-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .dash-panel + .dash-panel { margin-top: 8px; }
-  .dash-panel { animation: none; }
+  .dash-print-meta { display: block; font-size: 10px; color: #64748b; margin-bottom: 4px; }
+  .dash-hero { box-shadow: none; break-inside: avoid; }
+  .dash-summary .dash-hero { padding: 6px 14px; margin-bottom: 6px; }
+  .dash-top { gap: 8px; margin-bottom: 8px; }
+  .dash-top .dash-kpi { padding: 8px 12px 6px; }
+  .dash-top .dash-insights { gap: 8px; }
+  .dash-mosaic { gap: 8px; }
+  /* 並び: 上段 → 6+6（グラフ2つ）→ 4+4+4（一覧3つ）→ 7+5（グラフと表）→ 全幅。1ページ目に上3段、2ページ目に残り */
+  .dash-mosaic .tile-trend { grid-column: span 6; order: 1; }
+  .dash-mosaic .tile-downtime { grid-column: span 6; order: 2; }
+  .dash-mosaic .tile-cattotal { order: 3; }
+  .dash-mosaic .tile-worstcount { order: 4; }
+  .dash-mosaic .tile-worsttime { order: 5; }
+  .dash-mosaic .tile-cattrend { order: 6; }
+  .dash-mosaic .tile-heat { order: 7; }
+  .dash-mosaic .tile-repeat { order: 8; }
+  /* 行を明示する（自動配置だと、PDFの改ページで「ジャンル別の月推移」が全幅に広がり曜日×時間帯が次ページへ押し出された） */
+  .dash-mosaic .tile-cattrend { grid-column: 1 / 8 !important; grid-row: 3; }
+  .dash-mosaic .tile-heat { grid-column: 8 / 13 !important; grid-row: 3; }
+  .dash-mosaic .tile-repeat { grid-column: 1 / -1 !important; grid-row: 4; }
   .chart-wrap, .dash-kpi, .dash-insight { break-inside: avoid; box-shadow: none; animation: none; }
-  .chart-wrap { padding: 10px; }
-  .chart-title { margin-bottom: 8px; font-size: 13px; }
-  .dash-canvas { height: auto; }
+  .dash-mosaic .chart-wrap { padding: 8px 10px; }
+  .dash-mosaic .chart-title { margin-bottom: 6px; font-size: 12px; }
+  .dash-mosaic .dash-canvas, .dash-mosaic .tile-cattrend .dash-canvas { height: auto; }
   .dash-canvas canvas { display: none !important; }
   .dash-print-img { display: block; width: 100%; height: auto; }
-  .dash-kpi-value { font-size: 30px; }
-  .dash-kpi-value.is-text { font-size: 20px; line-height: 1.6; }
+  .dash-kpi-value { font-size: 26px; margin-top: 2px; }
+  .dash-kpi-value.is-text { font-size: 18px; line-height: 1.5; }
   .dash-mini { display: none; }
-  .dash-bars { gap: 8px; }
-  .dash-heat-cell { height: 22px; }
+  .dash-bars { gap: 6px; }
+  .dash-mosaic .tile-heat .dash-heat-cell { height: 30px; }
+  .dash-mosaic .tile-repeat .dash-repeat { gap: 6px; }
 }
 
 /* ダッシュボード: 年度の切り替え */
