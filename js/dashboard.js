@@ -34,14 +34,16 @@ let summarySub = 'trend'; // 表示中の小タブ（年度を切り替えても
 let renderToken = 0; // 年度を素早く切り替えたとき、古い取得の結果が新しい画面を上書きしないための番号
 const syncPanels = () => document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = p.id !== `dash-panel-${summarySub}`; });
 
-const PRINT_IMG_SIZE = { w: 440, h: 240 }; // 隠れている小タブの枠は大きさが 0 なので、標準の大きさで作る
-function attachPrintImage(id, draw) {
+// 印刷用の画像の大きさは、画面の枠ではなく印刷のタイルの大きさに合わせる（A4横で 6列＝約500px・7列＝約590px 幅）。
+// 画面の枠に合わせると、隠れている小タブでは大きさが 0、PCでは横長すぎて、印刷で文字が小さくなる
+const PRINT_IMG_SIZE = { w: 500, h: 190 };
+function attachPrintImage(id, draw, size) {
   const canvas = document.getElementById(id);
   const box = canvas && canvas.parentElement;
   if (!box) return;
   const off = document.createElement('canvas');
-  off.width = box.clientWidth || PRINT_IMG_SIZE.w;
-  off.height = box.clientHeight || PRINT_IMG_SIZE.h;
+  off.width = size.w;
+  off.height = size.h;
   setChartFlat(true); // 印刷はベタ塗り（画面の光るグラデーションを持ち込まない）
   try {
     const chart = draw(off, { animation: false, responsive: false, devicePixelRatio: 2 });
@@ -55,7 +57,7 @@ function attachPrintImage(id, draw) {
     setChartFlat(false);
   }
 }
-const registerChart = (id, draw) => { chartIds.push(id); draw(id, {}); attachPrintImage(id, draw); };
+const registerChart = (id, draw, printSize = PRINT_IMG_SIZE) => { chartIds.push(id); draw(id, {}); attachPrintImage(id, draw, printSize); };
 // 登録済みのグラフを破棄する（画面を差し替える前に呼ぶ。破棄しないと Chart.js のインスタンスが、画面を切り替えるたびに残る）
 function destroyCharts() {
   for (const id of chartIds) {
@@ -303,7 +305,7 @@ async function renderSummary(fy, currentFy, onChangeFy) {
   if (hasData) {
     registerChart('chart-category-trend', (c, x) => drawStacked(c, monthLabels,
       catSeries.map((s) => ({ label: s.category_name, data: s.counts, backgroundColor: s.color })),
-      { tooltipLabel: (t) => `${t.dataset.label}: ${t.parsed.y}件`, extra: x }));
+      { tooltipLabel: (t) => `${t.dataset.label}: ${t.parsed.y}件`, extra: x }), { w: 590, h: 360 });
   }
   if (hasDowntime) {
     registerChart('chart-downtime', (c, x) => drawStacked(c, monthLabels,
