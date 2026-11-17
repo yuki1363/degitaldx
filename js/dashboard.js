@@ -25,57 +25,46 @@ const app = document.getElementById('app');
 // ---------------- グラフ描画 ----------------
 //   グラフの描画・色・データの整形は js/dash-charts.js。
 
-// 画面に描いたグラフ（canvas）は、印刷の直前だけベタ塗りで描き直した画像に差し替える（画面の光るグラデーションを
-// 印刷に持ち込まない・印刷レイアウトの幅でも崩れない）。描き直せるよう、グラフごとの描画関数を覚えておく。
-let chartRegistry = [];
+// 印刷: 画面にグラフ（canvas）を描くたびに、ベタ塗りの印刷用の画像も先に作って枠に付けておく。画面では隠し、
+// 印刷では canvas を隠して画像を出す（CSS だけで切り替わる）。印刷の直前のイベント（beforeprint）には頼らない:
+// イベントが来ないブラウザや、画像の用意が印刷の描画に間に合わない場合に、グラフが空白で出ていた。
+let chartIds = [];
 let printUser = '';
 let summarySub = 'trend'; // 表示中の小タブ（年度を切り替えても保つ）
 let renderToken = 0; // 年度を素早く切り替えたとき、古い取得の結果が新しい画面を上書きしないための番号
 const syncPanels = () => document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = p.id !== `dash-panel-${summarySub}`; });
-const registerChart = (id, draw) => { chartRegistry.push({ id, draw }); draw(id, {}); };
-// 登録済みのグラフを破棄して登録簿を空にする（画面を差し替える前に呼ぶ。破棄しないと Chart.js のインスタンスと
-// 描画関数が抱えた集計データが、画面を切り替えるたびに残る）
+
+const PRINT_IMG_SIZE = { w: 440, h: 240 }; // 隠れている小タブの枠は大きさが 0 なので、標準の大きさで作る
+function attachPrintImage(id, draw) {
+  const canvas = document.getElementById(id);
+  const box = canvas && canvas.parentElement;
+  if (!box) return;
+  const off = document.createElement('canvas');
+  off.width = box.clientWidth || PRINT_IMG_SIZE.w;
+  off.height = box.clientHeight || PRINT_IMG_SIZE.h;
+  setChartFlat(true); // 印刷はベタ塗り（画面の光るグラデーションを持ち込まない）
+  try {
+    const chart = draw(off, { animation: false, responsive: false, devicePixelRatio: 2 });
+    const url = off.toDataURL('image/png');
+    chart.destroy();
+    box.querySelectorAll('.dash-print-img').forEach((n) => n.remove());
+    box.appendChild(el('img', { class: 'dash-print-img', src: url, alt: '' }));
+  } catch (err) {
+    console.error('print image failed:', err && err.stack ? err.stack : err); // 印刷用の画像が作れなくても、画面のグラフは止めない
+  } finally {
+    setChartFlat(false);
+  }
+}
+const registerChart = (id, draw) => { chartIds.push(id); draw(id, {}); attachPrintImage(id, draw); };
+// 登録済みのグラフを破棄する（画面を差し替える前に呼ぶ。破棄しないと Chart.js のインスタンスが、画面を切り替えるたびに残る）
 function destroyCharts() {
-  for (const { id } of chartRegistry) {
+  for (const id of chartIds) {
     const c = document.getElementById(id);
     const ch = c && Chart.getChart(c);
     if (ch) ch.destroy();
   }
-  chartRegistry = [];
+  chartIds = [];
 }
-
-const clearPrintImages = () => document.querySelectorAll('.dash-print-img').forEach((n) => n.remove());
-
-function injectPrintImages() {
-  clearPrintImages(); // beforeprint が続けて来ても画像が二重に入らない
-  // 印刷は小タブに関係なく全部まとめて出す（隠れているパネルも出してから、グラフを画像にする）
-  document.querySelectorAll('.dash-panel').forEach((p) => { p.hidden = false; });
-  for (const { id, draw } of chartRegistry) {
-    const canvas = document.getElementById(id);
-    const box = canvas && canvas.parentElement;
-    // 大きさは描いてあるグラフ自身から取る（ブラウザによっては印刷用の表示に切り替わった後に呼ばれ、枠が 0 になるため）
-    const live = canvas && Chart.getChart(canvas);
-    if (!box) continue;
-    // 表示してある枠の大きさを使う。印刷用の表示に切り替わった後で枠が 0 になるときは、グラフ自身の大きさ→標準の大きさ
-    const w = box.clientWidth || (live && live.width) || 440;
-    const h = box.clientHeight || (live && live.height) || 240;
-    const off = document.createElement('canvas');
-    off.width = w;
-    off.height = h;
-    setChartFlat(true); // 印刷はベタ塗り
-    try {
-      const chart = draw(off, { animation: false, responsive: false, devicePixelRatio: 2 });
-      const url = off.toDataURL('image/png');
-      chart.destroy();
-      box.appendChild(el('img', { class: 'dash-print-img', src: url, alt: '' }));
-    } catch (err) {
-      console.error('print chart failed:', err && err.stack ? err.stack : err);
-    } finally {
-      setChartFlat(false);
-    }
-  }
-}
-const removePrintImages = () => { clearPrintImages(); syncPanels(); };
 // 画面の幅が広い↔狭いで小タブ／敷き詰めが切り替わるとき、隠れていたグラフの大きさを合わせ直す
 //   （古い Safari〔iOS 13 以前〕の MediaQueryList は addEventListener を持たず addListener だけ）
 const wideQuery = window.matchMedia && window.matchMedia('(min-width: 960px)');
@@ -84,8 +73,6 @@ if (wideQuery) {
   if (wideQuery.addEventListener) wideQuery.addEventListener('change', resizeAllCharts);
   else if (wideQuery.addListener) wideQuery.addListener(resizeAllCharts);
 }
-window.addEventListener('beforeprint', injectPrintImages);
-window.addEventListener('afterprint', removePrintImages);
 
 // 高さを決めた枠の中に描く（縦長・横長どちらの画面でも同じ高さ）
 function makeCanvas(id) {

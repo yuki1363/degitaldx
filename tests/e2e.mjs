@@ -1087,7 +1087,7 @@ section('8. ダッシュボード・保全レポート');
   // 狭い幅（スマホ・縦長のタブレット）では、今までどおり小タブで切り替える
   await page.setViewportSize({ width: 800, height: 900 });
   await page.waitForTimeout(500);
-  // 印刷: 画面にはグラフを印刷するボタンがあり、印刷（beforeprint）ではグラフが画像に差し替わり、canvas・操作欄は隠れる
+  // 画面にはグラフを印刷するボタンがある
   const darkInfo = await page.evaluate(() => ({ btn: !!document.getElementById('dash-print'), dark: document.body.classList.contains('dash-dark') }));
   check('ダッシュボード: 元の明るい配色のまま、「グラフを印刷 / PDF保存」ボタンがある', darkInfo.btn && !darkInfo.dark, JSON.stringify(darkInfo));
   // 小タブ（推移／設備／内訳）: 初期は推移だけが見え、押すと切り替わる
@@ -1105,31 +1105,31 @@ section('8. ダッシュボード・保全レポート');
   check('ダッシュボード: 小タブ（推移・設備・内訳）で1つずつ表示が切り替わり、戻した推移のグラフも崩れない',
     sub0.trend && !sub0.equip && !sub0.mix && !sub1.trend && sub1.equip && !sub1.mix && equipVisible && !sub2.trend && !sub2.equip && sub2.mix && sub3.trend && !sub3.equip && !sub3.mix && trendSized,
     JSON.stringify({ sub0, sub1, sub2, sub3, equipVisible, chartSizes, trendSized }));
-  // 印刷: 小タブで隠れていたパネルも全部出て、グラフが画像になる（印刷の直前に beforeprint → 印刷用の表示）
-  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
-  const printPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].every((p) => !p.hidden));
-  const imgsOnce = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
-  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint'))); // 続けてもう一度（プレビューの作り直しなど）
-  const imgsTwice = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
+  // 印刷: 印刷の直前のイベント（beforeprint）には頼らず、印刷表示に切り替えるだけで、小タブで隠れていたパネルも全部出て、
+  //   グラフが画像で出る（以前は印刷の直前に画像を作っていたため、イベントが来ないブラウザではグラフが空白だった）
+  await page.click('#dash-sub-equip'); // 「設備」だけを開いた状態から印刷しても、推移・内訳も出る
   await page.emulateMedia({ media: 'print' });
   const pr = await page.evaluate(() => {
     const imgs = [...document.querySelectorAll('.dash-print-img')];
+    const tiles = [...document.querySelectorAll('.dash-mosaic .chart-wrap')].map((t) => { const r = t.getBoundingClientRect(); return r.width > 50 && r.height > 20; });
     return {
       n: imgs.length,
       ok: imgs.every((i) => i.src.startsWith('data:image/png') && i.src.length > 2000 && i.getBoundingClientRect().width > 50),
       canvasHidden: [...document.querySelectorAll('.dash-canvas canvas')].every((c) => getComputedStyle(c).display === 'none'),
+      panelsShown: [...document.querySelectorAll('.dash-panel')].every((p) => getComputedStyle(p).display !== 'none'),
+      tiles: tiles.length,
+      tilesShown: tiles.every(Boolean),
       toolbarHidden: getComputedStyle(document.getElementById('dash-print').parentElement).display === 'none',
       headerHidden: getComputedStyle(document.querySelector('.app-header')).display === 'none',
       bg: getComputedStyle(document.body).backgroundColor,
       meta: document.querySelector('.dash-print-meta')?.innerText || '',
     };
   });
-  await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
   await page.emulateMedia({ media: 'screen' });
-  const afterN = await page.evaluate(() => document.querySelectorAll('.dash-print-img').length);
-  const afterPanels = await page.evaluate(() => [...document.querySelectorAll('.dash-panel')].filter((p) => !p.hidden).map((p) => p.id));
-  check('ダッシュボード: 印刷ではグラフが画像で出て、ヘッダー・操作欄は隠れ、背景は白（印刷後は元に戻る）',
-    printPanels && imgsOnce >= 2 && imgsTwice === imgsOnce && pr.n >= 2 && pr.ok && pr.canvasHidden && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && afterN === 0 && afterPanels.length === 1 && afterPanels[0] === 'dash-panel-trend', JSON.stringify(pr) + afterN + JSON.stringify(afterPanels));
+  const screenImgsHidden = await page.evaluate(() => [...document.querySelectorAll('.dash-print-img')].every((i) => getComputedStyle(i).display === 'none'));
+  check('ダッシュボード: 印刷表示に切り替えるだけで、全タブのタイルとグラフ（画像）が出て、ヘッダー・操作欄は隠れ、背景は白（画面では画像は隠れる）',
+    pr.n >= 2 && pr.ok && pr.canvasHidden && pr.panelsShown && pr.tiles === 8 && pr.tilesShown && pr.toolbarHidden && pr.headerHidden && pr.bg === 'rgb(255, 255, 255)' && pr.meta.includes('出力') && screenImgsHidden,
+    JSON.stringify(pr));
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForTimeout(400);
   await page.click('#fy-prev');
