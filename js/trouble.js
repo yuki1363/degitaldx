@@ -602,7 +602,9 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     const check = () => { warn.hidden = !isUnreadableDowntime(input.value); };
     input.addEventListener('input', check);
     check();
-    return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input, warn]);
+    input.required = true;
+    const note = el('p', { class: 'hint' }, '＊必須　設備が止まっていない場合は「0」（0分）を入力してください。');
+    return el('div', { class: 'field' }, [el('label', {}, fld.label || tag), input, note, warn]);
   };
   // 帳票入力欄は再描画できる箱にしておく（下書き復元時に reportValues を反映し直すため）
   // 帳票用の項目の置き場所。現象の上・対策の下など、入力しやすい位置に分けて置く
@@ -689,6 +691,11 @@ async function renderForm(existing, prefill = null, usedParts = []) {
     }
     if (usedInput.hasUnaddedText()) {
       alert('使用部品の欄に、「＋ 追加」を押していない部品があります。追加するか、入力を消してください。');
+      return;
+    }
+    // 休止時間は必須（止まっていないときは 0 を入力）。入力欄が無い（帳票テンプレートが定義していない）ときは確認しない
+    if (reportFields.some((x) => x.tag === DOWNTIME_TAG) && String(reportValues[DOWNTIME_TAG] ?? '').trim() === '') {
+      alert('休止時間は必須です。\n設備が止まっていない場合は「0」（0分）を入力してください。');
       return;
     }
     const pendingParts = usedInput.getPending();

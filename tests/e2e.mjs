@@ -337,6 +337,7 @@ section('2.55 トラブル入力: 設備の案内・使用部品');
   await page.fill('input[placeholder*="部品名・型番"]', 'E2E-UP-1 E2E使用部品（在庫10）');
   await page.fill('input[aria-label="数量"]', '3');
   await page.click('button:text-is("＋ 追加")');
+  await page.locator('.field:has(> label:text-is("休止時間（分）")) input').fill('0');
   const pendText = await page.evaluate(() => document.body.innerText);
   check('トラブル入力: 選んだ使用部品が「在庫10 → 7」で並ぶ（保存前は在庫は変わらない）', pendText.includes('在庫10 → 7') && await stockOf() === 10, `stock=${await stockOf()}`);
   await page.click('button:text-is("保存")');
@@ -2837,6 +2838,7 @@ section('9.31 データ保護（二重登録の防止・削除した写真の復
   };
   page.on('request', onReq);
   await page.fill('textarea[placeholder*="異音"]', 'E2E識別番号つき保存');
+  await page.locator('.field:has(> label:text-is("休止時間（分）")) input').fill('0');
   await page.click('button:text-is("保存")');
   await page.waitForURL(/\/pages\/trouble\?id=\d+/, { timeout: 10000 }).catch(() => {});
   page.off('request', onReq);
